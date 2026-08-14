@@ -39,22 +39,17 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Publish rolling debug APK
+      - name: Publish versioned debug APK
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG="android-debug"
+          TAG="android-debug-${GITHUB_RUN_NUMBER}"
           APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" "$APK" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "CharacterIA Android Debug" \
-              --notes "APK de prueba generado automáticamente desde feature/android-v01." \
-              --prerelease
-          fi
+          gh release create "$TAG" "$APK" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "CharacterIA Android Debug ${GITHUB_RUN_NUMBER}" \
+            --notes "APK de prueba generado automáticamente desde feature/android-v01." \
+            --prerelease
