@@ -54,13 +54,13 @@ El proyecto usa:
 - Gradle **9.5.0**
 - Kotlin / Compose Compiler **2.3.21**
 - Compose BOM **2026.06.00**
-- `compileSdk = 37`
+- `compileSdk = 36`
 - `targetSdk = 36`
 - JDK 17
 
 El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
 
-Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 37 instalado y Gradle 9.5.0.
+Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 9.5.0.
 
 ## Estado v0.1
 
