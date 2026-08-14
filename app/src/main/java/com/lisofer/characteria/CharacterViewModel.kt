@@ -41,7 +41,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var currentUserMessageId: Long? = null
     private var currentAiMessageId: Long? = null
     private var fish: FishTtsClient? = null
-    private var fishFinishJob: Job? = null
+    private var turnFinalizeJob: Job? = null
+    private var turnCompletePending = false
     private var desiredConnected = false
 
     private val gemini = GeminiLiveClient(viewModelScope, object : GeminiLiveClient.Listener {
@@ -58,6 +59,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         override fun onInputTranscript(fullText: String) {
+            // A new user turn may begin before a late output transcription has settled.
+            // Close the previous AI bubble at that point so both turns never get mixed.
+            if (turnCompletePending) {
+                turnFinalizeJob?.cancel()
+                turnFinalizeJob = null
+                turnCompletePending = false
+                finalizeAiMessage()
+            }
+
             if (fish != null) {
                 cancelFish("Interrupción por voz")
             }
@@ -69,20 +79,28 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             ensureFish()
             fish?.sendText(delta)
             updateMessage(Speaker.AI, fullText, partial = true)
+
+            // Gemini documents output transcription as independently ordered from
+            // serverContent/turnComplete. If a late transcription arrives, extend the
+            // quiet window instead of closing Fish or creating a second AI bubble.
+            if (turnCompletePending) scheduleTurnSettlement()
+
             _ui.update { it.copy(status = SessionStatus.SPEAKING, statusDetail = "Respondiendo") }
         }
 
         override fun onTurnComplete() {
-            finalizeCurrentMessages()
-            fishFinishJob?.cancel()
-            fishFinishJob = viewModelScope.launch {
-                delay(300)
-                fish?.finish()
-            }
-            diag("Turno Gemini completo · sigo escuchando")
+            // The user transcription belongs definitively to this turn, so it is safe
+            // to close now. Keep the AI bubble open briefly for late transcript chunks.
+            finalizeUserMessage()
+            turnCompletePending = true
+            scheduleTurnSettlement()
+            diag("Turno Gemini completo · esperando transcripción final")
         }
 
         override fun onInterrupted() {
+            turnFinalizeJob?.cancel()
+            turnFinalizeJob = null
+            turnCompletePending = false
             cancelFish("Gemini detectó interrupción")
             finalizeCurrentMessages()
             _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
@@ -162,6 +180,9 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         desiredConnected = true
         currentUserMessageId = null
         currentAiMessageId = null
+        turnCompletePending = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
         val c = _ui.value.config
         _ui.update { it.copy(status = SessionStatus.CONNECTING, statusDetail = "Conectando…") }
         gemini.connect(GeminiLiveClient.Config(c.geminiApiKey, c.geminiModel, c.personality))
@@ -169,6 +190,9 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun disconnect() {
         desiredConnected = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
         mic.stop()
         gemini.disconnect()
         cancelFish("Desconectado")
@@ -184,11 +208,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             .onFailure {
                 _ui.update { state -> state.copy(status = SessionStatus.ERROR, statusDetail = it.message ?: "Error de micrófono") }
             }
-            .onSuccess { diag("Micrófono 16 kHz activo") }
+            .onSuccess { diag("Micrófono 16 kHz activo · bloques de 40 ms") }
     }
 
     private fun ensureFish() {
-        fishFinishJob?.cancel()
         if (fish != null) return
         val voice = store.voiceBytes() ?: return
         val c = _ui.value.config
@@ -229,9 +252,21 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
+    private fun scheduleTurnSettlement() {
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = viewModelScope.launch {
+            // Output transcription has no guaranteed ordering relative to turnComplete.
+            // A short quiet window absorbs late fragments without delaying streamed speech.
+            delay(800)
+            fish?.finish()
+            finalizeAiMessage()
+            turnCompletePending = false
+            turnFinalizeJob = null
+            diag("Turno asentado · sigo escuchando")
+        }
+    }
+
     private fun cancelFish(reason: String) {
-        fishFinishJob?.cancel()
-        fishFinishJob = null
         fish?.cancel()
         fish = null
         player.interrupt()
@@ -256,17 +291,29 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun finalizeCurrentMessages() {
-        val idsToFinalize = setOfNotNull(currentUserMessageId, currentAiMessageId)
-        if (idsToFinalize.isNotEmpty()) {
-            _ui.update { state ->
-                state.copy(messages = state.messages.map {
-                    if (it.id in idsToFinalize) it.copy(isPartial = false) else it
-                })
-            }
+    private fun finalizeUserMessage() {
+        val id = currentUserMessageId ?: return
+        _ui.update { state ->
+            state.copy(messages = state.messages.map {
+                if (it.id == id) it.copy(isPartial = false) else it
+            })
         }
         currentUserMessageId = null
+    }
+
+    private fun finalizeAiMessage() {
+        val id = currentAiMessageId ?: return
+        _ui.update { state ->
+            state.copy(messages = state.messages.map {
+                if (it.id == id) it.copy(isPartial = false) else it
+            })
+        }
         currentAiMessageId = null
+    }
+
+    private fun finalizeCurrentMessages() {
+        finalizeUserMessage()
+        finalizeAiMessage()
     }
 
     fun clearChat() {
@@ -283,6 +330,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     override fun onCleared() {
+        turnFinalizeJob?.cancel()
         mic.stop()
         gemini.disconnect()
         fish?.cancel()
