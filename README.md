@@ -50,8 +50,8 @@ Fish se abre por WebSocket por cada respuesta. La muestra y su transcripción se
 
 El proyecto usa:
 
-- Android Gradle Plugin **9.3.0**
-- Gradle **9.5.0**
+- Android Gradle Plugin **8.13.2**
+- Gradle **8.13**
 - Kotlin / Compose Compiler **2.3.21**
 - Compose BOM **2026.06.00**
 - `compileSdk = 36`
@@ -60,7 +60,7 @@ El proyecto usa:
 
 El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
 
-Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 9.5.0.
+Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 8.13.
 
 ## Estado v0.1
 
