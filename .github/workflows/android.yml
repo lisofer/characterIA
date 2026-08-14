@@ -47,12 +47,11 @@ jobs:
         run: |
           TAG="android-debug"
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          ASSET="CharacterIA-debug.apk"
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK#$ASSET" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" "$APK#$ASSET" \
+            gh release create "$TAG" "$APK" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "CharacterIA Android Debug" \
