@@ -33,8 +33,8 @@ class MicStreamer(private val context: Context) {
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
             )
-            val chunkBytes = 3_200 // 100 ms: 1600 samples x 2 bytes
-            val bufferBytes = maxOf(min * 2, chunkBytes * 4)
+            val chunkBytes = 1_280 // 40 ms: 640 samples x 2 bytes
+            val bufferBytes = maxOf(min * 2, chunkBytes * 6)
 
             val audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
