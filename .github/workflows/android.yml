@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -36,9 +39,23 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: CharacterIA-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+      - name: Publish rolling debug APK
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="android-debug"
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          ASSET="CharacterIA-debug.apk"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK#$ASSET" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK#$ASSET" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "CharacterIA Android Debug" \
+              --notes "APK de prueba generado automáticamente desde feature/android-v01." \
+              --prerelease
+          fi
