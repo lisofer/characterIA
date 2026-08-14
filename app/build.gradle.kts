@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.lisofer.characteria"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.lisofer.characteria"
