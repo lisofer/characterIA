@@ -18,6 +18,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Apply API rotation patch
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+        run: python3 scripts/fix_api_rotation.py
+
+      - name: Commit API rotation patch
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Patch already applied"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/lisofer/characteria/CharacterViewModel.kt app/src/main/java/com/lisofer/characteria/MainActivity.kt
+          git commit -m "fix: reset Gemini fallback cleanly when API key changes"
+          git push origin HEAD:feature/android-v01
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
