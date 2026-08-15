@@ -268,6 +268,10 @@ class GeminiLiveClient(
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
             .put(
+                "tools",
+                JSONArray().put(JSONObject().put("googleSearch", JSONObject()))
+            )
+            .put(
                 "contextWindowCompression",
                 JSONObject()
                     .put("triggerTokens", "25000")
