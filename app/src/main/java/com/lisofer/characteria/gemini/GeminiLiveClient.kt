@@ -55,6 +55,7 @@ class GeminiLiveClient(
     @Volatile private var setupComplete = false
     @Volatile private var hasEverBeenReady = false
     @Volatile private var config: Config? = null
+    @Volatile private var sessionHandle: String? = null
 
     private val reconnectScheduled = AtomicBoolean(false)
     private var reconnectJob: Job? = null
@@ -68,6 +69,7 @@ class GeminiLiveClient(
         this.config = config
         desiredConnected = true
         hasEverBeenReady = false
+        sessionHandle = null
         inputTranscript.reset()
         outputTranscript.reset()
         openSocket(isReconnect = false)
@@ -79,6 +81,7 @@ class GeminiLiveClient(
 
     fun disconnect() {
         desiredConnected = false
+        sessionHandle = null
         disconnectInternal(closeSocket = true)
         inputTranscript.reset()
         outputTranscript.reset()
@@ -92,8 +95,9 @@ class GeminiLiveClient(
         reconnectScheduled.set(false)
         setupComplete = false
         if (closeSocket) {
-            runCatching { socket?.close(1000, "user disconnect") }
+            val old = socket
             socket = null
+            runCatching { old?.close(1000, "user disconnect") }
         }
     }
 
@@ -113,22 +117,10 @@ class GeminiLiveClient(
         socket?.send(message.toString())
     }
 
-    fun sendTextTurn(text: String): Boolean {
-        if (!setupComplete || text.isBlank()) return false
-        val turn = JSONObject()
-            .put("role", "user")
-            .put("parts", JSONArray().put(JSONObject().put("text", text)))
-        val message = JSONObject().put(
-            "clientContent",
-            JSONObject()
-                .put("turns", JSONArray().put(turn))
-                .put("turnComplete", true)
-        )
-        return socket?.send(message.toString()) == true
-    }
-
     private fun openSocket(isReconnect: Boolean) {
         val cfg = config ?: return
+        val resumeHandle = if (isReconnect) sessionHandle else null
+        val actuallyResuming = isReconnect && !resumeHandle.isNullOrBlank()
         setupComplete = false
         setupTimeoutJob?.cancel()
         listener.onStatus(if (isReconnect) "Reconectando Gemini…" else "Conectando Gemini…")
@@ -144,9 +136,9 @@ class GeminiLiveClient(
         val callback = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (webSocket !== socket) return
-                listener.onDiagnostic("Gemini WebSocket abierto · HTTP ${response.code}")
+                listener.onDiagnostic("Gemini WebSocket abierto · HTTP ${response.code}${if (actuallyResuming) " · reanudando" else ""}")
 
-                val payload = buildSetup(cfg).toString()
+                val payload = buildSetup(cfg, resumeHandle).toString()
                 val sent = webSocket.send(payload)
                 listener.onDiagnostic(if (sent) "Gemini setup enviado" else "Gemini setup NO pudo enviarse")
 
@@ -164,16 +156,16 @@ class GeminiLiveClient(
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (webSocket !== socket) return
-                handleRawMessage(webSocket, text)
+                handleRawMessage(webSocket, text, actuallyResuming)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 if (webSocket !== socket) return
                 listener.onDiagnostic("Gemini recibió frame binario (${bytes.size} bytes)")
-                handleRawMessage(webSocket, bytes.utf8())
+                handleRawMessage(webSocket, bytes.utf8(), actuallyResuming)
             }
 
-            private fun handleRawMessage(webSocket: WebSocket, text: String) {
+            private fun handleRawMessage(webSocket: WebSocket, text: String, resumedConnection: Boolean) {
                 runCatching {
                     val root = JSONObject(text)
                     if (root.has("error")) {
@@ -184,7 +176,7 @@ class GeminiLiveClient(
                         socket?.cancel()
                         return
                     }
-                    handleMessage(webSocket, root)
+                    handleMessage(webSocket, root, resumedConnection)
                 }.onFailure {
                     listener.onDiagnostic("Gemini parse: ${it::class.simpleName}: ${it.message}")
                 }
@@ -236,17 +228,27 @@ class GeminiLiveClient(
         socket = client.newWebSocket(request, callback)
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(delayMs: Long = 700, rolloverSocket: WebSocket? = null) {
         if (!desiredConnected || !reconnectScheduled.compareAndSet(false, true)) return
         listener.onStatus("Reconectando Gemini…")
         reconnectJob = scope.launch(Dispatchers.IO) {
-            delay(900)
+            delay(delayMs)
+            if (!desiredConnected) {
+                reconnectScheduled.set(false)
+                return@launch
+            }
+
+            if (rolloverSocket != null && rolloverSocket === socket) {
+                socket = null
+                runCatching { rolloverSocket.close(1000, "session rollover") }
+            }
+
             reconnectScheduled.set(false)
             if (desiredConnected) openSocket(isReconnect = true)
         }
     }
 
-    private fun buildSetup(cfg: Config): JSONObject {
+    private fun buildSetup(cfg: Config, resumeHandle: String?): JSONObject {
         val setup = JSONObject()
             .put("model", "models/${cfg.model}")
             .put(
@@ -265,6 +267,18 @@ class GeminiLiveClient(
             )
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
+            .put(
+                "contextWindowCompression",
+                JSONObject()
+                    .put("triggerTokens", 25_000)
+                    .put("slidingWindow", JSONObject().put("targetTokens", 8_000))
+            )
+            .put(
+                "sessionResumption",
+                JSONObject().apply {
+                    resumeHandle?.takeIf { it.isNotBlank() }?.let { put("handle", it) }
+                }
+            )
 
         if (cfg.personality.isNotBlank()) {
             setup.put(
@@ -276,7 +290,7 @@ class GeminiLiveClient(
             )
         }
 
-        if (cfg.history.isNotEmpty()) {
+        if (cfg.history.isNotEmpty() && resumeHandle.isNullOrBlank()) {
             setup.put(
                 "historyConfig",
                 JSONObject().put("initialHistoryInClientContent", true)
@@ -310,25 +324,40 @@ class GeminiLiveClient(
         )
     }
 
-    private fun handleMessage(webSocket: WebSocket, root: JSONObject) {
+    private fun handleMessage(webSocket: WebSocket, root: JSONObject, resumedConnection: Boolean) {
+        root.optJSONObject("sessionResumptionUpdate")?.let { update ->
+            val resumable = update.optBoolean("resumable", false)
+            val handle = update.optString("newHandle").ifBlank { update.optString("token") }
+            if (resumable && handle.isNotBlank()) {
+                val changed = handle != sessionHandle
+                sessionHandle = handle
+                if (changed) listener.onDiagnostic("Gemini sesión reanudable actualizada")
+            }
+        }
+
         if (root.has("setupComplete")) {
             setupTimeoutJob?.cancel()
             setupTimeoutJob = null
             val cfg = config
-            if (cfg != null && cfg.history.isNotEmpty()) {
+            if (!resumedConnection && cfg != null && cfg.history.isNotEmpty()) {
                 sendInitialHistory(webSocket, cfg.history)
             }
             setupComplete = true
             hasEverBeenReady = true
             inputTranscript.reset()
             outputTranscript.reset()
-            listener.onDiagnostic("Gemini setupComplete")
-            listener.onReady(false)
+            listener.onDiagnostic(if (resumedConnection) "Gemini setupComplete · sesión reanudada" else "Gemini setupComplete")
+            listener.onReady(resumedConnection)
         }
 
         root.optJSONObject("goAway")?.let { goAway ->
             listener.onDiagnostic("Gemini GoAway: ${goAway.opt("timeLeft")}")
-            listener.onStatus("Gemini va a renovar la conexión…")
+            if (desiredConnected && !sessionHandle.isNullOrBlank()) {
+                listener.onStatus("Renovando sesión Gemini…")
+                scheduleReconnect(delayMs = 120, rolloverSocket = webSocket)
+            } else {
+                listener.onStatus("Gemini va a renovar la conexión…")
+            }
         }
 
         val content = root.optJSONObject("serverContent") ?: return
