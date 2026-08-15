@@ -11,11 +11,16 @@ import java.io.File
 
 class ProfileStore(context: Context) {
     private val root = File(context.filesDir, "character_profiles").apply { mkdirs() }
+    private val groupRoot = File(context.filesDir, "character_groups").apply { mkdirs() }
 
     private fun profileDir(id: String): File = File(root, id).apply { mkdirs() }
     private fun configFile(id: String) = File(profileDir(id), "profile.json")
     private fun voiceFile(id: String) = File(profileDir(id), "voice_sample.bin")
     private fun chatFile(id: String) = File(profileDir(id), "chat.json")
+    private fun groupChatFile(profileIds: List<String>): File {
+        val key = profileIds.distinct().sorted().joinToString("__")
+        return File(groupRoot, "$key.json")
+    }
 
     fun listProfiles(): List<CharacterProfileSummary> = root.listFiles()
         ?.asSequence()
@@ -89,6 +94,32 @@ class ProfileStore(context: Context) {
 
     fun saveChat(profileId: String, messages: List<ChatMessage>) {
         if (profileId.isBlank()) return
+        writeMessages(chatFile(profileId), messages)
+    }
+
+    fun loadChat(profileId: String): List<ChatMessage> = readMessages(chatFile(profileId))
+
+    fun clearChat(profileId: String) {
+        if (profileId.isBlank()) return
+        chatFile(profileId).delete()
+    }
+
+    fun saveGroupChat(profileIds: List<String>, messages: List<ChatMessage>) {
+        if (profileIds.distinct().size != 2) return
+        writeMessages(groupChatFile(profileIds), messages)
+    }
+
+    fun loadGroupChat(profileIds: List<String>): List<ChatMessage> {
+        if (profileIds.distinct().size != 2) return emptyList()
+        return readMessages(groupChatFile(profileIds))
+    }
+
+    fun clearGroupChat(profileIds: List<String>) {
+        if (profileIds.distinct().size != 2) return
+        groupChatFile(profileIds).delete()
+    }
+
+    private fun writeMessages(file: File, messages: List<ChatMessage>) {
         val array = JSONArray()
         messages.forEach { message ->
             array.put(
@@ -97,13 +128,14 @@ class ProfileStore(context: Context) {
                     .put("speaker", message.speaker.name)
                     .put("text", message.text)
                     .put("isPartial", false)
+                    .put("characterProfileId", message.characterProfileId)
+                    .put("characterName", message.characterName)
             )
         }
-        chatFile(profileId).writeText(array.toString())
+        file.writeText(array.toString())
     }
 
-    fun loadChat(profileId: String): List<ChatMessage> = runCatching {
-        val file = chatFile(profileId)
+    private fun readMessages(file: File): List<ChatMessage> = runCatching {
         if (!file.exists()) return emptyList()
         val array = JSONArray(file.readText())
         buildList {
@@ -118,15 +150,11 @@ class ProfileStore(context: Context) {
                             .getOrDefault(Speaker.USER),
                         text = text,
                         isPartial = false,
+                        characterProfileId = item.optString("characterProfileId", ""),
+                        characterName = item.optString("characterName", ""),
                     )
                 )
             }
         }
     }.getOrDefault(emptyList())
-
-    fun clearChat(profileId: String) {
-        if (profileId.isBlank()) return
-        val file = chatFile(profileId)
-        if (file.exists()) file.delete()
-    }
 }
