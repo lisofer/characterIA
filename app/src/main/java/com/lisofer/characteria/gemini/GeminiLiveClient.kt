@@ -1,6 +1,5 @@
 package com.lisofer.characteria.gemini
 
-import android.os.SystemClock
 import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +44,6 @@ class GeminiLiveClient(
         val personality: String,
         val history: List<HistoryTurn> = emptyList(),
         val fallbackModels: List<String> = emptyList(),
-        val enableGoogleSearch: Boolean = true,
     )
 
     private val client = OkHttpClient.Builder()
@@ -60,7 +58,6 @@ class GeminiLiveClient(
     @Volatile private var hasEverBeenReady = false
     @Volatile private var config: Config? = null
     @Volatile private var sessionHandle: String? = null
-    @Volatile private var lastReadyAtMs: Long = 0L
 
     private val reconnectScheduled = AtomicBoolean(false)
     private var reconnectJob: Job? = null
@@ -78,7 +75,6 @@ class GeminiLiveClient(
         hasEverBeenReady = false
         sessionHandle = null
         reconnectAttempts = 0
-        lastReadyAtMs = 0L
         inputTranscript.reset()
         outputTranscript.reset()
         openSocket(isReconnect = false)
@@ -219,14 +215,11 @@ class GeminiLiveClient(
                 if (!desiredConnected) return
 
                 val explicitQuota = isQuotaError(reason)
-                val rapid1011 = code == 1011 && wasReadyOnlyBriefly()
-                if (explicitQuota || rapid1011) {
+                if (explicitQuota) {
                     if (tryFallbackModel(webSocket, cfg.model, "cierre $code ${reason.ifBlank { "sin motivo" }}")) return
-                    if (explicitQuota) {
-                        desiredConnected = false
-                        listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
-                        return
-                    }
+                    desiredConnected = false
+                    listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
+                    return
                 }
 
                 if (hasEverBeenReady) {
@@ -250,14 +243,11 @@ class GeminiLiveClient(
                 if (!desiredConnected) return
 
                 val explicitQuota = isQuotaError(detail)
-                val rapid1011 = detail.contains("1011") && wasReadyOnlyBriefly()
-                if (explicitQuota || rapid1011) {
+                if (explicitQuota) {
                     if (tryFallbackModel(webSocket, cfg.model, detail)) return
-                    if (explicitQuota) {
-                        desiredConnected = false
-                        listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
-                        return
-                    }
+                    desiredConnected = false
+                    listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
+                    return
                 }
 
                 if (hasEverBeenReady) {
@@ -316,13 +306,12 @@ class GeminiLiveClient(
         if (currentIndex < 0) return false
         val nextModel = chain.getOrNull(currentIndex + 1) ?: return false
 
-        listener.onDiagnostic("Gemini cuota/fallo rápido en $failedModel · cambio automático a $nextModel")
+        listener.onDiagnostic("Gemini cuota agotada en $failedModel · cambio automático a $nextModel")
         config = cfg.copy(model = nextModel)
         sessionHandle = null
         setupComplete = false
         hasEverBeenReady = false
         reconnectAttempts = 0
-        lastReadyAtMs = 0L
         reconnectJob?.cancel()
         stabilityJob?.cancel()
         reconnectScheduled.set(false)
@@ -369,12 +358,6 @@ class GeminiLiveClient(
                 }
             )
 
-        if (cfg.enableGoogleSearch) {
-            setup.put(
-                "tools",
-                JSONArray().put(JSONObject().put("googleSearch", JSONObject()))
-            )
-        }
 
         if (cfg.personality.isNotBlank()) {
             setup.put(
@@ -440,7 +423,6 @@ class GeminiLiveClient(
             }
             setupComplete = true
             hasEverBeenReady = true
-            lastReadyAtMs = SystemClock.elapsedRealtime()
             inputTranscript.reset()
             outputTranscript.reset()
             listener.onDiagnostic(if (resumedConnection) "Gemini setupComplete · sesión reanudada" else "Gemini setupComplete")
@@ -495,11 +477,6 @@ class GeminiLiveClient(
         }
     }
 
-    private fun wasReadyOnlyBriefly(): Boolean {
-        val readyAt = lastReadyAtMs
-        return readyAt > 0L && SystemClock.elapsedRealtime() - readyAt < RAPID_FAILURE_MS
-    }
-
     private fun isQuotaError(text: String): Boolean {
         val value = text.lowercase()
         return value.contains("resource_exhausted") ||
@@ -549,6 +526,5 @@ class GeminiLiveClient(
     companion object {
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private const val STABLE_CONNECTION_MS = 15_000L
-        private const val RAPID_FAILURE_MS = 8_000L
     }
 }

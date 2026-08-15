@@ -573,7 +573,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 personality = c.personality,
                 history = history,
                 fallbackModels = geminiFallbackChain(activeModel),
-                enableGoogleSearch = true,
             )
         )
         diag("Memoria de ${c.profileName}: ${history.size} mensajes enviados a Gemini")
@@ -646,7 +645,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
                 fallbackModels = geminiFallbackChain(activeModel),
-                enableGoogleSearch = false,
             )
         )
     }
@@ -739,7 +737,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 personality = personality,
                 history = history,
                 fallbackModels = geminiFallbackChain(activeModel),
-                enableGoogleSearch = true,
             )
         )
         diag("Invocación: $displayName · memoria compartida ${history.size} mensajes")
@@ -786,7 +783,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
                 fallbackModels = geminiFallbackChain(activeModel),
-                enableGoogleSearch = false,
             )
         )
         diag("$reason · vuelvo a esperar una invocación")
