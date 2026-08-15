@@ -7,6 +7,8 @@ data class ChatMessage(
     val speaker: Speaker,
     val text: String,
     val isPartial: Boolean = false,
+    val characterProfileId: String = "",
+    val characterName: String = "",
 )
 
 data class CharacterProfileSummary(
@@ -48,5 +50,6 @@ data class AppUiState(
     val settingsOpen: Boolean = false,
     val backgroundModeEnabled: Boolean = false,
     val invocationActive: Boolean = false,
+    val activeCharacterNames: List<String> = emptyList(),
     val diagnostics: List<String> = emptyList(),
 )
