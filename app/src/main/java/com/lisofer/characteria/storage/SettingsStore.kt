@@ -2,6 +2,8 @@ package com.lisofer.characteria.storage
 
 import android.content.Context
 import com.lisofer.characteria.AppConfig
+import com.lisofer.characteria.DEFAULT_GEMINI_MODEL
+import com.lisofer.characteria.normalizeGeminiModel
 import java.io.File
 
 class SettingsStore(private val context: Context) {
@@ -12,9 +14,25 @@ class SettingsStore(private val context: Context) {
     fun geminiKey(): String = secrets.get("gemini")
     fun fishKey(): String = secrets.get("fish")
 
+    fun geminiModel(): String {
+        val saved = prefs.getString("geminiModel", null)
+            ?: prefs.getString("model", DEFAULT_GEMINI_MODEL)
+            ?: DEFAULT_GEMINI_MODEL
+        return normalizeGeminiModel(saved)
+    }
+
     fun saveGlobalKeys(geminiApiKey: String, fishApiKey: String) {
         secrets.put("gemini", geminiApiKey)
         secrets.put("fish", fishApiKey)
+    }
+
+    fun setGeminiModel(model: String) {
+        prefs.edit().putString("geminiModel", normalizeGeminiModel(model)).apply()
+    }
+
+    fun saveGlobalConnection(geminiApiKey: String, fishApiKey: String, geminiModel: String) {
+        saveGlobalKeys(geminiApiKey, fishApiKey)
+        setGeminiModel(geminiModel)
     }
 
     fun activeProfileId(): String = prefs.getString("activeProfileId", "") ?: ""
@@ -35,8 +53,7 @@ class SettingsStore(private val context: Context) {
         return AppConfig(
             geminiApiKey = geminiKey(),
             fishApiKey = fishKey(),
-            geminiModel = prefs.getString("model", "gemini-3.1-flash-live-preview")
-                ?: "gemini-3.1-flash-live-preview",
+            geminiModel = geminiModel(),
             personality = personality,
             voiceTranscript = prefs.getString("voiceTranscript", "") ?: "",
             voiceName = prefs.getString("voiceName", "") ?: "",
