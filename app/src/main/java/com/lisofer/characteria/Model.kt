@@ -16,6 +16,35 @@ data class CharacterProfileSummary(
     val name: String,
 )
 
+data class GeminiModelOption(
+    val id: String,
+    val label: String,
+)
+
+val GEMINI_LIVE_MODELS = listOf(
+    GeminiModelOption(
+        id = "gemini-3.1-flash-live-preview",
+        label = "Gemini 3.1 Flash Live · más rápido",
+    ),
+    GeminiModelOption(
+        id = "gemini-2.5-flash-native-audio-preview-12-2025",
+        label = "Gemini 2.5 Flash Live",
+    ),
+)
+
+const val DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-live-preview"
+
+fun normalizeGeminiModel(model: String): String =
+    model.takeIf { candidate -> GEMINI_LIVE_MODELS.any { it.id == candidate } }
+        ?: DEFAULT_GEMINI_MODEL
+
+fun geminiFallbackChain(model: String): List<String> {
+    val normalized = normalizeGeminiModel(model)
+    val ids = GEMINI_LIVE_MODELS.map { it.id }
+    val index = ids.indexOf(normalized).coerceAtLeast(0)
+    return ids.drop(index)
+}
+
 enum class SessionStatus {
     DISCONNECTED,
     CONNECTING,
@@ -33,7 +62,7 @@ data class AppConfig(
     val profileName: String = "",
     val geminiApiKey: String = "",
     val fishApiKey: String = "",
-    val geminiModel: String = "gemini-3.1-flash-live-preview",
+    val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val personality: String = "",
     val voiceTranscript: String = "",
     val voiceName: String = "",
