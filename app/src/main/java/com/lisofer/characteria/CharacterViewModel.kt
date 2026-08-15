@@ -43,13 +43,20 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var currentUserMessageId: Long? = null
     private var currentAiMessageId: Long? = null
     private var fish: FishTtsClient? = null
+    private var fishProfileId: String? = null
     private var turnFinalizeJob: Job? = null
     private var turnCompletePending = false
     private var desiredConnected = false
     private var connectionPurpose = ConnectionPurpose.NORMAL
-    private var wakeDetected = false
-    private var wakeTranscript = ""
-    private var pendingInvocationProfileId: String? = null
+
+    private var pendingInvocationProfileIds: List<String>? = null
+    private var activeBackgroundProfileIds: List<String> = emptyList()
+    private var conversationProfileIds: List<String> = emptyList()
+
+    private var groupLastSpeakerId: String? = null
+    private var groupLikelySpeakerId: String? = null
+    private var groupOutputSpeakerId: String? = null
+    private var groupOutputSpokenText = ""
 
     init {
         initializeProfiles()
@@ -57,23 +64,28 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val gemini: GeminiLiveClient = GeminiLiveClient(viewModelScope, object : GeminiLiveClient.Listener {
         override fun onStatus(message: String) {
-            val status = if (message.startsWith("Reconect")) SessionStatus.RECONNECTING else SessionStatus.CONNECTING
-            _ui.update { it.copy(status = status, statusDetail = message) }
+            val reconnecting = message.startsWith("Reconect") || message.startsWith("Renovando")
+            _ui.update {
+                it.copy(
+                    status = if (reconnecting) SessionStatus.RECONNECTING else SessionStatus.CONNECTING,
+                    statusDetail = message,
+                )
+            }
             diag(message)
         }
 
         override fun onReady(resumed: Boolean) {
-            diag(if (resumed) "Gemini reanudado" else "Gemini listo")
+            diag(if (resumed) "Gemini reanudado sin perder contexto" else "Gemini listo")
             when (connectionPurpose) {
                 ConnectionPurpose.WAKE -> {
                     startMic()
-                    val name = _ui.value.config.profileName.ifBlank { "CharacterIA" }
                     _ui.update {
                         it.copy(
                             status = SessionStatus.INVOCATION_ARMED,
                             statusDetail = "Esperando «[personaje], are you here?»",
                             backgroundModeEnabled = true,
                             invocationActive = false,
+                            activeCharacterNames = emptyList(),
                         )
                     }
                     InvocationForegroundService.update("CharacterIA", active = false)
@@ -82,7 +94,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
                 ConnectionPurpose.BACKGROUND_ACTIVE -> {
                     startMic()
-                    val name = _ui.value.config.profileName.ifBlank { "CharacterIA" }
+                    val name = activeDisplayName()
                     _ui.update {
                         it.copy(
                             status = SessionStatus.INVOCATION_ACTIVE,
@@ -92,7 +104,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                         )
                     }
                     InvocationForegroundService.update(name, active = true)
-
                 }
 
                 ConnectionPurpose.NORMAL -> {
@@ -112,27 +123,22 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     return
                 }
 
-                val targetProfile = findInvocationProfile(normalized)
-                if (targetProfile != null) {
+                val targetProfiles = findInvocationProfiles(normalized)
+                if (targetProfiles.isNotEmpty()) {
                     discardCurrentUserMessage()
+                    val targetIds = targetProfiles.map { it.id }
+                    val targetName = targetProfiles.joinToString(" + ") { it.name }
                     if (connectionPurpose == ConnectionPurpose.WAKE) {
-                        wakeTranscript = fullText
-                        wakeDetected = true
-                        pendingInvocationProfileId = targetProfile.id
-                        _ui.update { it.copy(statusDetail = "Invocando a ${targetProfile.name}…") }
+                        pendingInvocationProfileIds = targetIds
+                        _ui.update { it.copy(statusDetail = "Invocando a $targetName…") }
                     } else if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
-                        wakeDetected = false
-                        wakeTranscript = ""
-                        pendingInvocationProfileId = null
-                        activateBackgroundCharacter(targetProfile.id)
+                        pendingInvocationProfileIds = null
+                        activateBackgroundCharacters(targetIds)
                     }
                     return
                 }
 
-                if (connectionPurpose == ConnectionPurpose.WAKE) {
-                    wakeTranscript = fullText
-                    return
-                }
+                if (connectionPurpose == ConnectionPurpose.WAKE) return
             }
 
             if (turnCompletePending) {
@@ -140,13 +146,33 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 turnFinalizeJob = null
                 turnCompletePending = false
                 finalizeAiMessage()
+                resetGroupOutput()
                 persistConversation()
+            }
+
+            if (isGroupMode()) {
+                addressedGroupProfile(normalized)?.let { addressed ->
+                    if (currentAiMessageId == null && addressed.id != groupLikelySpeakerId) {
+                        groupLikelySpeakerId = addressed.id
+                        if (fish != null && fishProfileId != addressed.id) cancelFish("Preparando voz de ${addressed.name}")
+                        ensureFish(addressed.id)
+                    }
+                }
             }
 
             val startingNewTurn = currentUserMessageId == null
             if (startingNewTurn) {
                 if (fish != null) cancelFish("Interrupción por voz")
-                ensureFish()
+                if (isGroupMode()) {
+                    groupOutputSpeakerId = null
+                    groupOutputSpokenText = ""
+                    groupLikelySpeakerId = addressedGroupProfile(normalized)?.id
+                        ?: groupLastSpeakerId
+                        ?: activeBackgroundProfileIds.firstOrNull()
+                    groupLikelySpeakerId?.let(::ensureFish)
+                } else {
+                    ensureFish()
+                }
             }
 
             updateMessage(Speaker.USER, fullText, partial = true)
@@ -154,7 +180,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 if (it.backgroundModeEnabled) {
                     it.copy(
                         status = SessionStatus.INVOCATION_ACTIVE,
-                        statusDetail = "${it.config.profileName.ifBlank { "CharacterIA" }} te escucha…",
+                        statusDetail = "${activeDisplayName()} te escucha…",
                     )
                 } else {
                     it.copy(status = SessionStatus.LISTENING, statusDetail = "Te escucho…")
@@ -165,25 +191,31 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         override fun onOutputTranscript(delta: String, fullText: String) {
             if (connectionPurpose == ConnectionPurpose.WAKE) return
 
-            ensureFish()
-            fish?.sendText(delta)
-            updateMessage(Speaker.AI, fullText, partial = true)
+            if (isGroupMode()) {
+                handleGroupOutput(fullText)
+            } else {
+                ensureFish()
+                fish?.sendText(delta)
+                val c = _ui.value.config
+                updateMessage(
+                    Speaker.AI,
+                    fullText,
+                    partial = true,
+                    characterProfileId = c.profileId,
+                    characterName = c.profileName,
+                )
+            }
 
             if (turnCompletePending) scheduleTurnSettlement()
-
             _ui.update { it.copy(status = SessionStatus.SPEAKING, statusDetail = "Respondiendo") }
         }
 
         override fun onTurnComplete() {
             if (connectionPurpose == ConnectionPurpose.WAKE) {
-                val profileId = pendingInvocationProfileId
-                if (wakeDetected && profileId != null) {
-                    wakeDetected = false
-                    wakeTranscript = ""
-                    pendingInvocationProfileId = null
-                    activateBackgroundCharacter(profileId)
-                } else {
-                    wakeTranscript = ""
+                val targetIds = pendingInvocationProfileIds
+                if (!targetIds.isNullOrEmpty()) {
+                    pendingInvocationProfileIds = null
+                    activateBackgroundCharacters(targetIds)
                 }
                 return
             }
@@ -202,12 +234,13 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             turnCompletePending = false
             cancelFish("Gemini detectó interrupción")
             finalizeCurrentMessages()
+            resetGroupOutput()
             persistConversation()
             _ui.update {
                 if (it.backgroundModeEnabled) {
                     it.copy(
                         status = SessionStatus.INVOCATION_ACTIVE,
-                        statusDetail = "${it.config.profileName.ifBlank { "CharacterIA" }} activo · escuchando",
+                        statusDetail = "${activeDisplayName()} activo · escuchando",
                     )
                 } else {
                     it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
@@ -224,15 +257,16 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 cancelFish("Modo invocación detenido por error")
                 InvocationForegroundService.stop(context)
                 connectionPurpose = ConnectionPurpose.NORMAL
-                wakeDetected = false
-                wakeTranscript = ""
-                pendingInvocationProfileId = null
+                pendingInvocationProfileIds = null
+                activeBackgroundProfileIds = emptyList()
+                resetGroupOutput()
                 _ui.update {
                     it.copy(
                         status = SessionStatus.ERROR,
                         statusDetail = message,
                         backgroundModeEnabled = false,
                         invocationActive = false,
+                        activeCharacterNames = emptyList(),
                     )
                 }
             } else {
@@ -294,6 +328,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         pendingVoiceBytes = null
         currentUserMessageId = null
         currentAiMessageId = null
+        conversationProfileIds = listOf(profileId)
+        activeBackgroundProfileIds = emptyList()
         settings.setActiveProfileId(profileId)
         _ui.value = _ui.value.copy(
             config = config,
@@ -305,6 +341,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             settingsOpen = keepSettingsOpen,
             backgroundModeEnabled = false,
             invocationActive = false,
+            activeCharacterNames = emptyList(),
         )
         diag("Perfil cargado: ${config.profileName} · ${chat.size} mensajes guardados")
     }
@@ -340,7 +377,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectProfile(profileId: String) {
-        if (profileId == _ui.value.config.profileId) return
+        if (profileId == _ui.value.config.profileId && conversationProfileIds.size == 1) return
         if (desiredConnected) disconnect()
         loadProfileIntoUi(profileId, profiles.listProfiles(), keepSettingsOpen = true)
     }
@@ -423,20 +460,24 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         saveConfig()
         desiredConnected = true
         connectionPurpose = ConnectionPurpose.NORMAL
+        activeBackgroundProfileIds = emptyList()
+        conversationProfileIds = listOf(_ui.value.config.profileId)
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
+        resetGroupOutput()
 
         val c = _ui.value.config
-        val history = historyForGemini(_ui.value.messages)
+        val history = historyForSingle(_ui.value.messages, c.profileId)
         _ui.update {
             it.copy(
                 status = SessionStatus.CONNECTING,
                 statusDetail = "Conectando…",
                 backgroundModeEnabled = false,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
         gemini.connect(
@@ -475,7 +516,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         val c = _ui.value.config
         val context = getApplication<Application>()
         runCatching {
-            InvocationForegroundService.start(context, c.profileName, active = false)
+            InvocationForegroundService.start(context, "CharacterIA", active = false)
         }.onFailure { error ->
             _ui.update {
                 it.copy(
@@ -489,14 +530,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         desiredConnected = true
         connectionPurpose = ConnectionPurpose.WAKE
-        wakeDetected = false
-        wakeTranscript = ""
-        pendingInvocationProfileId = null
+        activeBackgroundProfileIds = emptyList()
+        pendingInvocationProfileIds = null
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
+        resetGroupOutput()
 
         _ui.update {
             it.copy(
@@ -504,6 +545,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 statusDetail = "Armando modo invocación…",
                 backgroundModeEnabled = true,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
 
@@ -517,21 +559,28 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    private fun activateBackgroundCharacter(profileId: String) {
+    private fun activateBackgroundCharacters(requestedIds: List<String>) {
         if (!_ui.value.backgroundModeEnabled) return
+        val targetIds = requestedIds.distinct().take(2)
+        if (targetIds.isEmpty()) return
 
-        val targetConfig = profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: run {
-            diag("No se encontró el perfil invocado: $profileId")
+        val targetConfigs = targetIds.mapNotNull { id ->
+            profiles.loadProfile(id, settings.geminiKey(), settings.fishKey())
+        }
+        if (targetConfigs.size != targetIds.size) {
+            diag("No se pudieron cargar todos los perfiles invocados")
             return
         }
-        val targetHasVoice = profiles.hasVoice(profileId)
-        val validationError = when {
-            targetConfig.profileName.isBlank() -> "El perfil no tiene nombre"
-            targetConfig.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
-            targetConfig.fishApiKey.isBlank() -> "Falta la API key de Fish Audio"
-            !targetHasVoice -> "${targetConfig.profileName} no tiene muestra de voz"
-            targetConfig.voiceTranscript.isBlank() -> "${targetConfig.profileName} no tiene transcripción de voz"
-            else -> null
+
+        val validationError = targetConfigs.firstNotNullOfOrNull { c ->
+            when {
+                c.profileName.isBlank() -> "Hay un perfil sin nombre"
+                c.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
+                c.fishApiKey.isBlank() -> "Falta la API key de Fish Audio"
+                !profiles.hasVoice(c.profileId) -> "${c.profileName} no tiene muestra de voz"
+                c.voiceTranscript.isBlank() -> "${c.profileName} no tiene transcripción de voz"
+                else -> null
+            }
         }
         if (validationError != null) {
             _ui.update { it.copy(statusDetail = validationError) }
@@ -539,60 +588,64 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
-        val previousName = _ui.value.config.profileName
-        turnFinalizeJob?.cancel()
-        turnFinalizeJob = null
-        turnCompletePending = false
         if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
             finalizeCurrentMessages()
             persistConversation()
         }
+
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
         mic.stop()
         gemini.disconnect()
         cancelFish("Cambio de personaje")
         player.interrupt()
 
-        val targetChat = profiles.loadChat(profileId)
+        val first = targetConfigs.first()
+        val isGroup = targetConfigs.size == 2
+        val targetChat = if (isGroup) profiles.loadGroupChat(targetIds) else profiles.loadChat(first.profileId)
         ids.set((targetChat.maxOfOrNull { it.id } ?: 0L) + 1L)
         pendingVoiceBytes = null
         currentUserMessageId = null
         currentAiMessageId = null
-        settings.setActiveProfileId(profileId)
-        connectionPurpose = ConnectionPurpose.BACKGROUND_ACTIVE
-        wakeDetected = false
-        wakeTranscript = ""
-        pendingInvocationProfileId = null
+        pendingInvocationProfileIds = null
+        activeBackgroundProfileIds = targetIds
+        conversationProfileIds = targetIds
+        groupLastSpeakerId = if (isGroup) {
+            targetChat.lastOrNull { it.speaker == Speaker.AI && it.characterProfileId in targetIds }?.characterProfileId
+        } else null
+        resetGroupOutput(keepLastSpeaker = true)
+        settings.setActiveProfileId(first.profileId)
 
+        val names = targetConfigs.map { it.profileName }
+        val displayName = names.joinToString(" + ")
         _ui.update {
             it.copy(
-                config = targetConfig,
+                config = first,
                 profiles = profiles.listProfiles(),
-                hasVoiceSample = targetHasVoice,
+                hasVoiceSample = profiles.hasVoice(first.profileId),
                 messages = targetChat,
                 status = SessionStatus.CONNECTING,
-                statusDetail = "Invocando a ${targetConfig.profileName}…",
+                statusDetail = "Invocando a $displayName…",
                 backgroundModeEnabled = true,
                 invocationActive = true,
+                activeCharacterNames = names,
                 settingsOpen = false,
             )
         }
-        InvocationForegroundService.update(targetConfig.profileName, active = true)
+        InvocationForegroundService.update(displayName, active = true)
 
-        val history = historyForGemini(targetChat)
+        val personality = if (isGroup) buildGroupPersonality(targetConfigs) else first.personality
+        val history = if (isGroup) historyForGroup(targetChat) else historyForSingle(targetChat, first.profileId)
         gemini.connect(
             GeminiLiveClient.Config(
-                apiKey = targetConfig.geminiApiKey,
-                model = targetConfig.geminiModel,
-                personality = targetConfig.personality,
+                apiKey = first.geminiApiKey,
+                model = first.geminiModel,
+                personality = personality,
                 history = history,
             )
         )
-        if (previousName.isNotBlank() && previousName != targetConfig.profileName) {
-            diag("Cambio de personaje: $previousName → ${targetConfig.profileName}")
-        } else {
-            diag("Invocación: ${targetConfig.profileName}")
-        }
-        diag("Memoria cargada · ${history.size} mensajes")
+        diag("Invocación: $displayName · memoria compartida ${history.size} mensajes")
     }
 
     private fun returnToWakeMode(reason: String) {
@@ -610,11 +663,11 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         player.interrupt()
 
         connectionPurpose = ConnectionPurpose.WAKE
-        wakeDetected = false
-        wakeTranscript = ""
-        pendingInvocationProfileId = null
+        activeBackgroundProfileIds = emptyList()
+        pendingInvocationProfileIds = null
         currentUserMessageId = null
         currentAiMessageId = null
+        resetGroupOutput()
 
         _ui.update {
             it.copy(
@@ -622,6 +675,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 statusDetail = "Cerrando conversación…",
                 backgroundModeEnabled = true,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
         InvocationForegroundService.update("CharacterIA", active = false)
@@ -652,15 +706,16 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         persistConversation()
         InvocationForegroundService.stop(context)
         connectionPurpose = ConnectionPurpose.NORMAL
-        wakeDetected = false
-        wakeTranscript = ""
-        pendingInvocationProfileId = null
+        activeBackgroundProfileIds = emptyList()
+        pendingInvocationProfileIds = null
+        resetGroupOutput()
         _ui.update {
             it.copy(
                 status = SessionStatus.DISCONNECTED,
                 statusDetail = "Modo invocación apagado",
                 backgroundModeEnabled = false,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
         diag(reason)
@@ -686,12 +741,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         finalizeCurrentMessages()
         persistConversation()
         connectionPurpose = ConnectionPurpose.NORMAL
+        activeBackgroundProfileIds = emptyList()
+        resetGroupOutput()
         _ui.update {
             it.copy(
                 status = SessionStatus.DISCONNECTED,
                 statusDetail = "Desconectado",
                 backgroundModeEnabled = false,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
         diag(detail)
@@ -706,11 +764,23 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             .onSuccess { diag("Micrófono 16 kHz activo · bloques de 40 ms") }
     }
 
-    private fun ensureFish() {
-        if (fish != null || connectionPurpose == ConnectionPurpose.WAKE) return
-        val profileId = _ui.value.config.profileId
-        val voice = pendingVoiceBytes ?: profiles.voiceBytes(profileId) ?: return
-        val c = _ui.value.config
+    private fun ensureFish(profileIdOverride: String? = null) {
+        if (connectionPurpose == ConnectionPurpose.WAKE) return
+        val profileId = profileIdOverride ?: _ui.value.config.profileId
+        if (fish != null && fishProfileId == profileId) return
+        if (fish != null && fishProfileId != profileId) cancelFish("Cambio de voz")
+
+        val c = if (profileId == _ui.value.config.profileId) {
+            _ui.value.config
+        } else {
+            profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: return
+        }
+        val voice = if (profileId == _ui.value.config.profileId) {
+            pendingVoiceBytes ?: profiles.voiceBytes(profileId)
+        } else {
+            profiles.voiceBytes(profileId)
+        } ?: return
+
         lateinit var client: FishTtsClient
         client = FishTtsClient(object : FishTtsClient.Listener {
             override fun onAudio(bytes: ByteArray) {
@@ -718,17 +788,20 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             override fun onReady() {
-                diag("Fish listo · TTS precargado")
+                diag("Fish listo · ${c.profileName} · TTS precargado")
             }
 
             override fun onFinished() {
-                if (fish === client) fish = null
+                if (fish === client) {
+                    fish = null
+                    fishProfileId = null
+                }
                 _ui.update { state ->
                     if (state.status == SessionStatus.SPEAKING) {
                         if (state.backgroundModeEnabled && state.invocationActive) {
                             state.copy(
                                 status = SessionStatus.INVOCATION_ACTIVE,
-                                statusDetail = "${state.config.profileName.ifBlank { "CharacterIA" }} activo · escuchando",
+                                statusDetail = "${activeDisplayName()} activo · escuchando",
                             )
                         } else {
                             state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
@@ -739,7 +812,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             override fun onError(message: String) {
-                if (fish === client) fish = null
+                if (fish === client) {
+                    fish = null
+                    fishProfileId = null
+                }
                 diag(message)
                 _ui.update { state -> state.copy(statusDetail = "$message · Gemini sigue conectado") }
             }
@@ -747,12 +823,53 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             override fun onDiagnostic(message: String) = diag(message)
         })
         fish = client
+        fishProfileId = profileId
         client.start(
             apiKey = c.fishApiKey,
             referenceAudio = voice,
             referenceTranscript = c.voiceTranscript,
             speed = c.voiceSpeed,
         )
+    }
+
+    private fun handleGroupOutput(fullText: String) {
+        if (!isGroupMode()) return
+
+        if (groupOutputSpeakerId == null) {
+            val parsed = parseGroupSpeaker(fullText)
+            groupOutputSpeakerId = parsed?.first
+                ?: if (fullText.length >= GROUP_PREFIX_FALLBACK_CHARS) {
+                    groupLikelySpeakerId ?: groupLastSpeakerId ?: activeBackgroundProfileIds.firstOrNull()
+                } else null
+            if (groupOutputSpeakerId == null) return
+
+            if (fishProfileId != groupOutputSpeakerId) {
+                cancelFish("Gemini eligió otra voz")
+                ensureFish(groupOutputSpeakerId)
+            }
+        }
+
+        val speakerId = groupOutputSpeakerId ?: return
+        val speakerConfig = profiles.loadProfile(speakerId, settings.geminiKey(), settings.fishKey()) ?: return
+        val spokenFull = stripGroupSpeakerPrefix(fullText, speakerConfig.profileName).trimStart()
+        val spokenDelta = incrementalDelta(groupOutputSpokenText, spokenFull)
+        groupOutputSpokenText = spokenFull
+        groupLastSpeakerId = speakerId
+
+        if (spokenDelta.isNotEmpty()) {
+            ensureFish(speakerId)
+            fish?.sendText(spokenDelta)
+        }
+        if (spokenFull.isNotBlank()) {
+            updateMessage(
+                Speaker.AI,
+                spokenFull,
+                partial = true,
+                characterProfileId = speakerId,
+                characterName = speakerConfig.profileName,
+            )
+            _ui.update { it.copy(statusDetail = "${speakerConfig.profileName} respondiendo") }
+        }
     }
 
     private fun scheduleTurnSettlement() {
@@ -764,6 +881,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             turnCompletePending = false
             turnFinalizeJob = null
             persistConversation()
+            resetGroupOutput(keepLastSpeaker = true)
             diag("Turno asentado · chat guardado · sigo escuchando")
         }
     }
@@ -771,23 +889,46 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private fun cancelFish(reason: String) {
         fish?.cancel()
         fish = null
+        fishProfileId = null
         player.interrupt()
         diag(reason)
     }
 
-    private fun updateMessage(speaker: Speaker, text: String, partial: Boolean) {
+    private fun updateMessage(
+        speaker: Speaker,
+        text: String,
+        partial: Boolean,
+        characterProfileId: String = "",
+        characterName: String = "",
+    ) {
         if (text.isBlank()) return
         val currentId = if (speaker == Speaker.USER) currentUserMessageId else currentAiMessageId
         if (currentId == null) {
             val id = ids.getAndIncrement()
             if (speaker == Speaker.USER) currentUserMessageId = id else currentAiMessageId = id
             _ui.update { state ->
-                state.copy(messages = state.messages + ChatMessage(id, speaker, text, partial))
+                state.copy(
+                    messages = state.messages + ChatMessage(
+                        id = id,
+                        speaker = speaker,
+                        text = text,
+                        isPartial = partial,
+                        characterProfileId = characterProfileId,
+                        characterName = characterName,
+                    )
+                )
             }
         } else {
             _ui.update { state ->
                 state.copy(messages = state.messages.map {
-                    if (it.id == currentId) it.copy(text = text, isPartial = partial) else it
+                    if (it.id == currentId) {
+                        it.copy(
+                            text = text,
+                            isPartial = partial,
+                            characterProfileId = characterProfileId.ifBlank { it.characterProfileId },
+                            characterName = characterName.ifBlank { it.characterName },
+                        )
+                    } else it
                 })
             }
         }
@@ -820,43 +961,127 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun persistConversation() {
         val state = _ui.value
-        val id = state.config.profileId
-        if (id.isBlank()) return
+        val idsForConversation = conversationProfileIds.distinct()
+        if (idsForConversation.isEmpty()) return
         val stable = state.messages.map { it.copy(isPartial = false) }
-        profiles.saveChat(id, stable)
-        val history = historyForGemini(stable)
-        gemini.updateHistory(history)
+
+        if (idsForConversation.size == 2) {
+            profiles.saveGroupChat(idsForConversation, stable)
+            gemini.updateHistory(historyForGroup(stable))
+        } else {
+            val profileId = idsForConversation.first()
+            profiles.saveChat(profileId, stable)
+            gemini.updateHistory(historyForSingle(stable, profileId))
+        }
     }
 
-    private fun historyForGemini(messages: List<ChatMessage>): List<GeminiLiveClient.HistoryTurn> {
-        val stable = messages.filter { !it.isPartial && it.text.isNotBlank() }
-        if (stable.isEmpty()) return emptyList()
+    private fun historyForSingle(
+        messages: List<ChatMessage>,
+        profileId: String,
+    ): List<GeminiLiveClient.HistoryTurn> {
+        val stable = messages.filter { message ->
+            !message.isPartial &&
+                message.text.isNotBlank() &&
+                (message.speaker == Speaker.USER || message.characterProfileId.isBlank() || message.characterProfileId == profileId)
+        }
+        return boundedHistory(stable) { message -> message.text }
+    }
 
+    private fun historyForGroup(messages: List<ChatMessage>): List<GeminiLiveClient.HistoryTurn> {
+        val stable = messages.filter { !it.isPartial && it.text.isNotBlank() }
+        return boundedHistory(stable) { message ->
+            if (message.speaker == Speaker.AI && message.characterName.isNotBlank()) {
+                "${message.characterName}: ${message.text}"
+            } else message.text
+        }
+    }
+
+    private fun boundedHistory(
+        messages: List<ChatMessage>,
+        textFor: (ChatMessage) -> String,
+    ): List<GeminiLiveClient.HistoryTurn> {
+        if (messages.isEmpty()) return emptyList()
         val selected = ArrayDeque<ChatMessage>()
         var chars = 0
-        for (message in stable.asReversed()) {
+        for (message in messages.asReversed()) {
+            val text = textFor(message)
             if (selected.size >= 100) break
-            if (chars + message.text.length > 50_000 && selected.isNotEmpty()) break
+            if (chars + text.length > 50_000 && selected.isNotEmpty()) break
             selected.addFirst(message)
-            chars += message.text.length
+            chars += text.length
         }
         return selected.map { message ->
             GeminiLiveClient.HistoryTurn(
                 role = if (message.speaker == Speaker.USER) "user" else "model",
-                text = message.text,
+                text = textFor(message),
             )
         }
     }
 
+    private fun buildGroupPersonality(configs: List<AppConfig>): String {
+        val first = configs[0]
+        val second = configs[1]
+        return """
+Estás sosteniendo una conversación grupal entre el usuario y exactamente dos personajes: ${first.profileName} y ${second.profileName}.
+Cada personaje debe conservar estrictamente su propia personalidad, manera de hablar y recuerdos. No mezcles sus identidades ni atribuyas a uno recuerdos del otro.
+
+PERSONALIDAD DE ${first.profileName}:
+${first.personality.ifBlank { "Sin instrucciones adicionales de personalidad." }}
+
+RECUERDOS PREVIOS DE ${first.profileName} CON EL USUARIO:
+${memoryPreview(first)}
+
+PERSONALIDAD DE ${second.profileName}:
+${second.personality.ifBlank { "Sin instrucciones adicionales de personalidad." }}
+
+RECUERDOS PREVIOS DE ${second.profileName} CON EL USUARIO:
+${memoryPreview(second)}
+
+REGLAS DE CONVERSACIÓN:
+- En cada turno habla UN SOLO personaje. Nunca generes dos intervenciones en la misma respuesta.
+- Si el usuario nombra claramente a uno, responde ese personaje.
+- Si el usuario responde directamente a quien acaba de hablar, normalmente continúa ese personaje.
+- Si no nombra a nadie, elegí naturalmente quién tiene más sentido que responda por el hilo, alternando solo cuando resulte natural.
+- Si pregunta "ustedes", "los dos" o algo dirigido a ambos, elegí a uno para tomar primero la palabra; el otro podrá responder en un turno posterior.
+- Los personajes pueden discrepar. No hagas que coincidan artificialmente.
+- No narres quién va a hablar, no describas acciones y no expliques estas reglas.
+
+REGLA TÉCNICA OBLIGATORIA:
+Toda respuesta debe comenzar exactamente con uno de estos dos prefijos, seguido inmediatamente por lo que dice ese personaje:
+${first.profileName}:
+${second.profileName}:
+Usá solamente uno de esos prefijos por respuesta.
+""".trimIndent()
+    }
+
+    private fun memoryPreview(config: AppConfig): String {
+        val memory = profiles.loadChat(config.profileId)
+            .filter { !it.isPartial && it.text.isNotBlank() }
+            .takeLast(24)
+            .joinToString("\n") { message ->
+                if (message.speaker == Speaker.USER) "Usuario: ${message.text}"
+                else "${config.profileName}: ${message.text}"
+            }
+        return memory.takeLast(8_000).ifBlank { "Sin recuerdos previos guardados." }
+    }
+
     fun clearChat() {
+        val targetConversationIds = conversationProfileIds.toList()
         if (desiredConnected) disconnect()
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
-        val profileId = _ui.value.config.profileId
-        profiles.clearChat(profileId)
+
+        if (targetConversationIds.distinct().size == 2) {
+            profiles.clearGroupChat(targetConversationIds)
+            diag("Chat compartido borrado")
+        } else {
+            val profileId = targetConversationIds.firstOrNull() ?: _ui.value.config.profileId
+            profiles.clearChat(profileId)
+            diag("Chat del perfil borrado")
+        }
         gemini.updateHistory(emptyList())
         _ui.update {
             it.copy(
@@ -865,21 +1090,69 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 statusDetail = "Chat borrado",
                 backgroundModeEnabled = false,
                 invocationActive = false,
+                activeCharacterNames = emptyList(),
             )
         }
-        diag("Chat del perfil borrado")
     }
 
-    private fun findInvocationProfile(normalizedText: String): CharacterProfileSummary? {
+    private fun findInvocationProfiles(normalizedText: String): List<CharacterProfileSummary> {
+        val suffixIndex = normalizedText.indexOf(INVOCATION_SUFFIX)
+        if (suffixIndex < 0) return emptyList()
+        val beforeSuffix = normalizedText.substring(0, suffixIndex).trim()
+        if (beforeSuffix.isBlank()) return emptyList()
+
         return _ui.value.profiles
-            .asSequence()
-            .map { profile -> profile to normalizeCommand(profile.name) }
-            .filter { (_, normalizedName) -> normalizedName.isNotBlank() }
-            .sortedByDescending { (_, normalizedName) -> normalizedName.length }
-            .firstOrNull { (_, normalizedName) ->
-                normalizedText.contains("$normalizedName $INVOCATION_SUFFIX")
+            .mapNotNull { profile ->
+                val normalizedName = normalizeCommand(profile.name)
+                if (normalizedName.isBlank()) return@mapNotNull null
+                val match = wordSequenceRegex(normalizedName).find(beforeSuffix) ?: return@mapNotNull null
+                Triple(profile, match.range.first, normalizedName.length)
             }
+            .sortedWith(compareBy<Triple<CharacterProfileSummary, Int, Int>> { it.second }.thenByDescending { it.third })
+            .map { it.first }
+            .distinctBy { it.id }
+            .take(2)
+    }
+
+    private fun addressedGroupProfile(normalizedText: String): CharacterProfileSummary? {
+        if (!isGroupMode()) return null
+        return activeBackgroundProfileIds
+            .mapNotNull { id -> _ui.value.profiles.firstOrNull { it.id == id } }
+            .mapNotNull { profile ->
+                val normalizedName = normalizeCommand(profile.name)
+                val match = wordSequenceRegex(normalizedName).find(normalizedText) ?: return@mapNotNull null
+                profile to match.range.first
+            }
+            .minByOrNull { it.second }
             ?.first
+    }
+
+    private fun parseGroupSpeaker(fullText: String): Pair<String, Int>? {
+        for (profileId in activeBackgroundProfileIds) {
+            val profile = _ui.value.profiles.firstOrNull { it.id == profileId } ?: continue
+            val regex = Regex("^\\s*${Regex.escape(profile.name)}\\s*:\\s*", RegexOption.IGNORE_CASE)
+            val match = regex.find(fullText) ?: continue
+            return profileId to (match.range.last + 1)
+        }
+        return null
+    }
+
+    private fun stripGroupSpeakerPrefix(fullText: String, profileName: String): String {
+        val regex = Regex("^\\s*${Regex.escape(profileName)}\\s*:\\s*", RegexOption.IGNORE_CASE)
+        return regex.replaceFirst(fullText, "")
+    }
+
+    private fun incrementalDelta(previous: String, current: String): String {
+        if (previous.isEmpty()) return current
+        if (current.startsWith(previous)) return current.substring(previous.length)
+        if (previous.endsWith(current)) return ""
+        val max = minOf(previous.length, current.length)
+        for (n in max downTo 1) {
+            if (previous.regionMatches(previous.length - n, current, 0, n)) {
+                return current.substring(n)
+            }
+        }
+        return current
     }
 
     private fun discardCurrentUserMessage() {
@@ -889,6 +1162,23 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
         currentUserMessageId = null
     }
+
+    private fun activeDisplayName(): String =
+        _ui.value.activeCharacterNames.takeIf { it.isNotEmpty() }?.joinToString(" + ")
+            ?: _ui.value.config.profileName.ifBlank { "CharacterIA" }
+
+    private fun isGroupMode(): Boolean =
+        connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE && activeBackgroundProfileIds.size == 2
+
+    private fun resetGroupOutput(keepLastSpeaker: Boolean = false) {
+        groupOutputSpeakerId = null
+        groupOutputSpokenText = ""
+        groupLikelySpeakerId = null
+        if (!keepLastSpeaker) groupLastSpeakerId = null
+    }
+
+    private fun wordSequenceRegex(normalizedName: String): Regex =
+        Regex("(?:^|\\s)${Regex.escape(normalizedName)}(?=\\s|$)")
 
     private fun normalizeCommand(text: String): String {
         val normalized = Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
@@ -921,6 +1211,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     companion object {
         private const val INVOCATION_SUFFIX = "are you here"
         private const val EXIT_PHRASE = "get out"
-        private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
+        private const val GROUP_PREFIX_FALLBACK_CHARS = 48
+        private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» o «nombre y nombre, are you here?», y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
 }
