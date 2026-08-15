@@ -163,11 +163,9 @@ class GeminiLiveClient(
                     delay(12_000)
                     if (desiredConnected && webSocket === socket && !setupComplete) {
                         listener.onDiagnostic("Gemini: timeout esperando setupComplete")
-                        if (!tryFallbackModel(webSocket, cfg.model, "timeout de conexión")) {
-                            desiredConnected = false
-                            listener.onError("Gemini no confirmó la sesión en 12 s. Revisá la API key o la cuota disponible.")
-                            webSocket.cancel()
-                        }
+                        desiredConnected = false
+                        listener.onError("Gemini no confirmó la sesión en 12 s. Revisá la conexión, la API key o la cuota disponible.")
+                        webSocket.cancel()
                     }
                 }
             }
@@ -220,9 +218,15 @@ class GeminiLiveClient(
 
                 if (!desiredConnected) return
 
+                val explicitQuota = isQuotaError(reason)
                 val rapid1011 = code == 1011 && wasReadyOnlyBriefly()
-                if ((isQuotaError(reason) || rapid1011) && tryFallbackModel(webSocket, cfg.model, "cierre $code ${reason.ifBlank { "sin motivo" }}")) {
-                    return
+                if (explicitQuota || rapid1011) {
+                    if (tryFallbackModel(webSocket, cfg.model, "cierre $code ${reason.ifBlank { "sin motivo" }}")) return
+                    if (explicitQuota) {
+                        desiredConnected = false
+                        listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
+                        return
+                    }
                 }
 
                 if (hasEverBeenReady) {
@@ -245,8 +249,16 @@ class GeminiLiveClient(
 
                 if (!desiredConnected) return
 
-                val likelyQuota = isQuotaError(detail) || (detail.contains("1011") && wasReadyOnlyBriefly())
-                if (likelyQuota && tryFallbackModel(webSocket, cfg.model, detail)) return
+                val explicitQuota = isQuotaError(detail)
+                val rapid1011 = detail.contains("1011") && wasReadyOnlyBriefly()
+                if (explicitQuota || rapid1011) {
+                    if (tryFallbackModel(webSocket, cfg.model, detail)) return
+                    if (explicitQuota) {
+                        desiredConnected = false
+                        listener.onError("Se agotó la cuota disponible de los modelos Gemini Live.")
+                        return
+                    }
+                }
 
                 if (hasEverBeenReady) {
                     scheduleReconnect()
