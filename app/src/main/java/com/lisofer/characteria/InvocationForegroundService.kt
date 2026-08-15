@@ -16,7 +16,13 @@ import androidx.core.content.ContextCompat
 class InvocationForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createChannel()
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -37,8 +43,7 @@ class InvocationForegroundService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
                 "Modo invocación",
@@ -48,6 +53,11 @@ class InvocationForegroundService : Service() {
                 setShowBadge(false)
             }
         )
+    }
+
+    private fun updateNotification(profileName: String, active: Boolean) {
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification(profileName, active))
     }
 
     private fun buildNotification(profileName: String, active: Boolean) = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -75,6 +85,7 @@ class InvocationForegroundService : Service() {
         private const val NOTIFICATION_ID = 4101
         private const val EXTRA_PROFILE_NAME = "profile_name"
         private const val EXTRA_ACTIVE = "active"
+        @Volatile private var instance: InvocationForegroundService? = null
 
         fun start(context: Context, profileName: String, active: Boolean = false) {
             val intent = Intent(context, InvocationForegroundService::class.java)
@@ -83,8 +94,8 @@ class InvocationForegroundService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        fun update(context: Context, profileName: String, active: Boolean) {
-            start(context, profileName, active)
+        fun update(profileName: String, active: Boolean) {
+            instance?.updateNotification(profileName, active)
         }
 
         fun stop(context: Context) {
