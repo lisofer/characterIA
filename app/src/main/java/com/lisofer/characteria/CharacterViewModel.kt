@@ -55,7 +55,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         initializeProfiles()
     }
 
-    private val gemini = GeminiLiveClient(viewModelScope, object : GeminiLiveClient.Listener {
+    private val gemini: GeminiLiveClient = GeminiLiveClient(viewModelScope, object : GeminiLiveClient.Listener {
         override fun onStatus(message: String) {
             val status = if (message.startsWith("Reconect")) SessionStatus.RECONNECTING else SessionStatus.CONNECTING
             _ui.update { it.copy(status = status, statusDetail = message) }
