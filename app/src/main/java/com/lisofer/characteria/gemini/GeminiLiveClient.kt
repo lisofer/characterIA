@@ -270,8 +270,8 @@ class GeminiLiveClient(
             .put(
                 "contextWindowCompression",
                 JSONObject()
-                    .put("triggerTokens", 25_000)
-                    .put("slidingWindow", JSONObject().put("targetTokens", 8_000))
+                    .put("triggerTokens", "25000")
+                    .put("slidingWindow", JSONObject().put("targetTokens", "8000"))
             )
             .put(
                 "sessionResumption",
