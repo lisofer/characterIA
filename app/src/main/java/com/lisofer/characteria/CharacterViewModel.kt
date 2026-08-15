@@ -2,6 +2,7 @@ package com.lisofer.characteria
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -52,6 +53,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var pendingInvocationProfileIds: List<String>? = null
     private var activeBackgroundProfileIds: List<String> = emptyList()
     private var conversationProfileIds: List<String> = emptyList()
+    private var ignoreInvocationCommandsUntilMs: Long = 0L
 
     private var groupLastSpeakerId: String? = null
     private var groupLikelySpeakerId: String? = null
@@ -126,6 +128,13 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 val targetProfiles = findInvocationProfiles(normalized)
                 if (targetProfiles.isNotEmpty()) {
                     discardCurrentUserMessage()
+                    if (
+                        connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE &&
+                        SystemClock.elapsedRealtime() < ignoreInvocationCommandsUntilMs
+                    ) {
+                        diag("Invocación residual ignorada al abrir la conversación")
+                        return
+                    }
                     val targetIds = targetProfiles.map { it.id }
                     val targetName = targetProfiles.joinToString(" + ") { it.name }
                     if (connectionPurpose == ConnectionPurpose.WAKE) {
@@ -532,6 +541,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         connectionPurpose = ConnectionPurpose.WAKE
         activeBackgroundProfileIds = emptyList()
         pendingInvocationProfileIds = null
+        ignoreInvocationCommandsUntilMs = 0L
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
@@ -611,6 +621,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         pendingInvocationProfileIds = null
         activeBackgroundProfileIds = targetIds
         conversationProfileIds = targetIds
+        connectionPurpose = ConnectionPurpose.BACKGROUND_ACTIVE
+        ignoreInvocationCommandsUntilMs = SystemClock.elapsedRealtime() + 1500L
         groupLastSpeakerId = if (isGroup) {
             targetChat.lastOrNull { it.speaker == Speaker.AI && it.characterProfileId in targetIds }?.characterProfileId
         } else null
