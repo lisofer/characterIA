@@ -1,0 +1,332 @@
+from pathlib import Path
+
+p = Path('app/src/main/java/com/lisofer/characteria/CharacterViewModel.kt')
+s = p.read_text()
+
+old = '''    private var groupLastSpeakerId: String? = null
+    private var groupLikelySpeakerId: String? = null
+    private var groupOutputSpeakerId: String? = null
+    private var groupOutputSpokenText = ""
+'''
+new = '''    private data class GroupSegment(val speakerId: String, val text: String)
+
+    private var groupLastSpeakerId: String? = null
+    private var groupLikelySpeakerId: String? = null
+    private var groupParsedSegments: List<GroupSegment> = emptyList()
+    private val groupSegmentMessageIds = mutableListOf<Long>()
+    private var groupTtsSegmentIndex = 0
+    private var groupTtsSentText = ""
+    private var groupTtsFinishing = false
+    private var groupModelTurnComplete = false
+'''
+if old not in s:
+    raise SystemExit('group state block not found')
+s = s.replace(old, new, 1)
+
+old = '''                if (isGroupMode()) {
+                    groupOutputSpeakerId = null
+                    groupOutputSpokenText = ""
+                    groupLikelySpeakerId = addressedGroupProfile(normalized)?.id
+                        ?: groupLastSpeakerId
+                        ?: activeBackgroundProfileIds.firstOrNull()
+                    groupLikelySpeakerId?.let(::ensureFish)
+                } else {
+'''
+new = '''                if (isGroupMode()) {
+                    resetGroupOutput(keepLastSpeaker = true)
+                    groupLikelySpeakerId = addressedGroupProfile(normalized)?.id
+                        ?: groupLastSpeakerId
+                        ?: activeBackgroundProfileIds.firstOrNull()
+                    groupLikelySpeakerId?.let(::ensureFish)
+                } else {
+'''
+if old not in s:
+    raise SystemExit('new-turn group reset block not found')
+s = s.replace(old, new, 1)
+
+old = '''            override fun onFinished() {
+                if (fish === client) {
+                    fish = null
+                    fishProfileId = null
+                }
+                _ui.update { state ->
+                    if (state.status == SessionStatus.SPEAKING) {
+                        if (state.backgroundModeEnabled && state.invocationActive) {
+                            state.copy(
+                                status = SessionStatus.INVOCATION_ACTIVE,
+                                statusDetail = "${activeDisplayName()} activo · escuchando",
+                            )
+                        } else {
+                            state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
+                        }
+                    } else state
+                }
+                diag("Fish terminó el turno")
+            }
+'''
+new = '''            override fun onFinished() {
+                val wasCurrent = fish === client
+                if (wasCurrent) {
+                    fish = null
+                    fishProfileId = null
+                }
+                if (wasCurrent && isGroupMode() && advanceGroupSpeechAfterFishFinished()) {
+                    return
+                }
+                _ui.update { state ->
+                    if (state.status == SessionStatus.SPEAKING) {
+                        if (state.backgroundModeEnabled && state.invocationActive) {
+                            state.copy(
+                                status = SessionStatus.INVOCATION_ACTIVE,
+                                statusDetail = "${activeDisplayName()} activo · escuchando",
+                            )
+                        } else {
+                            state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
+                        }
+                    } else state
+                }
+                diag("Fish terminó el turno")
+            }
+'''
+if old not in s:
+    raise SystemExit('Fish onFinished block not found')
+s = s.replace(old, new, 1)
+
+start = s.index('    private fun handleGroupOutput(fullText: String) {')
+end = s.index('    private fun scheduleTurnSettlement() {', start)
+new_handle = r'''    private fun handleGroupOutput(fullText: String) {
+        if (!isGroupMode()) return
+
+        val parsed = parseGroupSegments(fullText).ifEmpty {
+            if (fullText.length < GROUP_PREFIX_FALLBACK_CHARS) return
+            val fallback = groupLikelySpeakerId ?: groupLastSpeakerId ?: activeBackgroundProfileIds.firstOrNull()
+                ?: return
+            listOf(GroupSegment(fallback, fullText.trim()))
+        }
+        groupParsedSegments = parsed
+        syncGroupMessages(parsed)
+        groupLastSpeakerId = parsed.lastOrNull()?.speakerId ?: groupLastSpeakerId
+        speakCurrentGroupSegment()
+
+        val speaking = parsed.getOrNull(groupTtsSegmentIndex)
+        val speakingName = speaking?.speakerId?.let { id ->
+            _ui.value.profiles.firstOrNull { it.id == id }?.name
+        }
+        if (!speakingName.isNullOrBlank()) {
+            _ui.update { it.copy(statusDetail = "$speakingName respondiendo") }
+        }
+    }
+
+    private fun parseGroupSegments(fullText: String): List<GroupSegment> {
+        data class Prefix(val profileId: String, val start: Int, val contentStart: Int)
+        val prefixes = mutableListOf<Prefix>()
+        for (profileId in activeBackgroundProfileIds) {
+            val profile = _ui.value.profiles.firstOrNull { it.id == profileId } ?: continue
+            val regex = Regex("(?m)^\\s*${Regex.escape(profile.name)}\\s*:\\s*", RegexOption.IGNORE_CASE)
+            regex.findAll(fullText).forEach { match ->
+                prefixes += Prefix(profileId, match.range.first, match.range.last + 1)
+            }
+        }
+        if (prefixes.isEmpty()) return emptyList()
+        val ordered = prefixes.sortedBy { it.start }
+        return ordered.mapIndexedNotNull { index, prefix ->
+            val end = ordered.getOrNull(index + 1)?.start ?: fullText.length
+            val text = fullText.substring(prefix.contentStart, end).trim()
+            if (text.isBlank() && index < ordered.lastIndex) null else GroupSegment(prefix.profileId, text)
+        }
+    }
+
+    private fun syncGroupMessages(segments: List<GroupSegment>) {
+        while (groupSegmentMessageIds.size < segments.size) {
+            groupSegmentMessageIds += ids.getAndIncrement()
+        }
+        _ui.update { state ->
+            val messages = state.messages.toMutableList()
+            segments.forEachIndexed { index, segment ->
+                if (segment.text.isBlank()) return@forEachIndexed
+                val id = groupSegmentMessageIds[index]
+                val profile = state.profiles.firstOrNull { it.id == segment.speakerId }
+                val message = ChatMessage(
+                    id = id,
+                    speaker = Speaker.AI,
+                    text = segment.text,
+                    isPartial = true,
+                    characterProfileId = segment.speakerId,
+                    characterName = profile?.name.orEmpty(),
+                )
+                val existing = messages.indexOfFirst { it.id == id }
+                if (existing >= 0) messages[existing] = message else messages += message
+            }
+            state.copy(messages = messages)
+        }
+    }
+
+    private fun finalizeGroupMessages() {
+        if (groupSegmentMessageIds.isEmpty()) return
+        val idsToFinalize = groupSegmentMessageIds.toSet()
+        _ui.update { state ->
+            state.copy(messages = state.messages.map { message ->
+                if (message.id in idsToFinalize) message.copy(isPartial = false) else message
+            })
+        }
+    }
+
+    private fun speakCurrentGroupSegment() {
+        if (!isGroupMode()) return
+        val segment = groupParsedSegments.getOrNull(groupTtsSegmentIndex) ?: return
+        if (fishProfileId != segment.speakerId) {
+            if (fish != null) cancelFish("Cambio natural de interlocutor")
+            ensureFish(segment.speakerId)
+        }
+        val delta = incrementalDelta(groupTtsSentText, segment.text)
+        if (delta.isNotEmpty()) {
+            fish?.sendText(delta)
+            groupTtsSentText = segment.text
+        }
+
+        val hasNext = groupTtsSegmentIndex + 1 < groupParsedSegments.size
+        val shouldCloseCurrent = hasNext || groupModelTurnComplete
+        if (shouldCloseCurrent && !groupTtsFinishing) {
+            groupTtsFinishing = true
+            fish?.finish()
+        }
+    }
+
+    private fun advanceGroupSpeechAfterFishFinished(): Boolean {
+        if (!isGroupMode()) return false
+        val hasNext = groupTtsSegmentIndex + 1 < groupParsedSegments.size
+        if (hasNext) {
+            groupTtsSegmentIndex += 1
+            groupTtsSentText = ""
+            groupTtsFinishing = false
+            val next = groupParsedSegments[groupTtsSegmentIndex]
+            val nextName = _ui.value.profiles.firstOrNull { it.id == next.speakerId }?.name ?: "Siguiente personaje"
+            ensureFish(next.speakerId)
+            speakCurrentGroupSegment()
+            _ui.update { it.copy(status = SessionStatus.SPEAKING, statusDetail = "$nextName respondiendo") }
+            diag("Conversación grupal · toma la palabra $nextName")
+            return true
+        }
+        if (groupModelTurnComplete) {
+            finalizeGroupMessages()
+            resetGroupOutput(keepLastSpeaker = true)
+        } else {
+            groupTtsFinishing = false
+        }
+        return false
+    }
+
+'''
+s = s[:start] + new_handle + s[end:]
+
+old = '''    private fun scheduleTurnSettlement() {
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = viewModelScope.launch {
+            delay(800)
+            fish?.finish()
+            finalizeAiMessage()
+            turnCompletePending = false
+            turnFinalizeJob = null
+            persistConversation()
+            resetGroupOutput(keepLastSpeaker = true)
+            diag("Turno asentado · chat guardado · sigo escuchando")
+        }
+    }
+'''
+new = '''    private fun scheduleTurnSettlement() {
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = viewModelScope.launch {
+            delay(800)
+            if (isGroupMode()) {
+                groupModelTurnComplete = true
+                finalizeGroupMessages()
+                speakCurrentGroupSegment()
+            } else {
+                fish?.finish()
+                finalizeAiMessage()
+            }
+            turnCompletePending = false
+            turnFinalizeJob = null
+            persistConversation()
+            if (!isGroupMode()) resetGroupOutput(keepLastSpeaker = true)
+            diag("Turno asentado · chat guardado · sigo escuchando")
+        }
+    }
+'''
+if old not in s:
+    raise SystemExit('schedule settlement block not found')
+s = s.replace(old, new, 1)
+
+start = s.index('    private fun buildGroupPersonality(configs: List<AppConfig>): String {')
+end = s.index('    private fun memoryPreview(config: AppConfig): String {', start)
+new_personality = r'''    private fun buildGroupPersonality(configs: List<AppConfig>): String {
+        val first = configs[0]
+        val second = configs[1]
+        return """
+Estás sosteniendo una conversación natural entre tres personas: el usuario, ${first.profileName} y ${second.profileName}.
+Cada personaje conserva estrictamente su propia personalidad, manera de hablar y recuerdos. No mezcles sus identidades ni atribuyas a uno recuerdos del otro.
+
+PERSONALIDAD DE ${first.profileName}:
+${first.personality.ifBlank { "Sin instrucciones adicionales de personalidad." }}
+
+RECUERDOS PREVIOS DE ${first.profileName} CON EL USUARIO:
+${memoryPreview(first)}
+
+PERSONALIDAD DE ${second.profileName}:
+${second.personality.ifBlank { "Sin instrucciones adicionales de personalidad." }}
+
+RECUERDOS PREVIOS DE ${second.profileName} CON EL USUARIO:
+${memoryPreview(second)}
+
+DINÁMICA DE CONVERSACIÓN:
+- La charla debe sentirse como tres personas reales juntas, no como dos asistentes esperando preguntas.
+- Si el usuario nombra claramente a uno, ese personaje responde primero.
+- Después de una intervención, el otro personaje PUEDE reaccionar espontáneamente si tendría algo genuino que decir: discrepar, sumar algo, hacer un chiste, preguntar, recordar algo relacionado o responderle directamente al otro.
+- Si esa reacción abre naturalmente otra respuesta, pueden continuar hablando entre ellos durante varias intervenciones breves sin esperar al usuario.
+- No alternes por obligación y no hagas hablar a ambos en todos los turnos. A veces corresponde una sola respuesta.
+- Normalmente usá entre 1 y 3 intervenciones. Podés llegar hasta 6 cuando la conversación entre ellos tenga impulso propio o el usuario indique que quiere escucharlos, por ejemplo "sigan ustedes", "los escucho" o algo equivalente.
+- Frená naturalmente cuando el tema se agote, cuando haya una pregunta clara para el usuario o cuando socialmente tenga sentido esperar su reacción.
+- Los personajes pueden disentir, cargarse entre ellos y hacerse preguntas, siempre respetando sus personalidades.
+- Si el usuario empieza a hablar, cedé inmediatamente el turno.
+- No narres acciones, no expliques quién va a hablar y no menciones estas reglas.
+
+FORMATO TÉCNICO OBLIGATORIO:
+Cada intervención debe comenzar en una línea nueva exactamente con uno de estos prefijos:
+${first.profileName}:
+${second.profileName}:
+Podés usar uno o varios prefijos en una misma respuesta, según cuántas intervenciones naturales ocurran.
+Nunca pongas texto fuera de una intervención y nunca uses otro nombre como prefijo.
+""".trimIndent()
+    }
+
+'''
+s = s[:start] + new_personality + s[end:]
+
+start = s.index('    private fun parseGroupSpeaker(fullText: String): Pair<String, Int>? {')
+end = s.index('    private fun incrementalDelta(previous: String, current: String): String {', start)
+s = s[:start] + s[end:]
+
+old = '''    private fun resetGroupOutput(keepLastSpeaker: Boolean = false) {
+        groupOutputSpeakerId = null
+        groupOutputSpokenText = ""
+        groupLikelySpeakerId = null
+        if (!keepLastSpeaker) groupLastSpeakerId = null
+    }
+'''
+new = '''    private fun resetGroupOutput(keepLastSpeaker: Boolean = false) {
+        groupParsedSegments = emptyList()
+        groupSegmentMessageIds.clear()
+        groupTtsSegmentIndex = 0
+        groupTtsSentText = ""
+        groupTtsFinishing = false
+        groupModelTurnComplete = false
+        groupLikelySpeakerId = null
+        if (!keepLastSpeaker) groupLastSpeakerId = null
+    }
+'''
+if old not in s:
+    raise SystemExit('reset group block not found')
+s = s.replace(old, new, 1)
+
+p.write_text(s)
+print('patched CharacterViewModel.kt')
