@@ -130,7 +130,11 @@ private fun CharacterApp(vm: CharacterViewModel) {
                 title = {
                     Column {
                         Text("CharacterIA", fontWeight = FontWeight.Black)
-                        Text("Gemini Live + tu voz", style = MaterialTheme.typography.labelSmall, color = Muted)
+                        Text(
+                            state.config.profileName.ifBlank { "Sin perfil" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Muted,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg),
@@ -169,6 +173,8 @@ private fun CharacterApp(vm: CharacterViewModel) {
             onDismiss = { vm.setSettingsOpen(false) },
             onConfig = vm::updateConfig,
             onPickVoice = { voicePicker.launch(arrayOf("audio/*")) },
+            onSelectProfile = vm::selectProfile,
+            onNewProfile = vm::newProfile,
             onSave = vm::saveConfig,
         )
     }
@@ -206,7 +212,7 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
                     Text("Hablá normalmente.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Gemini detecta tus turnos y Fish responde con la muestra de voz que cargaste.",
+                        "El chat de ${state.config.profileName.ifBlank { "este perfil" }} se guarda en este teléfono hasta que lo borres.",
                         color = Muted,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -218,7 +224,9 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.messages, key = { it.id }) { message -> MessageBubble(message) }
+                items(state.messages, key = { it.id }) { message ->
+                    MessageBubble(message, state.config.profileName)
+                }
                 item { Spacer(Modifier.height(20.dp)) }
             }
         }
@@ -248,9 +256,9 @@ private fun StatusHero(state: AppUiState) {
             Text(state.statusDetail, fontWeight = FontWeight.SemiBold)
             val subtitle = when (state.status) {
                 SessionStatus.LISTENING -> "Micrófono activo · podés interrumpir"
-                SessionStatus.SPEAKING -> "Fish Audio · voz clonada"
-                SessionStatus.RECONNECTING -> "Intentando conservar el contexto"
-                else -> "Gemini 3.1 Flash Live"
+                SessionStatus.SPEAKING -> "Fish Audio · ${state.config.profileName.ifBlank { "voz clonada" }}"
+                SessionStatus.RECONNECTING -> "Recuperando el contexto del perfil"
+                else -> state.config.geminiModel
             }
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Muted)
         }
@@ -258,7 +266,7 @@ private fun StatusHero(state: AppUiState) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, aiName: String) {
     val isUser = message.speaker == Speaker.USER
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -273,7 +281,7 @@ private fun MessageBubble(message: ChatMessage) {
         ) {
             Column(Modifier.padding(14.dp)) {
                 Text(
-                    if (isUser) "VOS" else "CHARACTER",
+                    if (isUser) "VOS" else aiName.ifBlank { "CHARACTER" }.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
                     color = Muted,
                     fontWeight = FontWeight.Bold,
@@ -299,7 +307,7 @@ private fun BottomControls(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         OutlinedButton(onClick = onClear) {
-            Icon(Icons.Default.DeleteSweep, contentDescription = null)
+            Icon(Icons.Default.DeleteSweep, contentDescription = "Borrar chat de este perfil")
         }
         Button(
             modifier = Modifier.weight(1f).height(54.dp),
@@ -326,10 +334,13 @@ private fun SettingsSheet(
     onDismiss: () -> Unit,
     onConfig: ((AppConfig) -> AppConfig) -> Unit,
     onPickVoice: () -> Unit,
+    onSelectProfile: (String) -> Unit,
+    onNewProfile: () -> Unit,
     onSave: () -> Unit,
 ) {
     val c = state.config
     var modelMenu by remember { mutableStateOf(false) }
+    var profileMenu by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
         LazyColumn(
@@ -337,8 +348,53 @@ private fun SettingsSheet(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Text("Configuración", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                Text("Las claves quedan cifradas con Android Keystore en este teléfono.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Perfiles", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(
+                    "Cada perfil guarda su propia voz, personalidad y conversación.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            item {
+                Box {
+                    OutlinedButton(onClick = { profileMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Perfil: ${c.profileName.ifBlank { "Sin nombre" }}")
+                    }
+                    DropdownMenu(expanded = profileMenu, onDismissRequest = { profileMenu = false }) {
+                        state.profiles.forEach { profile ->
+                            DropdownMenuItem(
+                                text = { Text(profile.name) },
+                                onClick = {
+                                    onSelectProfile(profile.id)
+                                    profileMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(onClick = onNewProfile, modifier = Modifier.fillMaxWidth()) {
+                    Text("+ Nuevo perfil")
+                }
+            }
+            item {
+                OutlinedTextField(
+                    value = c.profileName,
+                    onValueChange = { value -> onConfig { it.copy(profileName = value) } },
+                    label = { Text("Nombre del perfil") },
+                    placeholder = { Text("Ej. Lisandro") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                Text("Conexión", fontWeight = FontWeight.Black)
+                Text(
+                    "Las API keys son compartidas por todos los perfiles y quedan cifradas con Android Keystore.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             item {
                 OutlinedTextField(
@@ -388,7 +444,7 @@ private fun SettingsSheet(
                     OutlinedButton(onClick = onPickVoice, modifier = Modifier.fillMaxWidth()) {
                         Text(if (state.hasVoiceSample) "Cambiar · ${c.voiceName}" else "Cargar audio de referencia")
                     }
-                    Text("Ideal: 10–30 s, una sola voz, sin música.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                    Text("El audio queda guardado solamente en este perfil.", color = Muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
             item {
@@ -414,14 +470,22 @@ private fun SettingsSheet(
                 OutlinedTextField(
                     value = c.personality,
                     onValueChange = { value -> onConfig { it.copy(personality = value) } },
-                    label = { Text("Personalidad") },
+                    label = { Text("Personalidad (opcional)") },
+                    placeholder = { Text("Escribí acá cómo querés que hable este personaje") },
                     minLines = 8,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
+                Text(
+                    "El chat de este perfil se conserva automáticamente. Al reconectar, Gemini recibe el historial reciente para continuar la conversación.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            item {
                 Button(onClick = onSave, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                    Text("Guardar", fontWeight = FontWeight.Bold)
+                    Text("Guardar perfil", fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(32.dp))
             }
