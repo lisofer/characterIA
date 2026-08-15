@@ -4,6 +4,7 @@ import android.content.Context
 import com.lisofer.characteria.AppConfig
 import com.lisofer.characteria.CharacterProfileSummary
 import com.lisofer.characteria.ChatMessage
+import com.lisofer.characteria.DEFAULT_GEMINI_MODEL
 import com.lisofer.characteria.Speaker
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,8 +18,11 @@ class ProfileStore(context: Context) {
     private fun configFile(id: String) = File(profileDir(id), "profile.json")
     private fun voiceFile(id: String) = File(profileDir(id), "voice_sample.bin")
     private fun chatFile(id: String) = File(profileDir(id), "chat.json")
+    private fun canonicalGroupIds(profileIds: List<String>): List<String> =
+        profileIds.distinct().sorted()
+
     private fun groupChatFile(profileIds: List<String>): File {
-        val key = profileIds.distinct().sorted().joinToString("__")
+        val key = canonicalGroupIds(profileIds).joinToString("__")
         return File(groupRoot, "$key.json")
     }
 
@@ -39,7 +43,12 @@ class ProfileStore(context: Context) {
         ?.toList()
         ?: emptyList()
 
-    fun loadProfile(id: String, geminiKey: String, fishKey: String): AppConfig? = runCatching {
+    fun loadProfile(
+        id: String,
+        geminiKey: String,
+        fishKey: String,
+        geminiModel: String = DEFAULT_GEMINI_MODEL,
+    ): AppConfig? = runCatching {
         val file = configFile(id)
         if (!file.exists()) return null
         val json = JSONObject(file.readText())
@@ -48,7 +57,7 @@ class ProfileStore(context: Context) {
             profileName = json.optString("name"),
             geminiApiKey = geminiKey,
             fishApiKey = fishKey,
-            geminiModel = json.optString("model", "gemini-3.1-flash-live-preview"),
+            geminiModel = geminiModel,
             personality = json.optString("personality", ""),
             voiceTranscript = json.optString("voiceTranscript", ""),
             voiceName = json.optString("voiceName", ""),
@@ -66,7 +75,6 @@ class ProfileStore(context: Context) {
 
         val json = JSONObject()
             .put("name", config.profileName.trim())
-            .put("model", config.geminiModel)
             .put("personality", config.personality)
             .put("voiceTranscript", config.voiceTranscript)
             .put("voiceName", config.voiceName)
@@ -105,17 +113,17 @@ class ProfileStore(context: Context) {
     }
 
     fun saveGroupChat(profileIds: List<String>, messages: List<ChatMessage>) {
-        if (profileIds.distinct().size != 2) return
+        if (canonicalGroupIds(profileIds).size != 2) return
         writeMessages(groupChatFile(profileIds), messages)
     }
 
     fun loadGroupChat(profileIds: List<String>): List<ChatMessage> {
-        if (profileIds.distinct().size != 2) return emptyList()
+        if (canonicalGroupIds(profileIds).size != 2) return emptyList()
         return readMessages(groupChatFile(profileIds))
     }
 
     fun clearGroupChat(profileIds: List<String>) {
-        if (profileIds.distinct().size != 2) return
+        if (canonicalGroupIds(profileIds).size != 2) return
         groupChatFile(profileIds).delete()
     }
 
