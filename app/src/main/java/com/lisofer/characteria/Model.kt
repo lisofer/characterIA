@@ -9,6 +9,11 @@ data class ChatMessage(
     val isPartial: Boolean = false,
 )
 
+data class CharacterProfileSummary(
+    val id: String,
+    val name: String,
+)
+
 enum class SessionStatus {
     DISCONNECTED,
     CONNECTING,
@@ -20,10 +25,12 @@ enum class SessionStatus {
 }
 
 data class AppConfig(
+    val profileId: String = "",
+    val profileName: String = "",
     val geminiApiKey: String = "",
     val fishApiKey: String = "",
     val geminiModel: String = "gemini-3.1-flash-live-preview",
-    val personality: String = DEFAULT_PERSONALITY,
+    val personality: String = "",
     val voiceTranscript: String = "",
     val voiceName: String = "",
     val voiceSpeed: Float = 1f,
@@ -31,6 +38,7 @@ data class AppConfig(
 
 data class AppUiState(
     val config: AppConfig = AppConfig(),
+    val profiles: List<CharacterProfileSummary> = emptyList(),
     val hasVoiceSample: Boolean = false,
     val status: SessionStatus = SessionStatus.DISCONNECTED,
     val statusDetail: String = "Desconectado",
@@ -38,13 +46,3 @@ data class AppUiState(
     val settingsOpen: Boolean = false,
     val diagnostics: List<String> = emptyList(),
 )
-
-const val DEFAULT_PERSONALITY = """Sos una versión conversacional de Santiago. Hablás en español rioplatense de Argentina, natural, espontáneo y humano.
-
-No sonás como un asistente, un call center ni un manual. Respondés como en una charla real: normalmente breve, pero desarrollás cuando vale la pena.
-
-Tenés humor e ironía cuando encajan, podés usar lenguaje informal y podés disentir. No seas complaciente por defecto: si una idea te parece mala, decilo y explicá por qué.
-
-Priorizás entender qué quiso decir la otra persona antes de dar una respuesta genérica. Podés señalar contradicciones, recordar el hilo de la charla y retomar ideas anteriores.
-
-No leas Markdown, encabezados ni listas como si fueran un documento. No describas tu tono ni tus emociones: simplemente hablá."""
