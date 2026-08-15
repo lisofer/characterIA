@@ -1,5 +1,6 @@
 package com.lisofer.characteria.gemini
 
+import android.os.SystemClock
 import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ class GeminiLiveClient(
     interface Listener {
         fun onStatus(message: String)
         fun onReady(resumed: Boolean)
+        fun onModelChanged(model: String, reason: String)
         fun onInputTranscript(fullText: String)
         fun onOutputTranscript(delta: String, fullText: String)
         fun onTurnComplete()
@@ -42,6 +44,8 @@ class GeminiLiveClient(
         val model: String,
         val personality: String,
         val history: List<HistoryTurn> = emptyList(),
+        val fallbackModels: List<String> = emptyList(),
+        val enableGoogleSearch: Boolean = true,
     )
 
     private val client = OkHttpClient.Builder()
@@ -56,10 +60,13 @@ class GeminiLiveClient(
     @Volatile private var hasEverBeenReady = false
     @Volatile private var config: Config? = null
     @Volatile private var sessionHandle: String? = null
+    @Volatile private var lastReadyAtMs: Long = 0L
 
     private val reconnectScheduled = AtomicBoolean(false)
     private var reconnectJob: Job? = null
     private var setupTimeoutJob: Job? = null
+    private var stabilityJob: Job? = null
+    private var reconnectAttempts = 0
 
     private val inputTranscript = TranscriptAccumulator()
     private val outputTranscript = TranscriptAccumulator()
@@ -70,6 +77,8 @@ class GeminiLiveClient(
         desiredConnected = true
         hasEverBeenReady = false
         sessionHandle = null
+        reconnectAttempts = 0
+        lastReadyAtMs = 0L
         inputTranscript.reset()
         outputTranscript.reset()
         openSocket(isReconnect = false)
@@ -82,6 +91,7 @@ class GeminiLiveClient(
     fun disconnect() {
         desiredConnected = false
         sessionHandle = null
+        reconnectAttempts = 0
         disconnectInternal(closeSocket = true)
         inputTranscript.reset()
         outputTranscript.reset()
@@ -92,6 +102,8 @@ class GeminiLiveClient(
         reconnectJob = null
         setupTimeoutJob?.cancel()
         setupTimeoutJob = null
+        stabilityJob?.cancel()
+        stabilityJob = null
         reconnectScheduled.set(false)
         setupComplete = false
         if (closeSocket) {
@@ -123,6 +135,7 @@ class GeminiLiveClient(
         val actuallyResuming = isReconnect && !resumeHandle.isNullOrBlank()
         setupComplete = false
         setupTimeoutJob?.cancel()
+        stabilityJob?.cancel()
         listener.onStatus(if (isReconnect) "Reconectando Gemini…" else "Conectando Gemini…")
 
         val request = Request.Builder()
@@ -136,7 +149,10 @@ class GeminiLiveClient(
         val callback = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (webSocket !== socket) return
-                listener.onDiagnostic("Gemini WebSocket abierto · HTTP ${response.code}${if (actuallyResuming) " · reanudando" else ""}")
+                listener.onDiagnostic(
+                    "Gemini WebSocket abierto · ${cfg.model} · HTTP ${response.code}" +
+                        if (actuallyResuming) " · reanudando" else ""
+                )
 
                 val payload = buildSetup(cfg, resumeHandle).toString()
                 val sent = webSocket.send(payload)
@@ -147,9 +163,11 @@ class GeminiLiveClient(
                     delay(12_000)
                     if (desiredConnected && webSocket === socket && !setupComplete) {
                         listener.onDiagnostic("Gemini: timeout esperando setupComplete")
-                        listener.onError("Gemini no confirmó la sesión en 12 s. Revisá modelo/API key; mirá Diagnóstico para el detalle.")
-                        desiredConnected = false
-                        webSocket.cancel()
+                        if (!tryFallbackModel(webSocket, cfg.model, "timeout de conexión")) {
+                            desiredConnected = false
+                            listener.onError("Gemini no confirmó la sesión en 12 s. Revisá la API key o la cuota disponible.")
+                            webSocket.cancel()
+                        }
                     }
                 }
             }
@@ -171,9 +189,15 @@ class GeminiLiveClient(
                     if (root.has("error")) {
                         val error = root.opt("error")?.toString() ?: "error desconocido"
                         listener.onDiagnostic("Gemini error de servidor: $error")
-                        listener.onError("Gemini rechazó la sesión: $error")
+                        if (isQuotaError(error) && tryFallbackModel(webSocket, cfg.model, error)) return
+
                         desiredConnected = false
-                        socket?.cancel()
+                        listener.onError(
+                            if (isQuotaError(error)) "Se agotó la cuota disponible de los modelos Gemini Live."
+                            else "Gemini rechazó la sesión: $error"
+                        )
+                        socket = null
+                        webSocket.cancel()
                         return
                     }
                     handleMessage(webSocket, root, resumedConnection)
@@ -196,6 +220,11 @@ class GeminiLiveClient(
 
                 if (!desiredConnected) return
 
+                val rapid1011 = code == 1011 && wasReadyOnlyBriefly()
+                if ((isQuotaError(reason) || rapid1011) && tryFallbackModel(webSocket, cfg.model, "cierre $code ${reason.ifBlank { "sin motivo" }}")) {
+                    return
+                }
+
                 if (hasEverBeenReady) {
                     scheduleReconnect()
                 } else {
@@ -216,6 +245,9 @@ class GeminiLiveClient(
 
                 if (!desiredConnected) return
 
+                val likelyQuota = isQuotaError(detail) || (detail.contains("1011") && wasReadyOnlyBriefly())
+                if (likelyQuota && tryFallbackModel(webSocket, cfg.model, detail)) return
+
                 if (hasEverBeenReady) {
                     scheduleReconnect()
                 } else {
@@ -228,9 +260,24 @@ class GeminiLiveClient(
         socket = client.newWebSocket(request, callback)
     }
 
-    private fun scheduleReconnect(delayMs: Long = 700, rolloverSocket: WebSocket? = null) {
+    private fun scheduleReconnect(
+        delayMs: Long = 700,
+        rolloverSocket: WebSocket? = null,
+        countAttempt: Boolean = true,
+    ) {
         if (!desiredConnected || !reconnectScheduled.compareAndSet(false, true)) return
-        listener.onStatus("Reconectando Gemini…")
+
+        if (countAttempt) {
+            reconnectAttempts += 1
+            if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+                reconnectScheduled.set(false)
+                desiredConnected = false
+                listener.onError("Gemini no pudo estabilizar la conexión después de $MAX_RECONNECT_ATTEMPTS intentos.")
+                return
+            }
+        }
+
+        listener.onStatus(if (rolloverSocket != null) "Renovando sesión Gemini…" else "Reconectando Gemini…")
         reconnectJob = scope.launch(Dispatchers.IO) {
             delay(delayMs)
             if (!desiredConnected) {
@@ -246,6 +293,38 @@ class GeminiLiveClient(
             reconnectScheduled.set(false)
             if (desiredConnected) openSocket(isReconnect = true)
         }
+    }
+
+    private fun tryFallbackModel(failedSocket: WebSocket, failedModel: String, reason: String): Boolean {
+        val cfg = config ?: return false
+        if (cfg.model != failedModel) return true
+
+        val candidates = buildList {
+            add(cfg.model)
+            cfg.fallbackModels.forEach { model -> if (model !in this) add(model) }
+        }
+        val currentIndex = candidates.indexOf(failedModel).coerceAtLeast(0)
+        val nextModel = candidates.drop(currentIndex + 1).firstOrNull() ?: return false
+
+        listener.onDiagnostic("Gemini cuota/fallo rápido en $failedModel · cambio automático a $nextModel")
+        config = cfg.copy(model = nextModel)
+        sessionHandle = null
+        setupComplete = false
+        hasEverBeenReady = false
+        reconnectAttempts = 0
+        lastReadyAtMs = 0L
+        reconnectJob?.cancel()
+        stabilityJob?.cancel()
+        reconnectScheduled.set(false)
+        listener.onModelChanged(nextModel, reason)
+
+        if (failedSocket === socket) socket = null
+        runCatching { failedSocket.cancel() }
+        scope.launch(Dispatchers.IO) {
+            delay(180)
+            if (desiredConnected && config?.model == nextModel) openSocket(isReconnect = false)
+        }
+        return true
     }
 
     private fun buildSetup(cfg: Config, resumeHandle: String?): JSONObject {
@@ -268,10 +347,6 @@ class GeminiLiveClient(
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
             .put(
-                "tools",
-                JSONArray().put(JSONObject().put("googleSearch", JSONObject()))
-            )
-            .put(
                 "contextWindowCompression",
                 JSONObject()
                     .put("triggerTokens", "25000")
@@ -283,6 +358,13 @@ class GeminiLiveClient(
                     resumeHandle?.takeIf { it.isNotBlank() }?.let { put("handle", it) }
                 }
             )
+
+        if (cfg.enableGoogleSearch) {
+            setup.put(
+                "tools",
+                JSONArray().put(JSONObject().put("googleSearch", JSONObject()))
+            )
+        }
 
         if (cfg.personality.isNotBlank()) {
             setup.put(
@@ -348,17 +430,26 @@ class GeminiLiveClient(
             }
             setupComplete = true
             hasEverBeenReady = true
+            lastReadyAtMs = SystemClock.elapsedRealtime()
             inputTranscript.reset()
             outputTranscript.reset()
             listener.onDiagnostic(if (resumedConnection) "Gemini setupComplete · sesión reanudada" else "Gemini setupComplete")
             listener.onReady(resumedConnection)
+
+            stabilityJob?.cancel()
+            stabilityJob = scope.launch(Dispatchers.IO) {
+                delay(STABLE_CONNECTION_MS)
+                if (desiredConnected && webSocket === socket && setupComplete) {
+                    reconnectAttempts = 0
+                    listener.onDiagnostic("Gemini conexión estable · contador de reconexión reiniciado")
+                }
+            }
         }
 
         root.optJSONObject("goAway")?.let { goAway ->
             listener.onDiagnostic("Gemini GoAway: ${goAway.opt("timeLeft")}")
             if (desiredConnected && !sessionHandle.isNullOrBlank()) {
-                listener.onStatus("Renovando sesión Gemini…")
-                scheduleReconnect(delayMs = 120, rolloverSocket = webSocket)
+                scheduleReconnect(delayMs = 120, rolloverSocket = webSocket, countAttempt = false)
             } else {
                 listener.onStatus("Gemini va a renovar la conexión…")
             }
@@ -394,6 +485,23 @@ class GeminiLiveClient(
         }
     }
 
+    private fun wasReadyOnlyBriefly(): Boolean {
+        val readyAt = lastReadyAtMs
+        return readyAt > 0L && SystemClock.elapsedRealtime() - readyAt < RAPID_FAILURE_MS
+    }
+
+    private fun isQuotaError(text: String): Boolean {
+        val value = text.lowercase()
+        return value.contains("resource_exhausted") ||
+            value.contains("resource exhausted") ||
+            value.contains("quota") ||
+            value.contains("rate limit") ||
+            value.contains("rate_limit") ||
+            value.contains("too many requests") ||
+            value.contains("429") ||
+            value.contains("exceeded your current")
+    }
+
     private class TranscriptAccumulator {
         data class Update(val delta: String, val full: String)
         private var value = ""
@@ -426,5 +534,11 @@ class GeminiLiveClient(
             value += delta
             return Update(delta, value)
         }
+    }
+
+    companion object {
+        private const val MAX_RECONNECT_ATTEMPTS = 3
+        private const val STABLE_CONNECTION_MS = 15_000L
+        private const val RAPID_FAILURE_MS = 8_000L
     }
 }
