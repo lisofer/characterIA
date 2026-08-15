@@ -20,6 +20,8 @@ enum class SessionStatus {
     LISTENING,
     THINKING,
     SPEAKING,
+    INVOCATION_ARMED,
+    INVOCATION_ACTIVE,
     RECONNECTING,
     ERROR,
 }
@@ -44,5 +46,7 @@ data class AppUiState(
     val statusDetail: String = "Desconectado",
     val messages: List<ChatMessage> = emptyList(),
     val settingsOpen: Boolean = false,
+    val backgroundModeEnabled: Boolean = false,
+    val invocationActive: Boolean = false,
     val diagnostics: List<String> = emptyList(),
 )
