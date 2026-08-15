@@ -299,12 +299,10 @@ class GeminiLiveClient(
         val cfg = config ?: return false
         if (cfg.model != failedModel) return true
 
-        val candidates = buildList {
-            add(cfg.model)
-            cfg.fallbackModels.forEach { model -> if (model !in this) add(model) }
-        }
-        val currentIndex = candidates.indexOf(failedModel).coerceAtLeast(0)
-        val nextModel = candidates.drop(currentIndex + 1).firstOrNull() ?: return false
+        val chain = cfg.fallbackModels.distinct().ifEmpty { listOf(cfg.model) }
+        val currentIndex = chain.indexOf(failedModel)
+        if (currentIndex < 0) return false
+        val nextModel = chain.getOrNull(currentIndex + 1) ?: return false
 
         listener.onDiagnostic("Gemini cuota/fallo rápido en $failedModel · cambio automático a $nextModel")
         config = cfg.copy(model = nextModel)
