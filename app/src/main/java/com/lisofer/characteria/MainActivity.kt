@@ -293,7 +293,7 @@ private fun StatusHero(state: AppUiState) {
                 SessionStatus.INVOCATION_ARMED -> "Segundo plano · «[personaje], are you here?»"
                 SessionStatus.INVOCATION_ACTIVE -> "Cambiar: «[personaje], are you here?» · salir: «get out»"
                 SessionStatus.RECONNECTING -> "Recuperando el contexto del perfil"
-                else -> state.config.geminiModel
+                else -> state.activeGeminiModel
             }
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Muted)
         }
@@ -465,7 +465,7 @@ private fun SettingsSheet(
             item {
                 Box {
                     OutlinedButton(onClick = { modelMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Modelo: ${c.geminiModel}")
+                        Text("Modelo preferido: ${c.geminiModel}")
                     }
                     DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
                         GEMINI_LIVE_MODELS.forEach { model ->
@@ -480,7 +480,11 @@ private fun SettingsSheet(
                     }
                 }
                 Text(
-                    "Si el modelo agota cuota, CharacterIA baja automáticamente al siguiente modelo Live gratuito disponible.",
+                    if (state.activeGeminiModel != c.geminiModel) {
+                        "Activo ahora: ${state.activeGeminiModel} por fallback. Si cambiás la API de Gemini, vuelve automáticamente al modelo preferido."
+                    } else {
+                        "Activo ahora: ${state.activeGeminiModel}. Si agota cuota, CharacterIA baja temporalmente al siguiente modelo Live disponible."
+                    },
                     color = Muted,
                     style = MaterialTheme.typography.labelSmall,
                 )

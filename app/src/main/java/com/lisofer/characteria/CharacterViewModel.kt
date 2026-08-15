@@ -122,15 +122,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         override fun onModelChanged(model: String, reason: String) {
-            settings.setGeminiModel(model)
+            settings.setActiveGeminiModel(model)
             _ui.update { state ->
                 state.copy(
-                    config = state.config.copy(geminiModel = model),
+                    activeGeminiModel = model,
                     status = SessionStatus.CONNECTING,
                     statusDetail = "Cambiando automáticamente a $model…",
                 )
             }
-            diag("Modelo global cambiado automáticamente a $model · $reason")
+            diag("Fallback temporal: modelo activo $model · preferido ${settings.geminiModel()} · $reason")
         }
 
         override fun onInputTranscript(fullText: String) {
@@ -369,8 +369,9 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             backgroundModeEnabled = false,
             invocationActive = false,
             activeCharacterNames = emptyList(),
+            activeGeminiModel = settings.activeGeminiModel(),
         )
-        diag("Perfil cargado: ${config.profileName} · ${chat.size} mensajes guardados")
+        diag("Perfil cargado: ${config.profileName} · ${chat.size} mensajes guardados · Gemini activo ${settings.activeGeminiModel()}")
     }
 
     fun setSettingsOpen(open: Boolean) = _ui.update { it.copy(settingsOpen = open) }
@@ -382,8 +383,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     fun selectGeminiModel(model: String) {
         val selected = normalizeGeminiModel(model)
         settings.setGeminiModel(selected)
-        _ui.update { state -> state.copy(config = state.config.copy(geminiModel = selected)) }
-        diag("Modelo global seleccionado: $selected")
+        resetRuntimeForConnectionChange("Modelo Gemini cambiado")
+        _ui.update { state ->
+            state.copy(
+                config = state.config.copy(geminiModel = selected),
+                activeGeminiModel = selected,
+                statusDetail = if (state.status == SessionStatus.DISCONNECTED) "Modelo preferido: $selected" else state.statusDetail,
+            )
+        }
+        diag("Modelo global preferido y activo seleccionado: $selected")
     }
 
     fun newProfile() {
@@ -424,7 +432,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
-        settings.saveGlobalConnection(config.geminiApiKey, config.fishApiKey, config.geminiModel)
+        val geminiKeyChanged = settings.saveGlobalConnection(
+            config.geminiApiKey,
+            config.fishApiKey,
+            config.geminiModel,
+        )
+        if (geminiKeyChanged) {
+            resetRuntimeForConnectionChange("API key de Gemini actualizada")
+            diag("API Gemini nueva · sesión anterior descartada · vuelvo al modelo preferido ${settings.geminiModel()}")
+        }
         profiles.saveProfile(config)
         pendingVoiceBytes?.let { bytes -> profiles.saveVoice(config.profileId, bytes) }
         pendingVoiceBytes = null
@@ -435,9 +451,43 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 profiles = profiles.listProfiles(),
                 hasVoiceSample = profiles.hasVoice(config.profileId),
                 settingsOpen = false,
+                activeGeminiModel = settings.activeGeminiModel(),
+                status = if (geminiKeyChanged) SessionStatus.DISCONNECTED else it.status,
+                statusDetail = if (geminiKeyChanged) {
+                    "API Gemini actualizada · listo con ${settings.activeGeminiModel()}"
+                } else it.statusDetail,
             )
         }
         diag("Perfil guardado: ${config.profileName}")
+    }
+
+    private fun resetRuntimeForConnectionChange(reason: String) {
+        if (!desiredConnected && !_ui.value.backgroundModeEnabled) return
+
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
+        finalizeCurrentMessages()
+        persistConversation()
+        desiredConnected = false
+        mic.stop()
+        gemini.disconnect()
+        cancelFish(reason)
+        player.interrupt()
+        InvocationForegroundService.stop(getApplication())
+        connectionPurpose = ConnectionPurpose.NORMAL
+        pendingInvocationProfileIds = null
+        activeBackgroundProfileIds = emptyList()
+        resetGroupOutput()
+        _ui.update { state ->
+            state.copy(
+                status = SessionStatus.DISCONNECTED,
+                statusDetail = reason,
+                backgroundModeEnabled = false,
+                invocationActive = false,
+                activeCharacterNames = emptyList(),
+            )
+        }
     }
 
     fun importVoiceSample(uri: Uri) {
@@ -505,6 +555,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         resetGroupOutput()
 
         val c = _ui.value.config
+        val activeModel = settings.activeGeminiModel()
         val history = historyForSingle(_ui.value.messages, c.profileId)
         _ui.update {
             it.copy(
@@ -518,10 +569,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = c.geminiApiKey,
-                model = c.geminiModel,
+                model = activeModel,
                 personality = c.personality,
                 history = history,
-                fallbackModels = geminiFallbackChain(c.geminiModel),
+                fallbackModels = geminiFallbackChain(activeModel),
                 enableGoogleSearch = true,
             )
         )
@@ -551,6 +602,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         saveConfig()
 
         val c = _ui.value.config
+        val activeModel = settings.activeGeminiModel()
         val context = getApplication<Application>()
         runCatching {
             InvocationForegroundService.start(context, "CharacterIA", active = false)
@@ -590,10 +642,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = c.geminiApiKey,
-                model = c.geminiModel,
+                model = activeModel,
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
-                fallbackModels = geminiFallbackChain(c.geminiModel),
+                fallbackModels = geminiFallbackChain(activeModel),
                 enableGoogleSearch = false,
             )
         )
@@ -679,13 +731,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         val personality = if (isGroup) buildGroupPersonality(targetConfigs) else first.personality
         val history = if (isGroup) historyForGroup(targetChat) else historyForSingle(targetChat, first.profileId)
+        val activeModel = settings.activeGeminiModel()
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = first.geminiApiKey,
-                model = first.geminiModel,
+                model = activeModel,
                 personality = personality,
                 history = history,
-                fallbackModels = geminiFallbackChain(first.geminiModel),
+                fallbackModels = geminiFallbackChain(activeModel),
                 enableGoogleSearch = true,
             )
         )
@@ -725,13 +778,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         InvocationForegroundService.update("CharacterIA", active = false)
 
         val c = _ui.value.config
+        val activeModel = settings.activeGeminiModel()
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = c.geminiApiKey,
-                model = c.geminiModel,
+                model = activeModel,
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
-                fallbackModels = geminiFallbackChain(c.geminiModel),
+                fallbackModels = geminiFallbackChain(activeModel),
                 enableGoogleSearch = false,
             )
         )
