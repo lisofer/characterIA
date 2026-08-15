@@ -62,6 +62,7 @@ data class AppConfig(
     val profileName: String = "",
     val geminiApiKey: String = "",
     val fishApiKey: String = "",
+    /** Modelo preferido elegido por el usuario. */
     val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val personality: String = "",
     val voiceTranscript: String = "",
@@ -80,5 +81,7 @@ data class AppUiState(
     val backgroundModeEnabled: Boolean = false,
     val invocationActive: Boolean = false,
     val activeCharacterNames: List<String> = emptyList(),
+    /** Puede diferir del preferido cuando hay fallback por cuota. */
+    val activeGeminiModel: String = DEFAULT_GEMINI_MODEL,
     val diagnostics: List<String> = emptyList(),
 )
