@@ -64,8 +64,8 @@ class InvocationForegroundService : Service() {
         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
         .setContentTitle(if (active) "$profileName está activo" else "CharacterIA · $profileName")
         .setContentText(
-            if (active) "Decí «podés retirarte» para apagarlo."
-            else "Esperando «yo te invoco»."
+            if (active) "Cambiar: «nombre, are you here?» · cerrar: «get out»."
+            else "Esperando «nombre del personaje, are you here?»."
         )
         .setOngoing(true)
         .setOnlyAlertOnce(true)

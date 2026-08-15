@@ -289,8 +289,8 @@ private fun StatusHero(state: AppUiState) {
             val subtitle = when (state.status) {
                 SessionStatus.LISTENING -> "Micrófono activo · podés interrumpir"
                 SessionStatus.SPEAKING -> "Fish Audio · ${state.config.profileName.ifBlank { "voz clonada" }}"
-                SessionStatus.INVOCATION_ARMED -> "Segundo plano · decí «yo te invoco»"
-                SessionStatus.INVOCATION_ACTIVE -> "Segundo plano · decí «podés retirarte»"
+                SessionStatus.INVOCATION_ARMED -> "Segundo plano · «[personaje], are you here?»"
+                SessionStatus.INVOCATION_ACTIVE -> "Cambiar: «[personaje], are you here?» · salir: «get out»"
                 SessionStatus.RECONNECTING -> "Recuperando el contexto del perfil"
                 else -> state.config.geminiModel
             }

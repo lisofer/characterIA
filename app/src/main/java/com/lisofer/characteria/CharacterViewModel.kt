@@ -49,7 +49,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var connectionPurpose = ConnectionPurpose.NORMAL
     private var wakeDetected = false
     private var wakeTranscript = ""
-    private var pendingInvocationText: String? = null
+    private var pendingInvocationProfileId: String? = null
 
     init {
         initializeProfiles()
@@ -71,12 +71,12 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.update {
                         it.copy(
                             status = SessionStatus.INVOCATION_ARMED,
-                            statusDetail = "Esperando «yo te invoco»",
+                            statusDetail = "Esperando «[personaje], are you here?»",
                             backgroundModeEnabled = true,
                             invocationActive = false,
                         )
                     }
-                    InvocationForegroundService.update(name, active = false)
+                    InvocationForegroundService.update("CharacterIA", active = false)
                     diag("Modo invocación armado")
                 }
 
@@ -93,18 +93,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     InvocationForegroundService.update(name, active = true)
 
-                    pendingInvocationText?.takeIf { it.isNotBlank() }?.let { text ->
-                        pendingInvocationText = null
-                        ensureFish()
-                        updateMessage(Speaker.USER, text, partial = false)
-                        finalizeUserMessage()
-                        persistConversation()
-                        if (gemini.sendTextTurn(text)) {
-                            diag("Frase de invocación entregada al personaje")
-                        } else {
-                            diag("No se pudo entregar la frase de invocación")
-                        }
-                    }
                 }
 
                 ConnectionPurpose.NORMAL -> {
@@ -118,22 +106,31 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             val normalized = normalizeCommand(fullText)
 
             if (_ui.value.backgroundModeEnabled) {
-                if (normalized.contains(RETIRE_PHRASE)) {
-                    if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
-                        updateMessage(Speaker.USER, fullText, partial = false)
-                        finalizeUserMessage()
-                        persistConversation()
+                if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE && normalized.contains(EXIT_PHRASE)) {
+                    discardCurrentUserMessage()
+                    returnToWakeMode("Comando «get out» detectado")
+                    return
+                }
+
+                val targetProfile = findInvocationProfile(normalized)
+                if (targetProfile != null) {
+                    discardCurrentUserMessage()
+                    if (connectionPurpose == ConnectionPurpose.WAKE) {
+                        wakeTranscript = fullText
+                        wakeDetected = true
+                        pendingInvocationProfileId = targetProfile.id
+                        _ui.update { it.copy(statusDetail = "Invocando a ${targetProfile.name}…") }
+                    } else if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
+                        wakeDetected = false
+                        wakeTranscript = ""
+                        pendingInvocationProfileId = null
+                        activateBackgroundCharacter(targetProfile.id)
                     }
-                    stopBackgroundMode("Comando «podés retirarte» detectado")
                     return
                 }
 
                 if (connectionPurpose == ConnectionPurpose.WAKE) {
                     wakeTranscript = fullText
-                    if (normalized.contains(WAKE_PHRASE)) {
-                        wakeDetected = true
-                        _ui.update { it.copy(statusDetail = "Invocación detectada…") }
-                    }
                     return
                 }
             }
@@ -179,11 +176,12 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         override fun onTurnComplete() {
             if (connectionPurpose == ConnectionPurpose.WAKE) {
-                if (wakeDetected) {
-                    val transcript = wakeTranscript
+                val profileId = pendingInvocationProfileId
+                if (wakeDetected && profileId != null) {
                     wakeDetected = false
                     wakeTranscript = ""
-                    activateBackgroundCharacter(transcript)
+                    pendingInvocationProfileId = null
+                    activateBackgroundCharacter(profileId)
                 } else {
                     wakeTranscript = ""
                 }
@@ -228,7 +226,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 connectionPurpose = ConnectionPurpose.NORMAL
                 wakeDetected = false
                 wakeTranscript = ""
-                pendingInvocationText = null
+                pendingInvocationProfileId = null
                 _ui.update {
                     it.copy(
                         status = SessionStatus.ERROR,
@@ -461,7 +459,12 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun startBackgroundMode() {
-        validateForConnect()?.let { error ->
+        val armError = when {
+            _ui.value.config.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
+            _ui.value.profiles.isEmpty() -> "No hay perfiles para invocar"
+            else -> null
+        }
+        armError?.let { error ->
             _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = error, settingsOpen = true) }
             return
         }
@@ -488,7 +491,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         connectionPurpose = ConnectionPurpose.WAKE
         wakeDetected = false
         wakeTranscript = ""
-        pendingInvocationText = null
+        pendingInvocationProfileId = null
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
@@ -514,36 +517,125 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    private fun activateBackgroundCharacter(triggerText: String) {
-        if (!_ui.value.backgroundModeEnabled || connectionPurpose != ConnectionPurpose.WAKE) return
+    private fun activateBackgroundCharacter(profileId: String) {
+        if (!_ui.value.backgroundModeEnabled) return
 
-        val c = _ui.value.config
-        val history = historyForGemini(_ui.value.messages)
+        val targetConfig = profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: run {
+            diag("No se encontró el perfil invocado: $profileId")
+            return
+        }
+        val targetHasVoice = profiles.hasVoice(profileId)
+        val validationError = when {
+            targetConfig.profileName.isBlank() -> "El perfil no tiene nombre"
+            targetConfig.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
+            targetConfig.fishApiKey.isBlank() -> "Falta la API key de Fish Audio"
+            !targetHasVoice -> "${targetConfig.profileName} no tiene muestra de voz"
+            targetConfig.voiceTranscript.isBlank() -> "${targetConfig.profileName} no tiene transcripción de voz"
+            else -> null
+        }
+        if (validationError != null) {
+            _ui.update { it.copy(statusDetail = validationError) }
+            diag(validationError)
+            return
+        }
+
+        val previousName = _ui.value.config.profileName
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
+        if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
+            finalizeCurrentMessages()
+            persistConversation()
+        }
         mic.stop()
         gemini.disconnect()
+        cancelFish("Cambio de personaje")
+        player.interrupt()
+
+        val targetChat = profiles.loadChat(profileId)
+        ids.set((targetChat.maxOfOrNull { it.id } ?: 0L) + 1L)
+        pendingVoiceBytes = null
+        currentUserMessageId = null
+        currentAiMessageId = null
+        settings.setActiveProfileId(profileId)
         connectionPurpose = ConnectionPurpose.BACKGROUND_ACTIVE
-        pendingInvocationText = triggerText
         wakeDetected = false
         wakeTranscript = ""
+        pendingInvocationProfileId = null
+
+        _ui.update {
+            it.copy(
+                config = targetConfig,
+                profiles = profiles.listProfiles(),
+                hasVoiceSample = targetHasVoice,
+                messages = targetChat,
+                status = SessionStatus.CONNECTING,
+                statusDetail = "Invocando a ${targetConfig.profileName}…",
+                backgroundModeEnabled = true,
+                invocationActive = true,
+                settingsOpen = false,
+            )
+        }
+        InvocationForegroundService.update(targetConfig.profileName, active = true)
+
+        val history = historyForGemini(targetChat)
+        gemini.connect(
+            GeminiLiveClient.Config(
+                apiKey = targetConfig.geminiApiKey,
+                model = targetConfig.geminiModel,
+                personality = targetConfig.personality,
+                history = history,
+            )
+        )
+        if (previousName.isNotBlank() && previousName != targetConfig.profileName) {
+            diag("Cambio de personaje: $previousName → ${targetConfig.profileName}")
+        } else {
+            diag("Invocación: ${targetConfig.profileName}")
+        }
+        diag("Memoria cargada · ${history.size} mensajes")
+    }
+
+    private fun returnToWakeMode(reason: String) {
+        if (!_ui.value.backgroundModeEnabled) return
+
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
+        discardCurrentUserMessage()
+        finalizeAiMessage()
+        persistConversation()
+        mic.stop()
+        gemini.disconnect()
+        cancelFish(reason)
+        player.interrupt()
+
+        connectionPurpose = ConnectionPurpose.WAKE
+        wakeDetected = false
+        wakeTranscript = ""
+        pendingInvocationProfileId = null
+        currentUserMessageId = null
+        currentAiMessageId = null
 
         _ui.update {
             it.copy(
                 status = SessionStatus.CONNECTING,
-                statusDetail = "Invocando a ${c.profileName.ifBlank { "CharacterIA" }}…",
-                invocationActive = true,
+                statusDetail = "Cerrando conversación…",
+                backgroundModeEnabled = true,
+                invocationActive = false,
             )
         }
-        InvocationForegroundService.update(c.profileName.ifBlank { "CharacterIA" }, active = true)
+        InvocationForegroundService.update("CharacterIA", active = false)
 
+        val c = _ui.value.config
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = c.geminiApiKey,
                 model = c.geminiModel,
-                personality = c.personality,
-                history = history,
+                personality = WAKE_SYSTEM_PROMPT,
+                history = emptyList(),
             )
         )
-        diag("Invocación confirmada · memoria cargada (${history.size} mensajes)")
+        diag("$reason · vuelvo a esperar una invocación")
     }
 
     private fun stopBackgroundMode(reason: String) {
@@ -562,7 +654,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         connectionPurpose = ConnectionPurpose.NORMAL
         wakeDetected = false
         wakeTranscript = ""
-        pendingInvocationText = null
+        pendingInvocationProfileId = null
         _ui.update {
             it.copy(
                 status = SessionStatus.DISCONNECTED,
@@ -778,6 +870,26 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         diag("Chat del perfil borrado")
     }
 
+    private fun findInvocationProfile(normalizedText: String): CharacterProfileSummary? {
+        return _ui.value.profiles
+            .asSequence()
+            .map { profile -> profile to normalizeCommand(profile.name) }
+            .filter { (_, normalizedName) -> normalizedName.isNotBlank() }
+            .sortedByDescending { (_, normalizedName) -> normalizedName.length }
+            .firstOrNull { (_, normalizedName) ->
+                normalizedText.contains("$normalizedName $INVOCATION_SUFFIX")
+            }
+            ?.first
+    }
+
+    private fun discardCurrentUserMessage() {
+        val id = currentUserMessageId ?: return
+        _ui.update { state ->
+            state.copy(messages = state.messages.filterNot { it.id == id })
+        }
+        currentUserMessageId = null
+    }
+
     private fun normalizeCommand(text: String): String {
         val normalized = Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
         return normalized
@@ -807,8 +919,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     companion object {
-        private const val WAKE_PHRASE = "yo te invoco"
-        private const val RETIRE_PHRASE = "podes retirarte"
-        private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de una frase de activación. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar la frase «yo te invoco». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
+        private const val INVOCATION_SUFFIX = "are you here"
+        private const val EXIT_PHRASE = "get out"
+        private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
 }
