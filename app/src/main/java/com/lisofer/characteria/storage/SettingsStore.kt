@@ -2,42 +2,55 @@ package com.lisofer.characteria.storage
 
 import android.content.Context
 import com.lisofer.characteria.AppConfig
-import com.lisofer.characteria.DEFAULT_PERSONALITY
 import java.io.File
 
 class SettingsStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val secrets = SecretStore(context)
-    private val voiceFile = File(context.filesDir, "voice_sample.bin")
+    private val legacyVoiceFile = File(context.filesDir, "voice_sample.bin")
 
-    fun load(): AppConfig = AppConfig(
-        geminiApiKey = secrets.get("gemini"),
-        fishApiKey = secrets.get("fish"),
-        geminiModel = prefs.getString("model", "gemini-3.1-flash-live-preview")
-            ?: "gemini-3.1-flash-live-preview",
-        personality = prefs.getString("personality", DEFAULT_PERSONALITY) ?: DEFAULT_PERSONALITY,
-        voiceTranscript = prefs.getString("voiceTranscript", "") ?: "",
-        voiceName = prefs.getString("voiceName", "") ?: "",
-        voiceSpeed = prefs.getFloat("voiceSpeed", 1f),
-    )
+    fun geminiKey(): String = secrets.get("gemini")
+    fun fishKey(): String = secrets.get("fish")
 
-    fun save(config: AppConfig) {
-        secrets.put("gemini", config.geminiApiKey)
-        secrets.put("fish", config.fishApiKey)
-        prefs.edit()
-            .putString("model", config.geminiModel)
-            .putString("personality", config.personality)
-            .putString("voiceTranscript", config.voiceTranscript)
-            .putString("voiceName", config.voiceName)
-            .putFloat("voiceSpeed", config.voiceSpeed)
-            .apply()
+    fun saveGlobalKeys(geminiApiKey: String, fishApiKey: String) {
+        secrets.put("gemini", geminiApiKey)
+        secrets.put("fish", fishApiKey)
     }
 
-    fun saveVoice(bytes: ByteArray, displayName: String) {
-        voiceFile.writeBytes(bytes)
-        prefs.edit().putString("voiceName", displayName).apply()
+    fun activeProfileId(): String = prefs.getString("activeProfileId", "") ?: ""
+
+    fun setActiveProfileId(id: String) {
+        prefs.edit().putString("activeProfileId", id).apply()
     }
 
-    fun voiceBytes(): ByteArray? = if (voiceFile.exists()) voiceFile.readBytes() else null
-    fun hasVoice(): Boolean = voiceFile.exists() && voiceFile.length() > 0
+    fun profilesMigrated(): Boolean = prefs.getBoolean("profilesMigrated", false)
+
+    fun markProfilesMigrated() {
+        prefs.edit().putBoolean("profilesMigrated", true).apply()
+    }
+
+    fun loadLegacy(): AppConfig {
+        val oldPersonality = prefs.getString("personality", "") ?: ""
+        val personality = if (oldPersonality.startsWith("Sos una versión conversacional de Santiago.")) "" else oldPersonality
+        return AppConfig(
+            geminiApiKey = geminiKey(),
+            fishApiKey = fishKey(),
+            geminiModel = prefs.getString("model", "gemini-3.1-flash-live-preview")
+                ?: "gemini-3.1-flash-live-preview",
+            personality = personality,
+            voiceTranscript = prefs.getString("voiceTranscript", "") ?: "",
+            voiceName = prefs.getString("voiceName", "") ?: "",
+            voiceSpeed = prefs.getFloat("voiceSpeed", 1f),
+        )
+    }
+
+    fun hasLegacyProfileData(): Boolean =
+        legacyVoiceFile.exists() ||
+            prefs.contains("voiceTranscript") ||
+            prefs.contains("voiceName") ||
+            prefs.contains("voiceSpeed") ||
+            prefs.contains("personality")
+
+    fun legacyVoiceBytes(): ByteArray? =
+        if (legacyVoiceFile.exists() && legacyVoiceFile.length() > 0) legacyVoiceFile.readBytes() else null
 }
