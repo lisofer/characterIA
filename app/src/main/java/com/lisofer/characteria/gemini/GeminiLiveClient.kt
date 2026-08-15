@@ -32,10 +32,16 @@ class GeminiLiveClient(
         fun onDiagnostic(message: String)
     }
 
+    data class HistoryTurn(
+        val role: String,
+        val text: String,
+    )
+
     data class Config(
         val apiKey: String,
         val model: String,
         val personality: String,
+        val history: List<HistoryTurn> = emptyList(),
     )
 
     private val client = OkHttpClient.Builder()
@@ -65,6 +71,10 @@ class GeminiLiveClient(
         inputTranscript.reset()
         outputTranscript.reset()
         openSocket(isReconnect = false)
+    }
+
+    fun updateHistory(history: List<HistoryTurn>) {
+        config = config?.copy(history = history)
     }
 
     fun disconnect() {
@@ -140,16 +150,16 @@ class GeminiLiveClient(
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (webSocket !== socket) return
-                handleRawMessage(text)
+                handleRawMessage(webSocket, text)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 if (webSocket !== socket) return
                 listener.onDiagnostic("Gemini recibió frame binario (${bytes.size} bytes)")
-                handleRawMessage(bytes.utf8())
+                handleRawMessage(webSocket, bytes.utf8())
             }
 
-            private fun handleRawMessage(text: String) {
+            private fun handleRawMessage(webSocket: WebSocket, text: String) {
                 runCatching {
                     val root = JSONObject(text)
                     if (root.has("error")) {
@@ -160,7 +170,7 @@ class GeminiLiveClient(
                         socket?.cancel()
                         return
                     }
-                    handleMessage(root)
+                    handleMessage(webSocket, root)
                 }.onFailure {
                     listener.onDiagnostic("Gemini parse: ${it::class.simpleName}: ${it.message}")
                 }
@@ -209,8 +219,7 @@ class GeminiLiveClient(
             }
         }
 
-        val newSocket = client.newWebSocket(request, callback)
-        socket = newSocket
+        socket = client.newWebSocket(request, callback)
     }
 
     private fun scheduleReconnect() {
@@ -224,22 +233,11 @@ class GeminiLiveClient(
     }
 
     private fun buildSetup(cfg: Config): JSONObject {
-        // Keep the first connection deliberately conservative. These fields are
-        // all part of BidiGenerateContentSetup in Google's current Live WebSocket API.
-        // Session resumption/context compression can be reintroduced after the
-        // basic Android handshake is proven stable on-device.
         val setup = JSONObject()
             .put("model", "models/${cfg.model}")
             .put(
                 "generationConfig",
                 JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
-            )
-            .put(
-                "systemInstruction",
-                JSONObject().put(
-                    "parts",
-                    JSONArray().put(JSONObject().put("text", cfg.personality))
-                )
             )
             .put(
                 "realtimeInputConfig",
@@ -254,13 +252,58 @@ class GeminiLiveClient(
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
 
+        if (cfg.personality.isNotBlank()) {
+            setup.put(
+                "systemInstruction",
+                JSONObject().put(
+                    "parts",
+                    JSONArray().put(JSONObject().put("text", cfg.personality))
+                )
+            )
+        }
+
+        if (cfg.history.isNotEmpty()) {
+            setup.put(
+                "historyConfig",
+                JSONObject().put("initialHistoryInClientContent", true)
+            )
+        }
+
         return JSONObject().put("setup", setup)
     }
 
-    private fun handleMessage(root: JSONObject) {
+    private fun sendInitialHistory(webSocket: WebSocket, history: List<HistoryTurn>) {
+        if (history.isEmpty()) return
+        val turns = JSONArray()
+        history.forEach { turn ->
+            if (turn.text.isBlank()) return@forEach
+            turns.put(
+                JSONObject()
+                    .put("role", turn.role)
+                    .put("parts", JSONArray().put(JSONObject().put("text", turn.text)))
+            )
+        }
+        val payload = JSONObject().put(
+            "clientContent",
+            JSONObject()
+                .put("turns", turns)
+                .put("turnComplete", true)
+        )
+        val sent = webSocket.send(payload.toString())
+        listener.onDiagnostic(
+            if (sent) "Gemini historial inicial enviado · ${turns.length()} mensajes"
+            else "Gemini historial inicial NO pudo enviarse"
+        )
+    }
+
+    private fun handleMessage(webSocket: WebSocket, root: JSONObject) {
         if (root.has("setupComplete")) {
             setupTimeoutJob?.cancel()
             setupTimeoutJob = null
+            val cfg = config
+            if (cfg != null && cfg.history.isNotEmpty()) {
+                sendInitialHistory(webSocket, cfg.history)
+            }
             setupComplete = true
             hasEverBeenReady = true
             inputTranscript.reset()
