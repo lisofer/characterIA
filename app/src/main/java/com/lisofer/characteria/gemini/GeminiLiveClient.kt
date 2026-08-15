@@ -113,6 +113,20 @@ class GeminiLiveClient(
         socket?.send(message.toString())
     }
 
+    fun sendTextTurn(text: String): Boolean {
+        if (!setupComplete || text.isBlank()) return false
+        val turn = JSONObject()
+            .put("role", "user")
+            .put("parts", JSONArray().put(JSONObject().put("text", text)))
+        val message = JSONObject().put(
+            "clientContent",
+            JSONObject()
+                .put("turns", JSONArray().put(turn))
+                .put("turnComplete", true)
+        )
+        return socket?.send(message.toString()) == true
+    }
+
     private fun openSocket(isReconnect: Boolean) {
         val cfg = config ?: return
         setupComplete = false
