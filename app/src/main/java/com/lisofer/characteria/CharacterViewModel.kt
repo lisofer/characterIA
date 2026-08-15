@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.Normalizer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +28,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 class CharacterViewModel(application: Application) : AndroidViewModel(application) {
+    private enum class ConnectionPurpose { NORMAL, WAKE, BACKGROUND_ACTIVE }
+
     private val settings = SettingsStore(application)
     private val profiles = ProfileStore(application)
     private val mic = MicStreamer(application)
@@ -43,6 +46,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var turnFinalizeJob: Job? = null
     private var turnCompletePending = false
     private var desiredConnected = false
+    private var connectionPurpose = ConnectionPurpose.NORMAL
+    private var wakeDetected = false
+    private var wakeTranscript = ""
+    private var pendingInvocationText: String? = null
 
     init {
         initializeProfiles()
@@ -57,11 +64,80 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         override fun onReady(resumed: Boolean) {
             diag(if (resumed) "Gemini reanudado" else "Gemini listo")
-            startMic()
-            _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
+            when (connectionPurpose) {
+                ConnectionPurpose.WAKE -> {
+                    startMic()
+                    val name = _ui.value.config.profileName.ifBlank { "CharacterIA" }
+                    _ui.update {
+                        it.copy(
+                            status = SessionStatus.INVOCATION_ARMED,
+                            statusDetail = "Esperando «yo te invoco»",
+                            backgroundModeEnabled = true,
+                            invocationActive = false,
+                        )
+                    }
+                    InvocationForegroundService.update(name, active = false)
+                    diag("Modo invocación armado")
+                }
+
+                ConnectionPurpose.BACKGROUND_ACTIVE -> {
+                    startMic()
+                    val name = _ui.value.config.profileName.ifBlank { "CharacterIA" }
+                    _ui.update {
+                        it.copy(
+                            status = SessionStatus.INVOCATION_ACTIVE,
+                            statusDetail = "$name activo · escuchando",
+                            backgroundModeEnabled = true,
+                            invocationActive = true,
+                        )
+                    }
+                    InvocationForegroundService.update(name, active = true)
+
+                    pendingInvocationText?.takeIf { it.isNotBlank() }?.let { text ->
+                        pendingInvocationText = null
+                        ensureFish()
+                        updateMessage(Speaker.USER, text, partial = false)
+                        finalizeUserMessage()
+                        persistConversation()
+                        if (gemini.sendTextTurn(text)) {
+                            diag("Frase de invocación entregada al personaje")
+                        } else {
+                            diag("No se pudo entregar la frase de invocación")
+                        }
+                    }
+                }
+
+                ConnectionPurpose.NORMAL -> {
+                    startMic()
+                    _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
+                }
+            }
         }
 
         override fun onInputTranscript(fullText: String) {
+            val normalized = normalizeCommand(fullText)
+
+            if (_ui.value.backgroundModeEnabled) {
+                if (normalized.contains(RETIRE_PHRASE)) {
+                    if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
+                        updateMessage(Speaker.USER, fullText, partial = false)
+                        finalizeUserMessage()
+                        persistConversation()
+                    }
+                    stopBackgroundMode("Comando «podés retirarte» detectado")
+                    return
+                }
+
+                if (connectionPurpose == ConnectionPurpose.WAKE) {
+                    wakeTranscript = fullText
+                    if (normalized.contains(WAKE_PHRASE)) {
+                        wakeDetected = true
+                        _ui.update { it.copy(statusDetail = "Invocación detectada…") }
+                    }
+                    return
+                }
+            }
+
             if (turnCompletePending) {
                 turnFinalizeJob?.cancel()
                 turnFinalizeJob = null
@@ -70,12 +146,28 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 persistConversation()
             }
 
-            if (fish != null) cancelFish("Interrupción por voz")
+            val startingNewTurn = currentUserMessageId == null
+            if (startingNewTurn) {
+                if (fish != null) cancelFish("Interrupción por voz")
+                ensureFish()
+            }
+
             updateMessage(Speaker.USER, fullText, partial = true)
-            _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Te escucho…") }
+            _ui.update {
+                if (it.backgroundModeEnabled) {
+                    it.copy(
+                        status = SessionStatus.INVOCATION_ACTIVE,
+                        statusDetail = "${it.config.profileName.ifBlank { "CharacterIA" }} te escucha…",
+                    )
+                } else {
+                    it.copy(status = SessionStatus.LISTENING, statusDetail = "Te escucho…")
+                }
+            }
         }
 
         override fun onOutputTranscript(delta: String, fullText: String) {
+            if (connectionPurpose == ConnectionPurpose.WAKE) return
+
             ensureFish()
             fish?.sendText(delta)
             updateMessage(Speaker.AI, fullText, partial = true)
@@ -86,6 +178,18 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         override fun onTurnComplete() {
+            if (connectionPurpose == ConnectionPurpose.WAKE) {
+                if (wakeDetected) {
+                    val transcript = wakeTranscript
+                    wakeDetected = false
+                    wakeTranscript = ""
+                    activateBackgroundCharacter(transcript)
+                } else {
+                    wakeTranscript = ""
+                }
+                return
+            }
+
             finalizeUserMessage()
             turnCompletePending = true
             scheduleTurnSettlement()
@@ -93,18 +197,49 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         override fun onInterrupted() {
+            if (connectionPurpose == ConnectionPurpose.WAKE) return
+
             turnFinalizeJob?.cancel()
             turnFinalizeJob = null
             turnCompletePending = false
             cancelFish("Gemini detectó interrupción")
             finalizeCurrentMessages()
             persistConversation()
-            _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
+            _ui.update {
+                if (it.backgroundModeEnabled) {
+                    it.copy(
+                        status = SessionStatus.INVOCATION_ACTIVE,
+                        statusDetail = "${it.config.profileName.ifBlank { "CharacterIA" }} activo · escuchando",
+                    )
+                } else {
+                    it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
+                }
+            }
         }
 
         override fun onError(message: String) {
             diag(message)
-            _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = message) }
+            if (_ui.value.backgroundModeEnabled) {
+                val context = getApplication<Application>()
+                desiredConnected = false
+                mic.stop()
+                cancelFish("Modo invocación detenido por error")
+                InvocationForegroundService.stop(context)
+                connectionPurpose = ConnectionPurpose.NORMAL
+                wakeDetected = false
+                wakeTranscript = ""
+                pendingInvocationText = null
+                _ui.update {
+                    it.copy(
+                        status = SessionStatus.ERROR,
+                        statusDetail = message,
+                        backgroundModeEnabled = false,
+                        invocationActive = false,
+                    )
+                }
+            } else {
+                _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = message) }
+            }
         }
 
         override fun onDiagnostic(message: String) = diag(message)
@@ -170,6 +305,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             status = SessionStatus.DISCONNECTED,
             statusDetail = "Desconectado",
             settingsOpen = keepSettingsOpen,
+            backgroundModeEnabled = false,
+            invocationActive = false,
         )
         diag("Perfil cargado: ${config.profileName} · ${chat.size} mensajes guardados")
     }
@@ -283,8 +420,11 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = error, settingsOpen = true) }
             return
         }
+        if (_ui.value.backgroundModeEnabled) stopBackgroundMode("Cambio a sesión normal")
+
         saveConfig()
         desiredConnected = true
+        connectionPurpose = ConnectionPurpose.NORMAL
         currentUserMessageId = null
         currentAiMessageId = null
         turnCompletePending = false
@@ -293,7 +433,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         val c = _ui.value.config
         val history = historyForGemini(_ui.value.messages)
-        _ui.update { it.copy(status = SessionStatus.CONNECTING, statusDetail = "Conectando…") }
+        _ui.update {
+            it.copy(
+                status = SessionStatus.CONNECTING,
+                statusDetail = "Conectando…",
+                backgroundModeEnabled = false,
+                invocationActive = false,
+            )
+        }
         gemini.connect(
             GeminiLiveClient.Config(
                 apiKey = c.geminiApiKey,
@@ -305,19 +452,157 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         diag("Memoria de ${c.profileName}: ${history.size} mensajes enviados a Gemini")
     }
 
-    fun disconnect() {
+    fun toggleBackgroundMode() {
+        if (_ui.value.backgroundModeEnabled) {
+            stopBackgroundMode("Modo invocación apagado desde la app")
+        } else {
+            startBackgroundMode()
+        }
+    }
+
+    private fun startBackgroundMode() {
+        validateForConnect()?.let { error ->
+            _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = error, settingsOpen = true) }
+            return
+        }
+
+        if (desiredConnected) disconnectNormalSession("Cambiando a modo invocación")
+        saveConfig()
+
+        val c = _ui.value.config
+        val context = getApplication<Application>()
+        runCatching {
+            InvocationForegroundService.start(context, c.profileName, active = false)
+        }.onFailure { error ->
+            _ui.update {
+                it.copy(
+                    status = SessionStatus.ERROR,
+                    statusDetail = "No se pudo activar el modo invocación: ${error.message}",
+                )
+            }
+            diag("Foreground service: ${error::class.simpleName}: ${error.message}")
+            return
+        }
+
+        desiredConnected = true
+        connectionPurpose = ConnectionPurpose.WAKE
+        wakeDetected = false
+        wakeTranscript = ""
+        pendingInvocationText = null
+        currentUserMessageId = null
+        currentAiMessageId = null
+        turnCompletePending = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+
+        _ui.update {
+            it.copy(
+                status = SessionStatus.CONNECTING,
+                statusDetail = "Armando modo invocación…",
+                backgroundModeEnabled = true,
+                invocationActive = false,
+            )
+        }
+
+        gemini.connect(
+            GeminiLiveClient.Config(
+                apiKey = c.geminiApiKey,
+                model = c.geminiModel,
+                personality = WAKE_SYSTEM_PROMPT,
+                history = emptyList(),
+            )
+        )
+    }
+
+    private fun activateBackgroundCharacter(triggerText: String) {
+        if (!_ui.value.backgroundModeEnabled || connectionPurpose != ConnectionPurpose.WAKE) return
+
+        val c = _ui.value.config
+        val history = historyForGemini(_ui.value.messages)
+        mic.stop()
+        gemini.disconnect()
+        connectionPurpose = ConnectionPurpose.BACKGROUND_ACTIVE
+        pendingInvocationText = triggerText
+        wakeDetected = false
+        wakeTranscript = ""
+
+        _ui.update {
+            it.copy(
+                status = SessionStatus.CONNECTING,
+                statusDetail = "Invocando a ${c.profileName.ifBlank { "CharacterIA" }}…",
+                invocationActive = true,
+            )
+        }
+        InvocationForegroundService.update(c.profileName.ifBlank { "CharacterIA" }, active = true)
+
+        gemini.connect(
+            GeminiLiveClient.Config(
+                apiKey = c.geminiApiKey,
+                model = c.geminiModel,
+                personality = c.personality,
+                history = history,
+            )
+        )
+        diag("Invocación confirmada · memoria cargada (${history.size} mensajes)")
+    }
+
+    private fun stopBackgroundMode(reason: String) {
+        val context = getApplication<Application>()
         desiredConnected = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
         turnCompletePending = false
         mic.stop()
         gemini.disconnect()
-        cancelFish("Desconectado")
+        cancelFish(reason)
         player.interrupt()
         finalizeCurrentMessages()
         persistConversation()
-        _ui.update { it.copy(status = SessionStatus.DISCONNECTED, statusDetail = "Desconectado") }
-        diag("Sesión desconectada")
+        InvocationForegroundService.stop(context)
+        connectionPurpose = ConnectionPurpose.NORMAL
+        wakeDetected = false
+        wakeTranscript = ""
+        pendingInvocationText = null
+        _ui.update {
+            it.copy(
+                status = SessionStatus.DISCONNECTED,
+                statusDetail = "Modo invocación apagado",
+                backgroundModeEnabled = false,
+                invocationActive = false,
+            )
+        }
+        diag(reason)
+    }
+
+    fun disconnect() {
+        if (_ui.value.backgroundModeEnabled) {
+            stopBackgroundMode("Modo invocación apagado")
+            return
+        }
+        disconnectNormalSession("Sesión desconectada")
+    }
+
+    private fun disconnectNormalSession(detail: String) {
+        desiredConnected = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        turnCompletePending = false
+        mic.stop()
+        gemini.disconnect()
+        cancelFish(detail)
+        player.interrupt()
+        finalizeCurrentMessages()
+        persistConversation()
+        connectionPurpose = ConnectionPurpose.NORMAL
+        _ui.update {
+            it.copy(
+                status = SessionStatus.DISCONNECTED,
+                statusDetail = "Desconectado",
+                backgroundModeEnabled = false,
+                invocationActive = false,
+            )
+        }
+        diag(detail)
     }
 
     private fun startMic() {
@@ -330,7 +615,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun ensureFish() {
-        if (fish != null) return
+        if (fish != null || connectionPurpose == ConnectionPurpose.WAKE) return
         val profileId = _ui.value.config.profileId
         val voice = pendingVoiceBytes ?: profiles.voiceBytes(profileId) ?: return
         val c = _ui.value.config
@@ -341,14 +626,21 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             override fun onReady() {
-                diag("Fish listo")
+                diag("Fish listo · TTS precargado")
             }
 
             override fun onFinished() {
                 if (fish === client) fish = null
                 _ui.update { state ->
                     if (state.status == SessionStatus.SPEAKING) {
-                        state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
+                        if (state.backgroundModeEnabled && state.invocationActive) {
+                            state.copy(
+                                status = SessionStatus.INVOCATION_ACTIVE,
+                                statusDetail = "${state.config.profileName.ifBlank { "CharacterIA" }} activo · escuchando",
+                            )
+                        } else {
+                            state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
+                        }
                     } else state
                 }
                 diag("Fish terminó el turno")
@@ -448,8 +740,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         val stable = messages.filter { !it.isPartial && it.text.isNotBlank() }
         if (stable.isEmpty()) return emptyList()
 
-        // Keep every chat message on disk. For the Live context, keep a generous recent
-        // window so setup messages stay bounded; older chat remains visible and stored.
         val selected = ArrayDeque<ChatMessage>()
         var chars = 0
         for (message in stable.asReversed()) {
@@ -476,8 +766,25 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         val profileId = _ui.value.config.profileId
         profiles.clearChat(profileId)
         gemini.updateHistory(emptyList())
-        _ui.update { it.copy(messages = emptyList(), status = SessionStatus.DISCONNECTED, statusDetail = "Chat borrado") }
+        _ui.update {
+            it.copy(
+                messages = emptyList(),
+                status = SessionStatus.DISCONNECTED,
+                statusDetail = "Chat borrado",
+                backgroundModeEnabled = false,
+                invocationActive = false,
+            )
+        }
         diag("Chat del perfil borrado")
+    }
+
+    private fun normalizeCommand(text: String): String {
+        val normalized = Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        return normalized
+            .replace("\\p{M}+".toRegex(), "")
+            .replace("[^a-z0-9ñ ]".toRegex(), " ")
+            .replace("\\s+".toRegex(), " ")
+            .trim()
     }
 
     private fun diag(message: String) {
@@ -494,7 +801,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         mic.stop()
         gemini.disconnect()
         fish?.cancel()
+        InvocationForegroundService.stop(getApplication())
         player.release()
         super.onCleared()
+    }
+
+    companion object {
+        private const val WAKE_PHRASE = "yo te invoco"
+        private const val RETIRE_PHRASE = "podes retirarte"
+        private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de una frase de activación. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar la frase «yo te invoco». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
 }
