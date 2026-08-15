@@ -9,6 +9,7 @@ import com.lisofer.characteria.audio.MicStreamer
 import com.lisofer.characteria.audio.PcmPlayer
 import com.lisofer.characteria.fish.FishTtsClient
 import com.lisofer.characteria.gemini.GeminiLiveClient
+import com.lisofer.characteria.storage.ProfileStore
 import com.lisofer.characteria.storage.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,28 +23,30 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 class CharacterViewModel(application: Application) : AndroidViewModel(application) {
-    private val store = SettingsStore(application)
+    private val settings = SettingsStore(application)
+    private val profiles = ProfileStore(application)
     private val mic = MicStreamer(application)
     private val player = PcmPlayer()
     private val ids = AtomicLong(1)
 
-    private val _ui = MutableStateFlow(
-        AppUiState(
-            config = store.load(),
-            hasVoiceSample = store.hasVoice(),
-        )
-    )
+    private val _ui = MutableStateFlow(AppUiState())
     val ui: StateFlow<AppUiState> = _ui.asStateFlow()
 
+    private var pendingVoiceBytes: ByteArray? = null
     private var currentUserMessageId: Long? = null
     private var currentAiMessageId: Long? = null
     private var fish: FishTtsClient? = null
     private var turnFinalizeJob: Job? = null
     private var turnCompletePending = false
     private var desiredConnected = false
+
+    init {
+        initializeProfiles()
+    }
 
     private val gemini = GeminiLiveClient(viewModelScope, object : GeminiLiveClient.Listener {
         override fun onStatus(message: String) {
@@ -59,18 +62,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         override fun onInputTranscript(fullText: String) {
-            // A new user turn may begin before a late output transcription has settled.
-            // Close the previous AI bubble at that point so both turns never get mixed.
             if (turnCompletePending) {
                 turnFinalizeJob?.cancel()
                 turnFinalizeJob = null
                 turnCompletePending = false
                 finalizeAiMessage()
+                persistConversation()
             }
 
-            if (fish != null) {
-                cancelFish("Interrupción por voz")
-            }
+            if (fish != null) cancelFish("Interrupción por voz")
             updateMessage(Speaker.USER, fullText, partial = true)
             _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Te escucho…") }
         }
@@ -80,17 +80,12 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             fish?.sendText(delta)
             updateMessage(Speaker.AI, fullText, partial = true)
 
-            // Gemini documents output transcription as independently ordered from
-            // serverContent/turnComplete. If a late transcription arrives, extend the
-            // quiet window instead of closing Fish or creating a second AI bubble.
             if (turnCompletePending) scheduleTurnSettlement()
 
             _ui.update { it.copy(status = SessionStatus.SPEAKING, statusDetail = "Respondiendo") }
         }
 
         override fun onTurnComplete() {
-            // The user transcription belongs definitively to this turn, so it is safe
-            // to close now. Keep the AI bubble open briefly for late transcript chunks.
             finalizeUserMessage()
             turnCompletePending = true
             scheduleTurnSettlement()
@@ -103,6 +98,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             turnCompletePending = false
             cancelFish("Gemini detectó interrupción")
             finalizeCurrentMessages()
+            persistConversation()
             _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
         }
 
@@ -114,16 +110,127 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         override fun onDiagnostic(message: String) = diag(message)
     })
 
+    private fun initializeProfiles() {
+        migrateLegacyProfileIfNeeded()
+
+        var summaries = profiles.listProfiles()
+        if (summaries.isEmpty()) {
+            val id = UUID.randomUUID().toString()
+            val blank = AppConfig(
+                profileId = id,
+                profileName = "Perfil 1",
+                geminiApiKey = settings.geminiKey(),
+                fishApiKey = settings.fishKey(),
+            )
+            profiles.saveProfile(blank)
+            settings.setActiveProfileId(id)
+            summaries = profiles.listProfiles()
+        }
+
+        val requested = settings.activeProfileId()
+        val activeId = requested.takeIf { id -> summaries.any { it.id == id } }
+            ?: summaries.first().id
+        loadProfileIntoUi(activeId, summaries, keepSettingsOpen = false)
+    }
+
+    private fun migrateLegacyProfileIfNeeded() {
+        if (settings.profilesMigrated()) return
+
+        if (profiles.listProfiles().isEmpty() && settings.hasLegacyProfileData()) {
+            val id = UUID.randomUUID().toString()
+            val legacy = settings.loadLegacy().copy(
+                profileId = id,
+                profileName = "Perfil 1",
+            )
+            profiles.saveProfile(legacy)
+            settings.legacyVoiceBytes()?.let { profiles.saveVoice(id, it) }
+            settings.setActiveProfileId(id)
+        }
+
+        settings.markProfilesMigrated()
+    }
+
+    private fun loadProfileIntoUi(
+        profileId: String,
+        summaries: List<CharacterProfileSummary> = profiles.listProfiles(),
+        keepSettingsOpen: Boolean,
+    ) {
+        val config = profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: return
+        val chat = profiles.loadChat(profileId)
+        ids.set((chat.maxOfOrNull { it.id } ?: 0L) + 1L)
+        pendingVoiceBytes = null
+        currentUserMessageId = null
+        currentAiMessageId = null
+        settings.setActiveProfileId(profileId)
+        _ui.value = _ui.value.copy(
+            config = config,
+            profiles = summaries,
+            hasVoiceSample = profiles.hasVoice(profileId),
+            messages = chat,
+            status = SessionStatus.DISCONNECTED,
+            statusDetail = "Desconectado",
+            settingsOpen = keepSettingsOpen,
+        )
+        diag("Perfil cargado: ${config.profileName} · ${chat.size} mensajes guardados")
+    }
+
     fun setSettingsOpen(open: Boolean) = _ui.update { it.copy(settingsOpen = open) }
 
     fun updateConfig(transform: (AppConfig) -> AppConfig) {
         _ui.update { it.copy(config = transform(it.config)) }
     }
 
+    fun newProfile() {
+        if (desiredConnected) disconnect()
+        val existing = profiles.listProfiles()
+        var n = existing.size + 1
+        var name = "Perfil $n"
+        val used = existing.map { it.name.lowercase() }.toSet()
+        while (name.lowercase() in used) {
+            n++
+            name = "Perfil $n"
+        }
+
+        val id = UUID.randomUUID().toString()
+        val config = AppConfig(
+            profileId = id,
+            profileName = name,
+            geminiApiKey = settings.geminiKey(),
+            fishApiKey = settings.fishKey(),
+        )
+        profiles.saveProfile(config)
+        settings.setActiveProfileId(id)
+        loadProfileIntoUi(id, profiles.listProfiles(), keepSettingsOpen = true)
+        diag("Nuevo perfil creado: $name")
+    }
+
+    fun selectProfile(profileId: String) {
+        if (profileId == _ui.value.config.profileId) return
+        if (desiredConnected) disconnect()
+        loadProfileIntoUi(profileId, profiles.listProfiles(), keepSettingsOpen = true)
+    }
+
     fun saveConfig() {
-        store.save(_ui.value.config)
-        _ui.update { it.copy(settingsOpen = false) }
-        diag("Configuración guardada")
+        val config = _ui.value.config
+        if (config.profileName.isBlank()) {
+            _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = "Poné un nombre al perfil") }
+            return
+        }
+
+        settings.saveGlobalKeys(config.geminiApiKey, config.fishApiKey)
+        profiles.saveProfile(config)
+        pendingVoiceBytes?.let { bytes -> profiles.saveVoice(config.profileId, bytes) }
+        pendingVoiceBytes = null
+        settings.setActiveProfileId(config.profileId)
+
+        _ui.update {
+            it.copy(
+                profiles = profiles.listProfiles(),
+                hasVoiceSample = profiles.hasVoice(config.profileId),
+                settingsOpen = false,
+            )
+        }
+        diag("Perfil guardado: ${config.profileName}")
     }
 
     fun importVoiceSample(uri: Uri) {
@@ -145,14 +252,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     if (cursor.moveToFirst()) cursor.getString(0) else null
                 } ?: "muestra_de_voz"
 
-                withContext(Dispatchers.IO) { store.saveVoice(bytes, name) }
+                pendingVoiceBytes = bytes
                 _ui.update {
                     it.copy(
                         hasVoiceSample = true,
                         config = it.config.copy(voiceName = name),
                     )
                 }
-                diag("Muestra de voz cargada: $name (${bytes.size / 1024} KB)")
+                diag("Muestra preparada para este perfil: $name (${bytes.size / 1024} KB)")
             }.onFailure {
                 _ui.update { state -> state.copy(status = SessionStatus.ERROR, statusDetail = it.message ?: "Error leyendo audio") }
             }
@@ -162,11 +269,11 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     fun validateForConnect(): String? {
         val c = _ui.value.config
         return when {
+            c.profileName.isBlank() -> "Poné un nombre al perfil"
             c.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
             c.fishApiKey.isBlank() -> "Falta la API key de Fish Audio"
             !_ui.value.hasVoiceSample -> "Falta cargar una muestra de voz"
             c.voiceTranscript.isBlank() -> "Falta la transcripción exacta de la voz"
-            c.personality.isBlank() -> "La personalidad está vacía"
             else -> null
         }
     }
@@ -183,9 +290,19 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         turnCompletePending = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
+
         val c = _ui.value.config
+        val history = historyForGemini(_ui.value.messages)
         _ui.update { it.copy(status = SessionStatus.CONNECTING, statusDetail = "Conectando…") }
-        gemini.connect(GeminiLiveClient.Config(c.geminiApiKey, c.geminiModel, c.personality))
+        gemini.connect(
+            GeminiLiveClient.Config(
+                apiKey = c.geminiApiKey,
+                model = c.geminiModel,
+                personality = c.personality,
+                history = history,
+            )
+        )
+        diag("Memoria de ${c.profileName}: ${history.size} mensajes enviados a Gemini")
     }
 
     fun disconnect() {
@@ -198,6 +315,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         cancelFish("Desconectado")
         player.interrupt()
         finalizeCurrentMessages()
+        persistConversation()
         _ui.update { it.copy(status = SessionStatus.DISCONNECTED, statusDetail = "Desconectado") }
         diag("Sesión desconectada")
     }
@@ -213,7 +331,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun ensureFish() {
         if (fish != null) return
-        val voice = store.voiceBytes() ?: return
+        val profileId = _ui.value.config.profileId
+        val voice = pendingVoiceBytes ?: profiles.voiceBytes(profileId) ?: return
         val c = _ui.value.config
         lateinit var client: FishTtsClient
         client = FishTtsClient(object : FishTtsClient.Listener {
@@ -255,14 +374,13 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private fun scheduleTurnSettlement() {
         turnFinalizeJob?.cancel()
         turnFinalizeJob = viewModelScope.launch {
-            // Output transcription has no guaranteed ordering relative to turnComplete.
-            // A short quiet window absorbs late fragments without delaying streamed speech.
             delay(800)
             fish?.finish()
             finalizeAiMessage()
             turnCompletePending = false
             turnFinalizeJob = null
-            diag("Turno asentado · sigo escuchando")
+            persistConversation()
+            diag("Turno asentado · chat guardado · sigo escuchando")
         }
     }
 
@@ -316,21 +434,63 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         finalizeAiMessage()
     }
 
+    private fun persistConversation() {
+        val state = _ui.value
+        val id = state.config.profileId
+        if (id.isBlank()) return
+        val stable = state.messages.map { it.copy(isPartial = false) }
+        profiles.saveChat(id, stable)
+        val history = historyForGemini(stable)
+        gemini.updateHistory(history)
+    }
+
+    private fun historyForGemini(messages: List<ChatMessage>): List<GeminiLiveClient.HistoryTurn> {
+        val stable = messages.filter { !it.isPartial && it.text.isNotBlank() }
+        if (stable.isEmpty()) return emptyList()
+
+        // Keep every chat message on disk. For the Live context, keep a generous recent
+        // window so setup messages stay bounded; older chat remains visible and stored.
+        val selected = ArrayDeque<ChatMessage>()
+        var chars = 0
+        for (message in stable.asReversed()) {
+            if (selected.size >= 100) break
+            if (chars + message.text.length > 50_000 && selected.isNotEmpty()) break
+            selected.addFirst(message)
+            chars += message.text.length
+        }
+        return selected.map { message ->
+            GeminiLiveClient.HistoryTurn(
+                role = if (message.speaker == Speaker.USER) "user" else "model",
+                text = message.text,
+            )
+        }
+    }
+
     fun clearChat() {
+        if (desiredConnected) disconnect()
         currentUserMessageId = null
         currentAiMessageId = null
-        _ui.update { it.copy(messages = emptyList()) }
+        turnCompletePending = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        val profileId = _ui.value.config.profileId
+        profiles.clearChat(profileId)
+        gemini.updateHistory(emptyList())
+        _ui.update { it.copy(messages = emptyList(), status = SessionStatus.DISCONNECTED, statusDetail = "Chat borrado") }
+        diag("Chat del perfil borrado")
     }
 
     private fun diag(message: String) {
         val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         _ui.update { state ->
-            state.copy(diagnostics = (state.diagnostics + "[$stamp] $message").takeLast(80))
+            state.copy(diagnostics = (state.diagnostics + "[$stamp] $message").takeLast(100))
         }
     }
 
     override fun onCleared() {
         turnFinalizeJob?.cancel()
+        finalizeCurrentMessages()
+        persistConversation()
         mic.stop()
         gemini.disconnect()
         fish?.cancel()
