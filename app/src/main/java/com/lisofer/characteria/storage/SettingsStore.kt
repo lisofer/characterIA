@@ -14,25 +14,65 @@ class SettingsStore(private val context: Context) {
     fun geminiKey(): String = secrets.get("gemini")
     fun fishKey(): String = secrets.get("fish")
 
+    /** Modelo que eligió el usuario. Un fallback automático nunca modifica esta preferencia. */
     fun geminiModel(): String {
-        val saved = prefs.getString("geminiModel", null)
-            ?: prefs.getString("model", DEFAULT_GEMINI_MODEL)
-            ?: DEFAULT_GEMINI_MODEL
-        return normalizeGeminiModel(saved)
+        val preferred = prefs.getString("preferredGeminiModel", null)
+        return normalizeGeminiModel(preferred ?: DEFAULT_GEMINI_MODEL)
+    }
+
+    /** Modelo que debe intentar la próxima sesión con la API key actual. */
+    fun activeGeminiModel(): String {
+        val active = prefs.getString("activeGeminiModel", null)
+            ?: prefs.getString("geminiModel", null) // migración desde Debug 157 y anteriores
+            ?: geminiModel()
+        return normalizeGeminiModel(active)
     }
 
     fun saveGlobalKeys(geminiApiKey: String, fishApiKey: String) {
-        secrets.put("gemini", geminiApiKey)
-        secrets.put("fish", fishApiKey)
+        secrets.put("gemini", geminiApiKey.trim())
+        secrets.put("fish", fishApiKey.trim())
     }
 
+    /** Selección manual: pasa a ser preferida y activa inmediatamente. */
     fun setGeminiModel(model: String) {
-        prefs.edit().putString("geminiModel", normalizeGeminiModel(model)).apply()
+        val normalized = normalizeGeminiModel(model)
+        prefs.edit()
+            .putString("preferredGeminiModel", normalized)
+            .putString("activeGeminiModel", normalized)
+            .putString("geminiModel", normalized) // compatibilidad hacia atrás
+            .apply()
     }
 
-    fun saveGlobalConnection(geminiApiKey: String, fishApiKey: String, geminiModel: String) {
-        saveGlobalKeys(geminiApiKey, fishApiKey)
-        setGeminiModel(geminiModel)
+    /** Fallback automático: cambia sólo el modelo activo de esta API key. */
+    fun setActiveGeminiModel(model: String) {
+        prefs.edit().putString("activeGeminiModel", normalizeGeminiModel(model)).apply()
+    }
+
+    fun resetActiveGeminiModelToPreferred() {
+        prefs.edit().putString("activeGeminiModel", geminiModel()).apply()
+    }
+
+    /**
+     * Guarda la conexión global. Si cambió la API key de Gemini, cualquier fallback de la
+     * key anterior deja de tener sentido y el modelo activo vuelve automáticamente al preferido.
+     * Devuelve true cuando la key de Gemini efectivamente cambió.
+     */
+    fun saveGlobalConnection(geminiApiKey: String, fishApiKey: String, geminiModel: String): Boolean {
+        val normalizedKey = geminiApiKey.trim()
+        val previousGeminiKey = geminiKey().trim()
+        val keyChanged = normalizedKey != previousGeminiKey
+        val preferred = normalizeGeminiModel(geminiModel)
+
+        saveGlobalKeys(normalizedKey, fishApiKey)
+        prefs.edit()
+            .putString("preferredGeminiModel", preferred)
+            .putString("geminiModel", preferred)
+            .apply()
+
+        if (keyChanged || !prefs.contains("activeGeminiModel")) {
+            prefs.edit().putString("activeGeminiModel", preferred).apply()
+        }
+        return keyChanged
     }
 
     fun activeProfileId(): String = prefs.getString("activeProfileId", "") ?: ""
