@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -117,6 +118,13 @@ private fun CharacterApp(vm: CharacterViewModel) {
         else vm.setSettingsOpen(true)
     }
 
+    val invocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) vm.toggleBackgroundMode()
+        else vm.setSettingsOpen(true)
+    }
+
     val voicePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -139,6 +147,23 @@ private fun CharacterApp(vm: CharacterViewModel) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg),
                 actions = {
+                    IconButton(
+                        onClick = {
+                            if (state.backgroundModeEnabled) {
+                                vm.toggleBackgroundMode()
+                            } else {
+                                val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                                if (permission == PackageManager.PERMISSION_GRANTED) vm.toggleBackgroundMode()
+                                else invocationPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.RecordVoiceOver,
+                            contentDescription = if (state.backgroundModeEnabled) "Apagar modo invocación" else "Activar modo invocación",
+                            tint = if (state.backgroundModeEnabled) Mint else Muted,
+                        )
+                    }
                     IconButton(onClick = { showDiagnostics = true }) {
                         Icon(Icons.Default.DeleteSweep, contentDescription = "Diagnóstico")
                     }
@@ -235,11 +260,18 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
 
 @Composable
 private fun StatusHero(state: AppUiState) {
-    val active = state.status in setOf(SessionStatus.LISTENING, SessionStatus.THINKING, SessionStatus.SPEAKING)
+    val active = state.status in setOf(
+        SessionStatus.LISTENING,
+        SessionStatus.THINKING,
+        SessionStatus.SPEAKING,
+        SessionStatus.INVOCATION_ARMED,
+        SessionStatus.INVOCATION_ACTIVE,
+    )
     val color = when (state.status) {
         SessionStatus.ERROR -> Danger
         SessionStatus.SPEAKING -> Sky
-        SessionStatus.LISTENING -> Mint
+        SessionStatus.LISTENING, SessionStatus.INVOCATION_ACTIVE -> Mint
+        SessionStatus.INVOCATION_ARMED -> Color(0xFFFFC857)
         SessionStatus.CONNECTING, SessionStatus.RECONNECTING, SessionStatus.THINKING -> Color(0xFFFFC857)
         else -> Color(0xFF657589)
     }
@@ -257,6 +289,8 @@ private fun StatusHero(state: AppUiState) {
             val subtitle = when (state.status) {
                 SessionStatus.LISTENING -> "Micrófono activo · podés interrumpir"
                 SessionStatus.SPEAKING -> "Fish Audio · ${state.config.profileName.ifBlank { "voz clonada" }}"
+                SessionStatus.INVOCATION_ARMED -> "Segundo plano · decí «yo te invoco»"
+                SessionStatus.INVOCATION_ACTIVE -> "Segundo plano · decí «podés retirarte»"
                 SessionStatus.RECONNECTING -> "Recuperando el contexto del perfil"
                 else -> state.config.geminiModel
             }
@@ -300,7 +334,9 @@ private fun BottomControls(
     onDisconnect: () -> Unit,
     onClear: () -> Unit,
 ) {
-    val connected = state.status != SessionStatus.DISCONNECTED && state.status != SessionStatus.ERROR
+    val connected = !state.backgroundModeEnabled &&
+        state.status != SessionStatus.DISCONNECTED &&
+        state.status != SessionStatus.ERROR
     Row(
         modifier = Modifier.fillMaxWidth().background(Surface).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -312,6 +348,7 @@ private fun BottomControls(
         Button(
             modifier = Modifier.weight(1f).height(54.dp),
             onClick = if (connected) onDisconnect else onConnect,
+            enabled = !state.backgroundModeEnabled,
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (connected) Color(0xFF612536) else Mint,
                 contentColor = if (connected) Color.White else Color(0xFF042117),
@@ -319,7 +356,14 @@ private fun BottomControls(
         ) {
             Icon(if (connected) Icons.Default.Stop else Icons.Default.Mic, contentDescription = null)
             Spacer(Modifier.size(8.dp))
-            Text(if (connected) "Desconectar" else "Conectar", fontWeight = FontWeight.Black)
+            Text(
+                when {
+                    state.backgroundModeEnabled -> "Modo invocación activo"
+                    connected -> "Desconectar"
+                    else -> "Conectar"
+                },
+                fontWeight = FontWeight.Black,
+            )
         }
         FilledIconButton(onClick = { }, enabled = false) {
             Icon(Icons.Default.Mic, contentDescription = null)
