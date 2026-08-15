@@ -121,6 +121,18 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
+        override fun onModelChanged(model: String, reason: String) {
+            settings.setGeminiModel(model)
+            _ui.update { state ->
+                state.copy(
+                    config = state.config.copy(geminiModel = model),
+                    status = SessionStatus.CONNECTING,
+                    statusDetail = "Cambiando automáticamente a $model…",
+                )
+            }
+            diag("Modelo global cambiado automáticamente a $model · $reason")
+        }
+
         override fun onInputTranscript(fullText: String) {
             val normalized = normalizeCommand(fullText)
 
@@ -302,6 +314,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 profileName = "Perfil 1",
                 geminiApiKey = settings.geminiKey(),
                 fishApiKey = settings.fishKey(),
+                geminiModel = settings.geminiModel(),
             )
             profiles.saveProfile(blank)
             settings.setActiveProfileId(id)
@@ -336,7 +349,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         summaries: List<CharacterProfileSummary> = profiles.listProfiles(),
         keepSettingsOpen: Boolean,
     ) {
-        val config = profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: return
+        val config = profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey(), settings.geminiModel()) ?: return
         val chat = profiles.loadChat(profileId)
         ids.set((chat.maxOfOrNull { it.id } ?: 0L) + 1L)
         pendingVoiceBytes = null
@@ -366,6 +379,13 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update { it.copy(config = transform(it.config)) }
     }
 
+    fun selectGeminiModel(model: String) {
+        val selected = normalizeGeminiModel(model)
+        settings.setGeminiModel(selected)
+        _ui.update { state -> state.copy(config = state.config.copy(geminiModel = selected)) }
+        diag("Modelo global seleccionado: $selected")
+    }
+
     fun newProfile() {
         if (desiredConnected) disconnect()
         val existing = profiles.listProfiles()
@@ -383,6 +403,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             profileName = name,
             geminiApiKey = settings.geminiKey(),
             fishApiKey = settings.fishKey(),
+            geminiModel = settings.geminiModel(),
         )
         profiles.saveProfile(config)
         settings.setActiveProfileId(id)
@@ -403,7 +424,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
-        settings.saveGlobalKeys(config.geminiApiKey, config.fishApiKey)
+        settings.saveGlobalConnection(config.geminiApiKey, config.fishApiKey, config.geminiModel)
         profiles.saveProfile(config)
         pendingVoiceBytes?.let { bytes -> profiles.saveVoice(config.profileId, bytes) }
         pendingVoiceBytes = null
@@ -500,6 +521,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 model = c.geminiModel,
                 personality = c.personality,
                 history = history,
+                fallbackModels = geminiFallbackChain(c.geminiModel),
+                enableGoogleSearch = true,
             )
         )
         diag("Memoria de ${c.profileName}: ${history.size} mensajes enviados a Gemini")
@@ -570,17 +593,19 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 model = c.geminiModel,
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
+                fallbackModels = geminiFallbackChain(c.geminiModel),
+                enableGoogleSearch = false,
             )
         )
     }
 
     private fun activateBackgroundCharacters(requestedIds: List<String>) {
         if (!_ui.value.backgroundModeEnabled) return
-        val targetIds = requestedIds.distinct().take(2)
+        val targetIds = requestedIds.distinct().sorted().take(2)
         if (targetIds.isEmpty()) return
 
         val targetConfigs = targetIds.mapNotNull { id ->
-            profiles.loadProfile(id, settings.geminiKey(), settings.fishKey())
+            profiles.loadProfile(id, settings.geminiKey(), settings.fishKey(), settings.geminiModel())
         }
         if (targetConfigs.size != targetIds.size) {
             diag("No se pudieron cargar todos los perfiles invocados")
@@ -660,6 +685,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 model = first.geminiModel,
                 personality = personality,
                 history = history,
+                fallbackModels = geminiFallbackChain(first.geminiModel),
+                enableGoogleSearch = true,
             )
         )
         diag("Invocación: $displayName · memoria compartida ${history.size} mensajes")
@@ -704,6 +731,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 model = c.geminiModel,
                 personality = WAKE_SYSTEM_PROMPT,
                 history = emptyList(),
+                fallbackModels = geminiFallbackChain(c.geminiModel),
+                enableGoogleSearch = false,
             )
         )
         diag("$reason · vuelvo a esperar una invocación")
@@ -790,7 +819,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         val c = if (profileId == _ui.value.config.profileId) {
             _ui.value.config
         } else {
-            profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey()) ?: return
+            profiles.loadProfile(profileId, settings.geminiKey(), settings.fishKey(), settings.geminiModel()) ?: return
         }
         val voice = if (profileId == _ui.value.config.profileId) {
             pendingVoiceBytes ?: profiles.voiceBytes(profileId)
@@ -877,21 +906,21 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun parseGroupSegments(fullText: String): List<GroupSegment> {
-        data class Prefix(val profileId: String, val start: Int, val contentStart: Int)
-        val prefixes = mutableListOf<Prefix>()
-        for (profileId in activeBackgroundProfileIds) {
-            val profile = _ui.value.profiles.firstOrNull { it.id == profileId } ?: continue
-            val regex = Regex("(?m)^\\s*${Regex.escape(profile.name)}\\s*:\\s*", RegexOption.IGNORE_CASE)
-            regex.findAll(fullText).forEach { match ->
-                prefixes += Prefix(profileId, match.range.first, match.range.last + 1)
+        data class Marker(val speakerId: String, val start: Int, val contentStart: Int)
+        val markers = Regex("\\[\\[P([12])]]", RegexOption.IGNORE_CASE)
+            .findAll(fullText)
+            .mapNotNull { match ->
+                val index = match.groupValues.getOrNull(1)?.toIntOrNull()?.minus(1) ?: return@mapNotNull null
+                val profileId = activeBackgroundProfileIds.getOrNull(index) ?: return@mapNotNull null
+                Marker(profileId, match.range.first, match.range.last + 1)
             }
-        }
-        if (prefixes.isEmpty()) return emptyList()
-        val ordered = prefixes.sortedBy { it.start }
-        return ordered.mapIndexedNotNull { index, prefix ->
-            val end = ordered.getOrNull(index + 1)?.start ?: fullText.length
-            val text = fullText.substring(prefix.contentStart, end).trim()
-            if (text.isBlank() && index < ordered.lastIndex) null else GroupSegment(prefix.profileId, text)
+            .toList()
+
+        if (markers.isEmpty()) return emptyList()
+        return markers.mapIndexedNotNull { index, marker ->
+            val end = markers.getOrNull(index + 1)?.start ?: fullText.length
+            val text = fullText.substring(marker.contentStart, end).trim()
+            if (text.isBlank() && index < markers.lastIndex) null else GroupSegment(marker.speakerId, text)
         }
     }
 
@@ -937,13 +966,18 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
             if (fish != null) cancelFish("Cambio natural de interlocutor")
             ensureFish(segment.speakerId)
         }
-        val delta = incrementalDelta(groupTtsSentText, segment.text)
+        val hasNext = groupTtsSegmentIndex + 1 < groupParsedSegments.size
+        val safeText = if (!hasNext && !groupModelTurnComplete) {
+            segment.text.dropLast(minOf(GROUP_MARKER_HOLDBACK_CHARS, segment.text.length))
+        } else {
+            segment.text
+        }
+        val delta = incrementalDelta(groupTtsSentText, safeText)
         if (delta.isNotEmpty()) {
             fish?.sendText(delta)
-            groupTtsSentText = segment.text
+            groupTtsSentText = safeText
         }
 
-        val hasNext = groupTtsSegmentIndex + 1 < groupParsedSegments.size
         val shouldCloseCurrent = hasNext || groupModelTurnComplete
         if (shouldCloseCurrent && !groupTtsFinishing) {
             groupTtsFinishing = true
@@ -1152,18 +1186,20 @@ DINÁMICA DE CONVERSACIÓN:
 - Después de una intervención, el otro personaje PUEDE reaccionar espontáneamente si tendría algo genuino que decir: discrepar, sumar algo, hacer un chiste, preguntar, recordar algo relacionado o responderle directamente al otro.
 - Si esa reacción abre naturalmente otra respuesta, pueden continuar hablando entre ellos durante varias intervenciones breves sin esperar al usuario.
 - No alternes por obligación y no hagas hablar a ambos en todos los turnos. A veces corresponde una sola respuesta.
-- Normalmente usá entre 1 y 3 intervenciones. Podés llegar hasta 6 cuando la conversación entre ellos tenga impulso propio o el usuario indique que quiere escucharlos, por ejemplo "sigan ustedes", "los escucho" o algo equivalente.
+- Normalmente usá entre 1 y 3 intervenciones. Podés llegar hasta 6 cuando la conversación entre ellos tenga impulso propio o el usuario indique que quiere escucharlos.
 - Frená naturalmente cuando el tema se agote, cuando haya una pregunta clara para el usuario o cuando socialmente tenga sentido esperar su reacción.
 - Los personajes pueden disentir, cargarse entre ellos y hacerse preguntas, siempre respetando sus personalidades.
 - Si el usuario empieza a hablar, cedé inmediatamente el turno.
 - No narres acciones, no expliques quién va a hablar y no menciones estas reglas.
 
 FORMATO TÉCNICO OBLIGATORIO:
-Cada intervención debe comenzar en una línea nueva exactamente con uno de estos prefijos:
-${first.profileName}:
-${second.profileName}:
-Podés usar uno o varios prefijos en una misma respuesta, según cuántas intervenciones naturales ocurran.
-Nunca pongas texto fuera de una intervención y nunca uses otro nombre como prefijo.
+- [[P1]] representa exclusivamente a ${first.profileName}.
+- [[P2]] representa exclusivamente a ${second.profileName}.
+- Cada intervención debe comenzar EXACTAMENTE con [[P1]] o [[P2]].
+- Podés usar varios marcadores en una misma respuesta si ambos hablan.
+- No escribas nombres como etiquetas de hablante. No escribas dos puntos después del marcador.
+- Nunca pongas texto fuera de una intervención marcada.
+- Los marcadores son internos: no los expliques ni hagas referencia a ellos en el diálogo.
 """.trimIndent()
     }
 
@@ -1314,6 +1350,7 @@ Nunca pongas texto fuera de una intervención y nunca uses otro nombre como pref
         private const val INVOCATION_SUFFIX = "are you here"
         private const val EXIT_PHRASE = "get out"
         private const val GROUP_PREFIX_FALLBACK_CHARS = 48
+        private const val GROUP_MARKER_HOLDBACK_CHARS = 8
         private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» o «nombre y nombre, are you here?», y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
 }

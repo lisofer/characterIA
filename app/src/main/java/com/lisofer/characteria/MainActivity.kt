@@ -197,6 +197,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
             state = state,
             onDismiss = { vm.setSettingsOpen(false) },
             onConfig = vm::updateConfig,
+            onModelSelected = vm::selectGeminiModel,
             onPickVoice = { voicePicker.launch(arrayOf("audio/*")) },
             onSelectProfile = vm::selectProfile,
             onNewProfile = vm::newProfile,
@@ -377,6 +378,7 @@ private fun SettingsSheet(
     state: AppUiState,
     onDismiss: () -> Unit,
     onConfig: ((AppConfig) -> AppConfig) -> Unit,
+    onModelSelected: (String) -> Unit,
     onPickVoice: () -> Unit,
     onSelectProfile: (String) -> Unit,
     onNewProfile: () -> Unit,
@@ -435,7 +437,7 @@ private fun SettingsSheet(
             item {
                 Text("Conexión", fontWeight = FontWeight.Black)
                 Text(
-                    "Las API keys son compartidas por todos los perfiles y quedan cifradas con Android Keystore.",
+                    "Las API keys y el modelo de Gemini son globales: todos los personajes usan siempre la misma conexión. Las claves quedan cifradas con Android Keystore.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -466,20 +468,22 @@ private fun SettingsSheet(
                         Text("Modelo: ${c.geminiModel}")
                     }
                     DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                        listOf(
-                            "gemini-3.1-flash-live-preview",
-                            "gemini-2.5-flash-native-audio-preview-12-2025",
-                        ).forEach { model ->
+                        GEMINI_LIVE_MODELS.forEach { model ->
                             DropdownMenuItem(
-                                text = { Text(model) },
+                                text = { Text(model.label) },
                                 onClick = {
-                                    onConfig { it.copy(geminiModel = model) }
+                                    onModelSelected(model.id)
                                     modelMenu = false
                                 }
                             )
                         }
                     }
                 }
+                Text(
+                    "Si el modelo agota cuota, CharacterIA baja automáticamente al siguiente modelo Live gratuito disponible.",
+                    color = Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
             item {
                 Column {
