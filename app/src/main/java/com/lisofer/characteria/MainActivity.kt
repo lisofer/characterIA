@@ -139,7 +139,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
                     Column {
                         Text("CharacterIA", fontWeight = FontWeight.Black)
                         Text(
-                            state.config.profileName.ifBlank { "Sin perfil" },
+                            (state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ") ?: state.config.profileName.ifBlank { "Sin perfil" }),
                             style = MaterialTheme.typography.labelSmall,
                             color = Muted,
                         )
@@ -315,7 +315,7 @@ private fun MessageBubble(message: ChatMessage, aiName: String) {
         ) {
             Column(Modifier.padding(14.dp)) {
                 Text(
-                    if (isUser) "VOS" else aiName.ifBlank { "CHARACTER" }.uppercase(),
+                    if (isUser) "VOS" else message.characterName.ifBlank { aiName.ifBlank { "CHARACTER" } }.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
                     color = Muted,
                     fontWeight = FontWeight.Bold,
