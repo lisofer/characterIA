@@ -18,11 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply invocation and duo latency patch
+      - name: Keep invocation microphone hot
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
-        run: python3 scripts/fix_invocation_group_latency.py
+        run: python3 scripts/keep_invocation_mic_hot.py
 
-      - name: Commit invocation and duo latency patch
+      - name: Commit hot microphone patch
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
         shell: bash
         run: |
@@ -33,7 +33,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/lisofer/characteria/CharacterViewModel.kt
-          git commit -m "perf: speed invocation and smooth duo voice routing"
+          git commit -m "perf: keep microphone hot across invocation switches"
           git push origin HEAD:feature/android-v01
 
       - name: Set up JDK 17
