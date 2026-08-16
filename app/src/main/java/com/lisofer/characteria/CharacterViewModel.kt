@@ -54,6 +54,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var activeBackgroundProfileIds: List<String> = emptyList()
     private var conversationProfileIds: List<String> = emptyList()
     private var ignoreInvocationCommandsUntilMs: Long = 0L
+    private var invocationConnectStartedAtMs: Long = 0L
 
     private data class GroupSegment(val speakerId: String, val text: String)
 
@@ -103,6 +104,11 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 ConnectionPurpose.BACKGROUND_ACTIVE -> {
                     startMic()
                     val name = activeDisplayName()
+                    val startedAt = invocationConnectStartedAtMs
+                    if (startedAt > 0L) {
+                        diag("Invocación lista en ${SystemClock.elapsedRealtime() - startedAt} ms · $name")
+                        invocationConnectStartedAtMs = 0L
+                    }
                     _ui.update {
                         it.copy(
                             status = SessionStatus.INVOCATION_ACTIVE,
@@ -156,10 +162,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     val targetIds = targetProfiles.map { it.id }
                     val targetName = targetProfiles.joinToString(" + ") { it.name }
                     if (connectionPurpose == ConnectionPurpose.WAKE) {
-                        pendingInvocationProfileIds = targetIds
+                        pendingInvocationProfileIds = null
+                        invocationConnectStartedAtMs = SystemClock.elapsedRealtime()
                         _ui.update { it.copy(statusDetail = "Invocando a $targetName…") }
+                        diag("Invocación reconocida · conectando sin esperar turnComplete")
+                        activateBackgroundCharacters(targetIds)
                     } else if (connectionPurpose == ConnectionPurpose.BACKGROUND_ACTIVE) {
                         pendingInvocationProfileIds = null
+                        invocationConnectStartedAtMs = SystemClock.elapsedRealtime()
                         activateBackgroundCharacters(targetIds)
                     }
                     return
@@ -1018,7 +1028,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
         val hasNext = groupTtsSegmentIndex + 1 < groupParsedSegments.size
         val safeText = if (!hasNext && !groupModelTurnComplete) {
-            segment.text.dropLast(minOf(GROUP_MARKER_HOLDBACK_CHARS, segment.text.length))
+            withoutIncompleteGroupMarkerTail(segment.text)
         } else {
             segment.text
         }
@@ -1245,6 +1255,7 @@ DINÁMICA DE CONVERSACIÓN:
 FORMATO TÉCNICO OBLIGATORIO:
 - [[P1]] representa exclusivamente a ${first.profileName}.
 - [[P2]] representa exclusivamente a ${second.profileName}.
+- El primer carácter de cada respuesta debe ser el primer [ de [[P1]] o [[P2]]: no antepongas espacios, saludos ni texto.
 - Cada intervención debe comenzar EXACTAMENTE con [[P1]] o [[P2]].
 - Podés usar varios marcadores en una misma respuesta si ambos hablan.
 - No escribas nombres como etiquetas de hablante. No escribas dos puntos después del marcador.
@@ -1326,6 +1337,21 @@ FORMATO TÉCNICO OBLIGATORIO:
             ?.first
     }
 
+    private fun withoutIncompleteGroupMarkerTail(text: String): String {
+        if (text.isEmpty()) return text
+        var holdback = 0
+        for (marker in GROUP_SPEAKER_MARKERS) {
+            val maxPrefix = minOf(marker.length - 1, text.length)
+            for (length in maxPrefix downTo 1) {
+                if (text.endsWith(marker.substring(0, length), ignoreCase = true)) {
+                    holdback = maxOf(holdback, length)
+                    break
+                }
+            }
+        }
+        return if (holdback > 0) text.dropLast(holdback) else text
+    }
+
     private fun incrementalDelta(previous: String, current: String): String {
         if (previous.isEmpty()) return current
         if (current.startsWith(previous)) return current.substring(previous.length)
@@ -1399,8 +1425,8 @@ FORMATO TÉCNICO OBLIGATORIO:
     companion object {
         private const val INVOCATION_SUFFIX = "are you here"
         private const val EXIT_PHRASE = "get out"
-        private const val GROUP_PREFIX_FALLBACK_CHARS = 48
-        private const val GROUP_MARKER_HOLDBACK_CHARS = 8
+        private const val GROUP_PREFIX_FALLBACK_CHARS = 16
+        private val GROUP_SPEAKER_MARKERS = listOf("[[P1]]", "[[P2]]")
         private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» o «nombre y nombre, are you here?», y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
 }
