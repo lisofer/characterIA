@@ -696,7 +696,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
         turnCompletePending = false
-        mic.stop()
+        // Keep AudioRecord alive across invocation switches. Gemini drops PCM while setupComplete=false.
         gemini.disconnect()
         cancelFish("Cambio de personaje")
         player.interrupt()
@@ -761,7 +761,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         discardCurrentUserMessage()
         finalizeAiMessage()
         persistConversation()
-        mic.stop()
+        // Keep the same microphone capture alive while returning to the wake Gemini session.
         gemini.disconnect()
         cancelFish(reason)
         player.interrupt()
