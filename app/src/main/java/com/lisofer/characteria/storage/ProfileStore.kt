@@ -13,6 +13,7 @@ import java.io.File
 class ProfileStore(context: Context) {
     private val root = File(context.filesDir, "character_profiles").apply { mkdirs() }
     private val groupRoot = File(context.filesDir, "character_groups").apply { mkdirs() }
+    private val secrets = SecretStore(context)
 
     private fun profileDir(id: String): File = File(root, id).apply { mkdirs() }
     private fun configFile(id: String) = File(profileDir(id), "profile.json")
@@ -58,7 +59,7 @@ class ProfileStore(context: Context) {
             profileName = json.optString("name"),
             geminiApiKey = geminiKey,
             fishApiKey = fishKey,
-            simliApiKey = simliKey,
+            simliApiKey = simliKey.ifBlank { secrets.get("simli") },
             geminiModel = geminiModel,
             personality = json.optString("personality", ""),
             voiceTranscript = json.optString("voiceTranscript", ""),
@@ -71,6 +72,8 @@ class ProfileStore(context: Context) {
 
     fun saveProfile(config: AppConfig) {
         require(config.profileId.isNotBlank()) { "El perfil no tiene ID" }
+        if (config.simliApiKey.isNotBlank()) secrets.put("simli", config.simliApiKey.trim())
+
         val file = configFile(config.profileId)
         val oldCreatedAt = runCatching {
             if (file.exists()) JSONObject(file.readText()).optLong("createdAt", System.currentTimeMillis())
