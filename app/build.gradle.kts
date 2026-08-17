@@ -15,8 +15,8 @@ android {
         applicationId = "com.lisofer.characteria.vision"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-vision"
+        versionCode = 3
+        versionName = "0.3.0-vision-real"
     }
 
     buildFeatures {
