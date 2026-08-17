@@ -50,7 +50,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "feature/characteria-musetalk" ]]; then
             APK="CharacterIA-MuseTalk-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA MuseTalk Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="CharacterIA MuseTalk 0.9 experimental. Se eliminó por completo el benchmark manual de FPS. Reutiliza el motor MuseTalk ya instalado, sin volver a descargar ~2.08 GB. Completar la preparación 16/16 ya no carga UNet/Whisper/VAE en memoria: el motor pesado se inicia recién cuando llega PCM de Fish y se libera tras 15 s de silencio. Si una inferencia falla, se cierra la sesión neural y se intenta nuevamente en la siguiente respuesta en lugar de saturar el teléfono."
+            NOTES="CharacterIA MuseTalk 0.10. Corrige la preparación cancelada por rememberCoroutineScope: el preprocesado ahora usa un worker independiente de Compose y puede continuar aunque se cierre Ajustes. CancellationException ya no aparece como error neural. También se corrige el renderer para mantener una única sesión de lipsync por avatar y no reiniciarla con cada chunk PCM de Fish. Reutiliza íntegramente el motor MuseTalk ya instalado; no requiere volver a descargar ~2.08 GB."
           elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
