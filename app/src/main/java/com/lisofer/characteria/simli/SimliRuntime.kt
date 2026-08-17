@@ -1,7 +1,7 @@
 package com.lisofer.characteria.simli
 
 import android.content.Context
-import io.livekit.android.renderer.SurfaceViewRenderer
+import io.livekit.android.renderer.TextureViewRenderer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,7 +25,7 @@ object SimliRuntime {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var client: SimliAvatarClient? = null
-    private var renderer: SurfaceViewRenderer? = null
+    private var renderer: TextureViewRenderer? = null
     private var fingerprint: String = ""
 
     @Synchronized
@@ -56,11 +56,26 @@ object SimliRuntime {
             }
 
             override fun onReady() {
-                _state.update { it.copy(enabled = true, connecting = false, ready = true, status = "Simli · listo") }
+                _state.update {
+                    it.copy(
+                        enabled = true,
+                        connecting = false,
+                        ready = true,
+                        status = "Simli · LiveKit conectado · esperando imagen…",
+                    )
+                }
             }
 
             override fun onVideoReady() {
-                _state.update { it.copy(videoReady = true, status = "Simli · avatar listo") }
+                _state.update {
+                    it.copy(
+                        enabled = true,
+                        connecting = false,
+                        ready = true,
+                        videoReady = true,
+                        status = "Simli · avatar listo",
+                    )
+                }
             }
 
             override fun onError(message: String) {
@@ -73,11 +88,10 @@ object SimliRuntime {
     }
 
     @Synchronized
-    fun bindRenderer(view: SurfaceViewRenderer?) {
+    fun bindRenderer(view: TextureViewRenderer?) {
         if (renderer === view) return
-        client?.bindRenderer(view)
         renderer = view
-        if (view != null) client?.bindRenderer(view)
+        client?.bindRenderer(view)
     }
 
     /** True means Simli accepted the chunk and its LiveKit audio owns playback. */
