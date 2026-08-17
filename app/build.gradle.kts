@@ -11,13 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // Variante totalmente separada: estable, Vision y MuseTalk pueden convivir.
         applicationId = "com.lisofer.characteria.musetalk"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.9.0-musetalk-lazy-lipsync"
-        // MuseTalk needs a 64-bit neural runtime. Avoid bundling emulator/x86 native ORT libs.
+        versionCode = 10
+        versionName = "0.10.0-musetalk-lifecycle-fix"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -72,6 +70,5 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
 
-    // MuseTalk Local: FP16 heavy compute + explicit FP32 fallback islands.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
 }
