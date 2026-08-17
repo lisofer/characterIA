@@ -137,7 +137,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("CharacterIA", fontWeight = FontWeight.Black)
+                        Text("CharacterIA Visión", fontWeight = FontWeight.Black)
                         Text(
                             (state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ") ?: state.config.profileName.ifBlank { "Sin perfil" }),
                             style = MaterialTheme.typography.labelSmall,
@@ -232,6 +232,7 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
 
     Column(modifier = modifier.fillMaxSize()) {
         StatusHero(state)
+        com.lisofer.characteria.vision.VisionAvatarHost(state)
         if (state.messages.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -396,7 +397,7 @@ private fun SettingsSheet(
             item {
                 Text("Perfiles", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Text(
-                    "Cada perfil guarda su propia voz, personalidad y conversación.",
+                    "Cada perfil guarda su propia voz, personalidad, video y conversación.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -527,6 +528,9 @@ private fun SettingsSheet(
                     minLines = 8,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            item {
+                com.lisofer.characteria.vision.VisionProfileSettings(c.profileId)
             }
             item {
                 Text(
