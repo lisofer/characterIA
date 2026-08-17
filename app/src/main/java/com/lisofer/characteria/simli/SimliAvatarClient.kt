@@ -4,11 +4,12 @@ import android.content.Context
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
-import io.livekit.android.renderer.SurfaceViewRenderer
+import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.Call
 import okhttp3.Callback
@@ -27,8 +28,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Thin native client around Simli's Compose + LiveKit transport.
- * Fish remains the TTS source; this class only turns its PCM into a synchronized avatar stream.
+ * Thin native client around Simli Compose + LiveKit.
+ * Fish remains the TTS source; this class turns its PCM into a synchronized avatar stream.
  */
 class SimliAvatarClient(
     context: Context,
@@ -48,13 +49,19 @@ class SimliAvatarClient(
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
     private val resampler = Pcm16Resampler()
-    private val ready = AtomicBoolean(false)
+
+    /** LiveKit is joined and Simli can already accept PCM. */
+    private val inputReady = AtomicBoolean(false)
+
+    /** A real decoded video frame reached Android, not merely a subscribed track. */
+    private val firstFrameSeen = AtomicBoolean(false)
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var room: Room? = null
-    @Volatile private var renderer: SurfaceViewRenderer? = null
+    @Volatile private var renderer: TextureViewRenderer? = null
     @Volatile private var videoTrack: VideoTrack? = null
     private var roomEventsJob: Job? = null
+    private var firstFrameWatchdog: Job? = null
     private var generation = 0L
 
     fun start(apiKey: String, faceId: String) {
@@ -108,9 +115,9 @@ class SimliAvatarClient(
         })
     }
 
-    /** Returns true only when Simli owns playback for this PCM chunk. */
+    /** Returns true only when Simli accepted ownership of this Fish PCM chunk. */
     fun sendFishPcm(pcm44k: ByteArray): Boolean {
-        if (!ready.get()) return false
+        if (!inputReady.get()) return false
         val ws = socket ?: return false
         val pcm16k = resampler.process(pcm44k)
         if (pcm16k.isEmpty()) return true
@@ -119,28 +126,35 @@ class SimliAvatarClient(
 
     fun clearBuffer() {
         resampler.reset()
-        socket?.takeIf { ready.get() }?.send("SKIP")
+        socket?.takeIf { inputReady.get() }?.send("SKIP")
     }
 
-    fun bindRenderer(newRenderer: SurfaceViewRenderer?) {
+    /** Called from Compose on the main thread. TextureView is more reliable inside Compose than SurfaceView. */
+    fun bindRenderer(newRenderer: TextureViewRenderer?) {
         val old = renderer
         if (old === newRenderer) return
-        videoTrack?.let { track -> old?.let(track::removeRenderer) }
+
+        videoTrack?.let { track -> old?.let { runCatching { track.removeRenderer(it) } } }
         renderer = newRenderer
+
         val activeRoom = room
         if (newRenderer != null && activeRoom != null) {
             runCatching { activeRoom.initVideoRenderer(newRenderer) }
                 .onFailure { listener.onStatus("Simli renderer: ${it.message}") }
-            videoTrack?.let { track -> runCatching { track.addRenderer(newRenderer) } }
+            videoTrack?.let { track -> attachTrackToRenderer(track, newRenderer) }
         }
     }
 
-    fun isReady(): Boolean = ready.get()
+    fun isReady(): Boolean = inputReady.get()
 
     fun stop() {
         generation += 1L
-        ready.set(false)
+        inputReady.set(false)
+        firstFrameSeen.set(false)
         resampler.reset()
+        firstFrameWatchdog?.cancel()
+        firstFrameWatchdog = null
+
         runCatching { socket?.send("DONE") }
         runCatching { socket?.close(1000, "CharacterIA stop") }
         socket = null
@@ -181,14 +195,15 @@ class SimliAvatarClient(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (myGeneration != generation || webSocket !== socket) return
-                ready.set(false)
+                inputReady.set(false)
                 listener.onStatus("Simli cerrado · $code ${reason.ifBlank { "" }}".trim())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (myGeneration != generation || webSocket !== socket) return
-                ready.set(false)
-                listener.onError("Simli WebSocket: ${t.message ?: t::class.simpleName}")
+                inputReady.set(false)
+                val httpPart = response?.let { " · HTTP ${it.code}" }.orEmpty()
+                listener.onError("Simli WebSocket$httpPart: ${t.message ?: t::class.simpleName}")
             }
         }
         created = http.newWebSocket(request, callback)
@@ -203,11 +218,15 @@ class SimliAvatarClient(
                 listener.onError("Simli: ${compact(trimmed)}")
             }
             upper.startsWith("STOP") -> {
-                ready.set(false)
+                inputReady.set(false)
                 listener.onStatus("Simli · sesión finalizada")
             }
-            upper.startsWith("SPEAK") -> listener.onStatus("Simli · hablando")
-            upper.startsWith("SILENT") -> listener.onStatus("Simli · listo")
+            upper.startsWith("SPEAK") -> {
+                listener.onStatus(if (firstFrameSeen.get()) "Simli · hablando" else "Simli · generando imagen…")
+            }
+            upper.startsWith("SILENT") -> {
+                listener.onStatus(if (firstFrameSeen.get()) "Simli · avatar listo" else "Simli · esperando primer frame…")
+            }
             upper.contains("LIVEKIT") -> {
                 val jsonStart = trimmed.indexOf('{')
                 val payload = if (jsonStart >= 0) trimmed.substring(jsonStart) else trimmed
@@ -223,54 +242,111 @@ class SimliAvatarClient(
         }
     }
 
+    /**
+     * Simli's reference web client only considers startup complete after the first actual video frame.
+     * Keep every LiveKit/UI operation on the main dispatcher because TextureViewRenderer requires it.
+     */
     private fun connectLiveKit(url: String, token: String, myGeneration: Long) {
-        if (myGeneration != generation || room != null) return
-        val newRoom = LiveKit.create(appContext)
-        room = newRoom
+        scope.launch {
+            if (myGeneration != generation || room != null) return@launch
 
-        renderer?.let { view ->
-            runCatching { newRoom.initVideoRenderer(view) }
-                .onFailure { listener.onStatus("Simli renderer: ${it.message}") }
-        }
+            val newRoom = LiveKit.create(appContext)
+            room = newRoom
 
-        roomEventsJob = scope.launch {
-            newRoom.events.collect { event ->
-                if (myGeneration != generation) return@collect
-                when (event) {
-                    is RoomEvent.TrackSubscribed -> {
-                        val track = event.track as? VideoTrack ?: return@collect
-                        val previous = videoTrack
-                        val view = renderer
-                        if (previous != null && previous !== track && view != null) {
-                            runCatching { previous.removeRenderer(view) }
+            renderer?.let { view ->
+                runCatching { newRoom.initVideoRenderer(view) }
+                    .onFailure { listener.onStatus("Simli renderer: ${it.message}") }
+            }
+
+            roomEventsJob = launch {
+                newRoom.events.collect { event ->
+                    if (myGeneration != generation) return@collect
+                    when (event) {
+                        is RoomEvent.TrackSubscribed -> {
+                            val track = event.track as? VideoTrack ?: return@collect
+                            attachVideoTrack(track, myGeneration)
                         }
-                        videoTrack = track
-                        if (view != null) runCatching { track.addRenderer(view) }
-                        listener.onVideoReady()
+                        is RoomEvent.TrackSubscriptionFailed -> {
+                            listener.onError("Simli LiveKit track: ${event.exception.message ?: "falló la suscripción"}")
+                        }
+                        is RoomEvent.Disconnected -> {
+                            inputReady.set(false)
+                            listener.onStatus("Simli · video desconectado")
+                        }
+                        else -> Unit
                     }
-                    is RoomEvent.Disconnected -> {
-                        ready.set(false)
-                        listener.onStatus("Simli · video desconectado")
-                    }
-                    else -> Unit
                 }
             }
-        }
 
-        scope.launch {
             runCatching { newRoom.connect(url, token) }
                 .onSuccess {
                     if (myGeneration != generation) {
                         newRoom.disconnect()
-                    } else {
-                        ready.set(true)
-                        listener.onReady()
-                        listener.onStatus("Simli · conectado")
+                        return@onSuccess
                     }
+
+                    inputReady.set(true)
+                    listener.onReady()
+                    listener.onStatus("Simli · LiveKit conectado · esperando imagen…")
+
+                    // Warm-up recommended by Simli's SDK examples: one second of PCM16/16 kHz silence.
+                    // It starts the remote rendering path before the first Fish response arrives.
+                    socket?.send(ByteArray(32_000).toByteString())
+
+                    // Defensive recovery for a track that was already subscribed before our observer ran.
+                    newRoom.remoteParticipants.values
+                        .asSequence()
+                        .flatMap { it.trackPublications.values.asSequence() }
+                        .mapNotNull { it.track as? VideoTrack }
+                        .firstOrNull()
+                        ?.let { attachVideoTrack(it, myGeneration) }
                 }
                 .onFailure {
-                    if (myGeneration == generation) listener.onError("Simli LiveKit: ${it.message ?: it::class.simpleName}")
+                    if (myGeneration == generation) {
+                        listener.onError("Simli LiveKit: ${it.message ?: it::class.simpleName}")
+                    }
                 }
+        }
+    }
+
+    private fun attachVideoTrack(track: VideoTrack, myGeneration: Long) {
+        if (myGeneration != generation) return
+        val previous = videoTrack
+        val view = renderer
+        if (previous != null && previous !== track && view != null) {
+            runCatching { previous.removeRenderer(view) }
+        }
+        videoTrack = track
+
+        if (view != null) {
+            attachTrackToRenderer(track, view)
+        }
+        listener.onStatus("Simli · stream de video recibido · esperando frame…")
+
+        firstFrameWatchdog?.cancel()
+        firstFrameWatchdog = scope.launch {
+            delay(8_000)
+            if (myGeneration == generation && !firstFrameSeen.get()) {
+                listener.onStatus("Simli · conectado pero todavía sin frames de video")
+            }
+        }
+    }
+
+    private fun attachTrackToRenderer(track: VideoTrack, view: TextureViewRenderer) {
+        runCatching {
+            view.setMirror(false)
+            view.addFrameListener({
+                if (firstFrameSeen.compareAndSet(false, true)) {
+                    firstFrameWatchdog?.cancel()
+                    scope.launch {
+                        listener.onVideoReady()
+                        listener.onStatus("Simli · avatar listo")
+                    }
+                }
+            }, 0f)
+            track.addRenderer(view)
+        }.onFailure {
+            listener.onError("Simli render: ${it.message ?: it::class.simpleName}")
         }
     }
 
