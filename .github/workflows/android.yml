@@ -46,10 +46,20 @@ jobs:
         shell: bash
         run: |
           TAG="android-debug-${GITHUB_RUN_NUMBER}"
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SOURCE_APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
+            APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
+            TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
+            NOTES="APK experimental de CharacterIA Visión 0.2: avatar de video opcional por personaje, detección local de boca y lipsync guiado por PCM. Se instala junto a CharacterIA estable."
+          else
+            APK="CharacterIA-debug-${GITHUB_RUN_NUMBER}.apk"
+            TITLE="CharacterIA Android Debug ${GITHUB_RUN_NUMBER}"
+            NOTES="APK de prueba generado automáticamente desde $GITHUB_REF_NAME."
+          fi
+          cp "$SOURCE_APK" "$APK"
           gh release create "$TAG" "$APK" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "CharacterIA Android Debug ${GITHUB_RUN_NUMBER}" \
-            --notes "APK de prueba generado automáticamente desde feature/android-v01." \
+            --title "$TITLE" \
+            --notes "$NOTES" \
             --prerelease
