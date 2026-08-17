@@ -54,6 +54,10 @@ class SettingsStore(private val context: Context) {
         prefs.edit().putString("activeGeminiModel", geminiModel()).apply()
     }
 
+    /** Compatibilidad con el ViewModel limpio: Simli se persiste desde ProfileStore al guardar. */
+    fun saveGlobalConnection(geminiApiKey: String, fishApiKey: String, geminiModel: String): Boolean =
+        saveGlobalConnection(geminiApiKey, fishApiKey, simliKey(), geminiModel)
+
     /**
      * Guarda la conexión global. Si cambió la API key de Gemini, cualquier fallback de la
      * key anterior deja de tener sentido y el modelo activo vuelve automáticamente al preferido.
