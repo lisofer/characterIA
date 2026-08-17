@@ -51,43 +51,49 @@ jobs:
           from onnxconverter_common.float16 import convert_float_to_float16
 
           source = "model-src/unet.onnx"
+          inferred_source = "model-src/unet_inferred.onnx"
           output = "model-out/unet_android_mixed_v2.onnx"
           external_name = "unet_android_mixed_v2.onnx.data"
+          validation = "model-out/unet_android_mixed_v2_inferred.onnx"
 
-          print("Loading MuseTalk UNet + external weights…", flush=True)
-          model = onnx.load_model(source, load_external_data=True)
+          # The source model has >3 GB of external data. In-memory shape inference
+          # tries to SerializeToString() the whole protobuf and exceeds protobuf's
+          # size limit. infer_shapes_path is the ONNX path-based API for huge models.
+          print("Inferring source shapes/types from paths…", flush=True)
+          onnx.shape_inference.infer_shapes_path(
+              source,
+              inferred_source,
+              check_type=True,
+              strict_mode=True,
+              data_prop=False,
+          )
+
+          print("Loading inferred MuseTalk UNet + external weights…", flush=True)
+          model = onnx.load_model(inferred_source, load_external_data=True)
           op_types = sorted({node.op_type for node in model.graph.node})
           print("UNet op types:", op_types, flush=True)
 
-          # NNAPI's documented operator set includes Conv, MatMul and Gemm.
-          # Keep ONLY those compute-heavy ops in FP16. Everything else remains
-          # FP32 so an unsupported NNAPI node can safely fall back to ORT CPU.
-          # Shape inference MUST stay enabled: the converter uses inferred types
-          # to insert the Cast nodes at every FP16 <-> FP32 boundary.
+          # Keep in FP16 only operators that NNAPI documents and that dominate
+          # MuseTalk UNet compute. All normalization/activation/shape ops stay FP32,
+          # so any Android fallback lands on a datatype ORT CPU can execute.
           fp16_nnapi_ops = {"Conv", "MatMul", "Gemm"}
           blocked = sorted(set(op_types) - fp16_nnapi_ops - {"Cast"})
           print("FP16 / NNAPI candidates:", sorted(fp16_nnapi_ops & set(op_types)), flush=True)
           print("Keeping FP32:", blocked, flush=True)
 
+          # Types are already populated by infer_shapes_path, so disable the
+          # converter's in-memory inference while still letting it use those types
+          # to insert Cast nodes around blocked FP32 operations.
           model = convert_float_to_float16(
               model,
               keep_io_types=True,
-              disable_shape_infer=False,
+              disable_shape_infer=True,
               op_block_list=blocked,
           )
 
           prop = model.metadata_props.add()
           prop.key = "characteria.android_mixed_precision"
-          prop.value = "v2; FP16 Conv/MatMul/Gemm only; shape-inferred boundary casts; all other ops FP32"
-
-          # Strict checker catches exactly the failure seen on the phone in v1:
-          # an InstanceNormalization node receiving float16 + float inputs.
-          print("Running strict ONNX checker + shape/type inference…", flush=True)
-          onnx.checker.check_model(model, full_check=True)
-          inferred = onnx.shape_inference.infer_shapes(model, strict_mode=True, data_prop=False)
-          onnx.checker.check_model(inferred, full_check=True)
-          del inferred
-          gc.collect()
+          prop.value = "v2; path-inferred types; FP16 Conv/MatMul/Gemm only; other ops FP32"
 
           print("Saving external-data model…", flush=True)
           onnx.save_model(
@@ -101,6 +107,20 @@ jobs:
           )
           del model
           gc.collect()
+
+          # Validate from file paths too. This is the gate for the exact type error
+          # reported on Android (InstanceNormalization receiving float16 + float).
+          print("Strict checking saved mixed model…", flush=True)
+          onnx.checker.check_model(output, full_check=True)
+          onnx.shape_inference.infer_shapes_path(
+              output,
+              validation,
+              check_type=True,
+              strict_mode=True,
+              data_prop=False,
+          )
+          onnx.checker.check_model(validation, full_check=True)
+          os.remove(validation)
 
           data_path = os.path.join("model-out", external_name)
           for path in [output, data_path]:
@@ -126,4 +146,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "MuseTalk Android Mixed Precision v2" \
-            --notes "MuseTalk 1.5 UNet for CharacterIA Android. v2 keeps only NNAPI-friendly Conv/MatMul/Gemm in FP16, all other ops in FP32, enables shape inference so boundary Casts are inserted correctly, and passes strict ONNX type/schema validation before publication."
+            --notes "MuseTalk 1.5 UNet for CharacterIA Android. v2 uses path-based strict shape/type inference for the >3 GB source model, keeps only NNAPI-friendly Conv/MatMul/Gemm in FP16, and keeps normalization/activation/fallback operators in FP32."
