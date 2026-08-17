@@ -42,7 +42,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lisofer.characteria.AppUiState
-import com.lisofer.characteria.musetalk.MuseTalkAudioBus
 import com.lisofer.characteria.musetalk.MuseTalkAvatar
 import com.lisofer.characteria.musetalk.MuseTalkAvatarPreprocessor
 import com.lisofer.characteria.musetalk.MuseTalkAvatarStore
@@ -217,7 +216,6 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
     val prepState by MuseTalkAvatarPreprocessor.state.collectAsStateWithLifecycle()
     val rendered by MuseTalkLiveRenderer.frame.collectAsStateWithLifecycle()
     val rendererState by MuseTalkLiveRenderer.state.collectAsStateWithLifecycle()
-    val audioRevision by MuseTalkAudioBus.revision.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { MuseTalkModelStore.refresh(context) }
     val prepared = remember(avatar.profileId, avatar.videoPath, prepState, modelState) {
@@ -226,14 +224,10 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
         } else null
     }
 
-    LaunchedEffect(avatar.profileId, prepared?.sourceUpdatedAt, modelState, audioRevision) {
-        if (
-            prepared != null &&
-            modelState == MuseTalkModelStore.State.Ready &&
-            MuseTalkAudioBus.hasRecentSpeech() &&
-            rendererState !is MuseTalkLiveRenderer.State.Loading &&
-            rendererState !is MuseTalkLiveRenderer.State.Speaking
-        ) {
+    // Exactly one long-lived renderer coroutine per prepared avatar. Never key this effect to
+    // PCM/audio revisions: doing so would cancel and reload the neural runtime on every Fish chunk.
+    LaunchedEffect(avatar.profileId, prepared?.sourceUpdatedAt, modelState) {
+        if (prepared != null && modelState == MuseTalkModelStore.State.Ready) {
             MuseTalkLiveRenderer.run(context, prepared)
         }
     }
