@@ -47,12 +47,8 @@ import com.lisofer.characteria.musetalk.MuseTalkAvatarPreprocessor
 import com.lisofer.characteria.musetalk.MuseTalkAvatarStore
 import com.lisofer.characteria.musetalk.MuseTalkLiveRenderer
 import com.lisofer.characteria.musetalk.MuseTalkModelStore
-import com.lisofer.characteria.musetalk.MuseTalkOrtEngine
 import com.lisofer.characteria.musetalk.MuseTalkPreparedStore
-import com.lisofer.characteria.musetalk.pretty
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 private val Panel = Color(0xFF0B1722)
@@ -91,8 +87,6 @@ fun VisionProfileSettings(profileId: String) {
 
     var importing by remember(profileId) { mutableStateOf(false) }
     var avatarFeedback by remember(profileId) { mutableStateOf<String?>(null) }
-    var benchmarkRunning by remember { mutableStateOf(false) }
-    var benchmarkText by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { MuseTalkModelStore.refresh(context) }
     val avatar = remember(profileId, avatarRevision) { MuseTalkAvatarStore.load(context, profileId) }
@@ -107,7 +101,7 @@ fun VisionProfileSettings(profileId: String) {
             importing = true
             avatarFeedback = "Guardando video fuente…"
             runCatching { MuseTalkAvatarStore.importVideo(context, profileId, uri) }
-                .onSuccess { avatarFeedback = "✓ Video guardado. Ahora prepará el avatar neural." }
+                .onSuccess { avatarFeedback = "✓ Video guardado. Ahora prepará el lipsync para este personaje." }
                 .onFailure { avatarFeedback = it.message ?: "No pude guardar el video" }
             importing = false
         }
@@ -116,10 +110,10 @@ fun VisionProfileSettings(profileId: String) {
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(14.dp)
     ) {
-        Text("Avatar neural · MuseTalk Local", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        Text("Lipsync neural · MuseTalk Local", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(
-            "MuseTalk 1.5 corre dentro del teléfono. El MP4 se prepara una sola vez; durante la charla Fish sigue saliendo primero y el renderer neural puede descartar frames si no alcanza el ritmo.",
+            "La configuración es simple: cargás el MP4, instalás MuseTalk una sola vez y preparás ese video. Después el lipsync se activa automáticamente cuando Fish habla.",
             color = Muted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -147,12 +141,12 @@ fun VisionProfileSettings(profileId: String) {
         avatarFeedback?.let { Text(it, color = Muted, style = MaterialTheme.typography.labelSmall) }
 
         Spacer(Modifier.height(14.dp))
-        Text("2 · Motor neuronal", color = Accent, style = MaterialTheme.typography.labelLarge)
+        Text("2 · Motor de lipsync", color = Accent, style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(6.dp))
         when (val s = modelState) {
             MuseTalkModelStore.State.Missing -> {
                 Text(
-                    "Motor Android compatible (~2,08 GB). Si venís de la build 239, la app borra automáticamente el UNet/VAE FP16 incompatibles antes de actualizar y reutiliza los archivos que sirven.",
+                    "MuseTalk 1.5 se descarga una sola vez (~2,08 GB) y queda guardado en el teléfono.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -160,7 +154,7 @@ fun VisionProfileSettings(profileId: String) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { scope.launch { runCatching { MuseTalkModelStore.install(context) } } },
-                ) { Text("Instalar / actualizar MuseTalk 1.5") }
+                ) { Text("Descargar MuseTalk 1.5") }
             }
             is MuseTalkModelStore.State.Downloading -> {
                 Text("Descargando ${s.fileIndex}/${s.fileCount}: ${s.fileName}", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -170,25 +164,15 @@ fun VisionProfileSettings(profileId: String) {
                 Text("${s.downloadedBytes / 1_000_000} / ${s.totalBytes / 1_000_000} MB", color = Muted, style = MaterialTheme.typography.labelSmall)
             }
             MuseTalkModelStore.State.Ready -> {
-                Text("✓ MuseTalk 1.5 · Android mixed precision instalado", color = Accent, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    modifier = Modifier.fillMaxWidth(), enabled = !benchmarkRunning,
-                    onClick = {
-                        scope.launch {
-                            benchmarkRunning = true
-                            benchmarkText = "Cargando UNet mixed + VAE FP32…"
-                            val result = runCatching {
-                                withContext(Dispatchers.Default) { MuseTalkOrtEngine(context).use { it.benchmark() } }
-                            }
-                            benchmarkText = result.fold({ it.pretty() }, { "Error neural: ${it.message ?: it::class.simpleName}" })
-                            benchmarkRunning = false
-                        }
-                    },
-                ) { Text(if (benchmarkRunning) "Midiendo…" else "Medir FPS reales en este celular") }
+                Text("✓ MuseTalk 1.5 instalado", color = Accent, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "No se ejecuta nada pesado mientras el personaje está en silencio.",
+                    color = Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
                 TextButton(
-                    modifier = Modifier.fillMaxWidth(), enabled = !benchmarkRunning,
-                    onClick = { MuseTalkModelStore.remove(context); benchmarkText = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { MuseTalkModelStore.remove(context) },
                 ) { Text("Eliminar motor (~2,08 GB)") }
             }
             is MuseTalkModelStore.State.Error -> {
@@ -199,11 +183,10 @@ fun VisionProfileSettings(profileId: String) {
                 ) { Text("Reintentar / continuar descarga") }
             }
         }
-        benchmarkText?.let { Spacer(Modifier.height(7.dp)); Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
 
         if (avatar != null && modelState == MuseTalkModelStore.State.Ready) {
             Spacer(Modifier.height(14.dp))
-            Text("3 · Preparar avatar", color = Accent, style = MaterialTheme.typography.labelLarge)
+            Text("3 · Aplicar MuseTalk al video", color = Accent, style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(6.dp))
             when (val p = prepState) {
                 is MuseTalkAvatarPreprocessor.State.Preparing -> {
@@ -218,14 +201,28 @@ fun VisionProfileSettings(profileId: String) {
                 else -> Unit
             }
             if (prepared != null) {
-                Text("✓ Avatar neural listo · ${prepared.frames.size} frames preprocesados", color = Accent, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "✓ Lipsync listo para este video. Se activa automáticamente cuando el personaje habla.",
+                    color = Accent,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Al terminar este paso MuseTalk NO queda corriendo en segundo plano. El motor pesado se abre recién cuando llega voz de Fish.",
+                    color = Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             } else if (prepState !is MuseTalkAvatarPreprocessor.State.Preparing) {
-                Text("Esto detecta la cara y calcula sus latentes VAE. Se hace una sola vez por video.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Esto detecta la cara y prepara los latentes del MP4. Se hace una sola vez por cada video que cargues.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Spacer(Modifier.height(7.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { scope.launch { runCatching { MuseTalkAvatarPreprocessor.prepare(context, avatar) } } },
-                ) { Text("Preparar avatar MuseTalk") }
+                ) { Text("Preparar lipsync en este video") }
             }
         }
     }
@@ -248,6 +245,7 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
 
     LaunchedEffect(avatar.profileId, prepared?.sourceUpdatedAt, modelState) {
         if (prepared != null && modelState == MuseTalkModelStore.State.Ready) {
+            // This loop is lightweight while silent. It only opens ONNX sessions when Fish PCM arrives.
             MuseTalkLiveRenderer.run(context, prepared)
         }
     }
@@ -293,10 +291,10 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
         }
 
         val status = when (val s = rendererState) {
-            is MuseTalkLiveRenderer.State.Speaking -> "MUSETALK · ${"%.1f".format(s.outputFps)} FPS · ${s.neuralMs} ms/frame"
+            is MuseTalkLiveRenderer.State.Speaking -> "MUSETALK · lipsync activo"
             is MuseTalkLiveRenderer.State.Loading -> "MUSETALK · ${s.detail}"
-            is MuseTalkLiveRenderer.State.Error -> "MUSETALK · error: ${s.message}"
-            MuseTalkLiveRenderer.State.Idle -> if (prepared != null) "MUSETALK · listo" else "MUSETALK · prepará el avatar en Ajustes"
+            is MuseTalkLiveRenderer.State.Error -> "MUSETALK · ${s.message}"
+            MuseTalkLiveRenderer.State.Idle -> if (prepared != null) "MUSETALK · listo · esperando voz" else "MUSETALK · prepará el video en Ajustes"
         }
         Text(status, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), color = Accent, style = MaterialTheme.typography.labelSmall)
     }
