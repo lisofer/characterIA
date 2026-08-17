@@ -16,10 +16,9 @@ import kotlin.math.roundToInt
  * MuseTalk 1.5 ONNX runtime for Android.
  *
  * PCM 16k -> mel -> Whisper -> frame prompts 50x384 -> positional encoding
- * avatar latent 8x32x32 + prompt -> mixed UNet -> 4x32x32 -> VAE -> RGB 256x256
+ * avatar latent 8x32x32 + prompt -> safe FP16 UNet -> 4x32x32 -> VAE -> RGB 256x256
  *
- * The Android UNet keeps Conv/ConvTranspose/MatMul/Gemm in FP16 while the rest
- * stays FP32, so nodes rejected by NNAPI can safely fall back to XNNPACK/ORT CPU.
+ * Audio remains the master clock. Neural rendering is best-effort and may drop frames.
  */
 class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     data class BenchmarkResult(
@@ -44,11 +43,12 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     private var encoder: OrtSession? = null
     private var whisper: OrtSession? = null
     private var positional: OrtSession? = null
+    private var unetBackend = "sin cargar"
 
     @Synchronized
     fun loadGenerator() {
         check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
-        if (unet == null) unet = createSession("unet_android_mixed.onnx", true)
+        if (unet == null) unet = createUnetSession()
         if (decoder == null) decoder = createSession("vae_decoder.onnx", true)
         if (whisper == null) whisper = createSession("whisper_encoder.onnx", true)
         if (positional == null) positional = createSession("positional_encoding.onnx", false)
@@ -161,7 +161,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         val decoderMs = decoderNs / 1_000_000.0 / n
         val total = unetMs + decoderMs
         return BenchmarkResult(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "NNAPI → XNNPACK → ORT CPU" else "XNNPACK → ORT CPU",
+            unetBackend,
             unetMs, decoderMs, total, if (total > 0) 1000.0 / total else 0.0,
             "${Build.MANUFACTURER} ${Build.MODEL}",
         )
@@ -219,16 +219,50 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         } finally { input.close() }
     }
 
-    private fun createSession(fileName: String, preferNnapi: Boolean): OrtSession {
+    /**
+     * ORT ALL_OPT rewrites parts of MuseTalk's attention graph before NNAPI sees it.
+     * On the user's device that rewrite generates an invalid synthetic Split
+     * (AddNnapiSplit count=0). The source ONNX has no Split node, so for the UNet
+     * we deliberately keep graph optimization at BASIC while retaining NNAPI FP16.
+     * If the device driver still rejects session construction, retry once without
+     * NNAPI so the benchmark can establish a real XNNPACK/CPU baseline instead of
+     * terminating during model load.
+     */
+    private fun createUnetSession(): OrtSession {
+        return try {
+            createSession(
+                fileName = "unet_android_mixed.onnx",
+                preferNnapi = true,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            ).also { unetBackend = "UNet NNAPI FP16 · BASIC_OPT" }
+        } catch (nnapiError: Throwable) {
+            val message = nnapiError.message.orEmpty()
+            if (!message.contains("AddNnapiSplit", ignoreCase = true) &&
+                !message.contains("does not evenly divide", ignoreCase = true)) {
+                throw nnapiError
+            }
+            createSession(
+                fileName = "unet_android_mixed.onnx",
+                preferNnapi = false,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            ).also { unetBackend = "UNet XNNPACK/ORT CPU · fallback por NNAPI Split" }
+        }
+    }
+
+    private fun createSession(
+        fileName: String,
+        preferNnapi: Boolean,
+        optimizationLevel: OrtSession.SessionOptions.OptLevel = OrtSession.SessionOptions.OptLevel.ALL_OPT,
+    ): OrtSession {
         val path = MuseTalkModelStore.modelFile(context, fileName).absolutePath
         val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         val options = OrtSession.SessionOptions().apply {
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            setOptimizationLevel(optimizationLevel)
             setInterOpNumThreads(1)
             // XNNPACK owns its own worker pool, so keep ORT's pool small to avoid contention.
             setIntraOpNumThreads(1)
             if (preferNnapi && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                runCatching { addNnapi(EnumSet.of(NNAPIFlags.USE_FP16)) }
+                addNnapi(EnumSet.of(NNAPIFlags.USE_FP16))
             }
             runCatching { addXnnpack(mapOf("intra_op_num_threads" to cores.toString())) }
         }
@@ -263,6 +297,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         runCatching { unet?.close() }; unet = null
         ownedSessionOptions.forEach { runCatching { it.close() } }
         ownedSessionOptions.clear()
+        unetBackend = "sin cargar"
     }
 }
 
