@@ -16,7 +16,10 @@ import kotlin.math.roundToInt
  * MuseTalk 1.5 ONNX runtime for Android.
  *
  * PCM 16k -> mel -> Whisper -> frame prompts 50x384 -> positional encoding
- * avatar latent 8x32x32 + prompt -> UNet -> 4x32x32 -> VAE -> RGB 256x256
+ * avatar latent 8x32x32 + prompt -> mixed UNet -> 4x32x32 -> VAE -> RGB 256x256
+ *
+ * The Android UNet keeps Conv/ConvTranspose/MatMul/Gemm in FP16 while the rest
+ * stays FP32, so nodes rejected by NNAPI can safely fall back to XNNPACK/ORT CPU.
  */
 class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     data class BenchmarkResult(
@@ -35,6 +38,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     )
 
     private val env = OrtEnvironment.getEnvironment("CharacterIA-MuseTalk")
+    private val ownedSessionOptions = mutableListOf<OrtSession.SessionOptions>()
     private var unet: OrtSession? = null
     private var decoder: OrtSession? = null
     private var encoder: OrtSession? = null
@@ -43,17 +47,17 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
 
     @Synchronized
     fun loadGenerator() {
-        check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk." }
-        if (unet == null) unet = createSession("unet_fp16.onnx", true)
-        if (decoder == null) decoder = createSession("vae_decoder_fp16.onnx", true)
+        check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
+        if (unet == null) unet = createSession("unet_android_mixed.onnx", true)
+        if (decoder == null) decoder = createSession("vae_decoder.onnx", true)
         if (whisper == null) whisper = createSession("whisper_encoder.onnx", true)
         if (positional == null) positional = createSession("positional_encoding.onnx", false)
     }
 
     @Synchronized
     fun loadEncoder() {
-        check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk." }
-        if (encoder == null) encoder = createSession("vae_encoder_fp16.onnx", true)
+        check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
+        if (encoder == null) encoder = createSession("vae_encoder.onnx", true)
     }
 
     @Synchronized
@@ -82,15 +86,11 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         }
     }
 
-    /** Convenience for diagnostics/single-frame rendering. */
     @Synchronized
     fun audioPrompt16k(audio16k: FloatArray): FloatArray =
         audioPrompts16k(audio16k, 1).last()
 
-    /**
-     * One Whisper pass can feed several 25fps video frames. This is essential because
-     * Fish commonly sends ~150ms chunks; mapping one chunk to one frame would cap us at ~7fps.
-     */
+    /** One Whisper pass can feed several MuseTalk frames at the native 25fps cadence. */
     @Synchronized
     fun audioPrompts16k(audio16k: FloatArray, takeLastFrames: Int = 4): List<FloatArray> {
         require(audio16k.isNotEmpty()) { "Ventana de audio vacía" }
@@ -100,9 +100,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         val count = takeLastFrames.coerceIn(1, totalFrames)
         val first = (totalFrames - count).coerceAtLeast(0)
         return buildList(count) {
-            for (frame in first until totalFrames) {
-                add(addPositionalEncoding(makeWhisperChunk(raw, frame)))
-            }
+            for (frame in first until totalFrames) add(addPositionalEncoding(makeWhisperChunk(raw, frame)))
         }
     }
 
@@ -163,7 +161,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         val decoderMs = decoderNs / 1_000_000.0 / n
         val total = unetMs + decoderMs
         return BenchmarkResult(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "NNAPI + ORT CPU fallback" else "ORT CPU",
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "NNAPI → XNNPACK → ORT CPU" else "XNNPACK → ORT CPU",
             unetMs, decoderMs, total, if (total > 0) 1000.0 / total else 0.0,
             "${Build.MANUFACTURER} ${Build.MODEL}",
         )
@@ -201,7 +199,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         val result = FloatArray(50 * 384)
         val usedLayers = minOf(layers, 5)
         for (t in 0 until 10) {
-            val sourceSeq = audioIndex + t - 4 // left padding = ceil(50/25)*2
+            val sourceSeq = audioIndex + t - 4
             if (sourceSeq !in 0 until actualLength) continue
             for (layer in 0 until usedLayers) {
                 val dstBase = (t * 5 + layer) * 384
@@ -223,15 +221,23 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
 
     private fun createSession(fileName: String, preferNnapi: Boolean): OrtSession {
         val path = MuseTalkModelStore.modelFile(context, fileName).absolutePath
+        val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         val options = OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             setInterOpNumThreads(1)
-            setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(2, 6))
+            // XNNPACK owns its own worker pool, so keep ORT's pool small to avoid contention.
+            setIntraOpNumThreads(1)
             if (preferNnapi && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 runCatching { addNnapi(EnumSet.of(NNAPIFlags.USE_FP16)) }
             }
+            runCatching { addXnnpack(mapOf("intra_op_num_threads" to cores.toString())) }
         }
-        return try { env.createSession(path, options) } finally { options.close() }
+        return try {
+            env.createSession(path, options).also { ownedSessionOptions += options }
+        } catch (t: Throwable) {
+            runCatching { options.close() }
+            throw t
+        }
     }
 
     private fun tensor(data: FloatArray, shape: LongArray): OnnxTensor {
@@ -245,7 +251,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     private fun outputFloats(result: OrtSession.Result, preferredName: String? = null): FloatArray {
         val value = preferredName?.let { result.get(it).orElse(null) } ?: result.get(0)
         val tensor = value as? OnnxTensor ?: error("Salida ONNX no es tensor")
-        val buffer = tensor.floatBuffer ?: error("Salida ONNX no es Float/FP16 convertible")
+        val buffer = tensor.floatBuffer ?: error("Salida ONNX no es Float")
         return FloatArray(buffer.remaining()).also { buffer.get(it) }
     }
 
@@ -255,6 +261,8 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
         runCatching { whisper?.close() }; whisper = null
         runCatching { decoder?.close() }; decoder = null
         runCatching { unet?.close() }; unet = null
+        ownedSessionOptions.forEach { runCatching { it.close() } }
+        ownedSessionOptions.clear()
     }
 }
 
