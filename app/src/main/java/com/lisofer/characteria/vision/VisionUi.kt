@@ -151,12 +151,16 @@ fun VisionProfileSettings(profileId: String) {
         Spacer(Modifier.height(6.dp))
         when (val s = modelState) {
             MuseTalkModelStore.State.Missing -> {
-                Text("Descarga única de ~1,85 GB. Los modelos quedan guardados en este celular.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Motor Android compatible (~2,08 GB). Si venís de la build 239, la app borra automáticamente el UNet/VAE FP16 incompatibles antes de actualizar y reutiliza los archivos que sirven.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Spacer(Modifier.height(8.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { scope.launch { runCatching { MuseTalkModelStore.install(context) } } },
-                ) { Text("Descargar MuseTalk 1.5") }
+                ) { Text("Instalar / actualizar MuseTalk 1.5") }
             }
             is MuseTalkModelStore.State.Downloading -> {
                 Text("Descargando ${s.fileIndex}/${s.fileCount}: ${s.fileName}", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -166,14 +170,14 @@ fun VisionProfileSettings(profileId: String) {
                 Text("${s.downloadedBytes / 1_000_000} / ${s.totalBytes / 1_000_000} MB", color = Muted, style = MaterialTheme.typography.labelSmall)
             }
             MuseTalkModelStore.State.Ready -> {
-                Text("✓ MuseTalk 1.5 ONNX instalado", color = Accent, style = MaterialTheme.typography.bodySmall)
+                Text("✓ MuseTalk 1.5 · Android mixed precision instalado", color = Accent, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(), enabled = !benchmarkRunning,
                     onClick = {
                         scope.launch {
                             benchmarkRunning = true
-                            benchmarkText = "Cargando UNet + VAE…"
+                            benchmarkText = "Cargando UNet mixed + VAE FP32…"
                             val result = runCatching {
                                 withContext(Dispatchers.Default) { MuseTalkOrtEngine(context).use { it.benchmark() } }
                             }
@@ -185,7 +189,7 @@ fun VisionProfileSettings(profileId: String) {
                 TextButton(
                     modifier = Modifier.fillMaxWidth(), enabled = !benchmarkRunning,
                     onClick = { MuseTalkModelStore.remove(context); benchmarkText = null },
-                ) { Text("Eliminar motor (~1,85 GB)") }
+                ) { Text("Eliminar motor (~2,08 GB)") }
             }
             is MuseTalkModelStore.State.Error -> {
                 Text("Error: ${s.message}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
