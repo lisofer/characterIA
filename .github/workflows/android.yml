@@ -50,7 +50,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "feature/characteria-vision-smooth" ]]; then
             APK="CharacterIA-Vision-Smooth-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Smooth Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="CharacterIA Visión Smooth 0.4, reconstruida desde Debug 213. Divide el PCM de Fish en ventanas de 20 ms y anima a ~60 Hz, alinea labios con el buffer real de AudioTrack, sigue la trayectoria facial preanalizada y neutraliza la boca/mandíbula original del MP4 antes de dibujar una única boca. No usa MuseTalk ni modelos neuronales pesados en runtime."
+            NOTES="CharacterIA Visión Smooth 0.5: usa un único MP4. Analiza automáticamente el mismo video para elegir un tramo corto con la boca relajada como idle, lo reproduce en loop y usa el resto del archivo como biblioteca de bocas. Se elimina por completo el parche grande de mandíbula de 0.4. El tramo idle se reanaliza densamente (~30 Hz) y queda cacheado para seguir la boca con mayor precisión. Mantiene lipsync PCM a ~60 Hz y no usa MuseTalk ni modelos neuronales pesados en runtime."
           elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
