@@ -47,10 +47,14 @@ jobs:
         run: |
           TAG="android-debug-${GITHUB_RUN_NUMBER}"
           SOURCE_APK="app/build/outputs/apk/debug/app-debug.apk"
-          if [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
+          if [[ "$GITHUB_REF_NAME" == "feature/characteria-vision-smooth" ]]; then
+            APK="CharacterIA-Vision-Smooth-debug-${GITHUB_RUN_NUMBER}.apk"
+            TITLE="CharacterIA Visión Smooth Debug ${GITHUB_RUN_NUMBER}"
+            NOTES="CharacterIA Visión Smooth 0.4, reconstruida desde Debug 213. Divide el PCM de Fish en ventanas de 20 ms y anima a ~60 Hz, alinea labios con el buffer real de AudioTrack, sigue la trayectoria facial preanalizada y neutraliza la boca/mandíbula original del MP4 antes de dibujar una única boca. No usa MuseTalk ni modelos neuronales pesados en runtime."
+          elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="APK experimental de CharacterIA Visión 0.2: avatar de video opcional por personaje, detección local de boca y lipsync guiado por PCM. Se instala junto a CharacterIA estable."
+            NOTES="APK experimental de CharacterIA Visión. Se instala junto a CharacterIA estable."
           else
             APK="CharacterIA-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Android Debug ${GITHUB_RUN_NUMBER}"
