@@ -9,9 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -264,7 +264,7 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
     ) {
         Box(modifier = Modifier.fillMaxWidth().height(280.dp).background(Color.Black)) {
             AndroidView(
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         useController = false
@@ -282,7 +282,7 @@ private fun MuseTalkAvatarStage(avatar: MuseTalkAvatar) {
                 Image(
                     bitmap = it.bitmap.asImageBitmap(),
                     contentDescription = "MuseTalk neural frame",
-                    modifier = Modifier.matchParentSize(),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
                 )
             }
