@@ -13,6 +13,7 @@ class SettingsStore(private val context: Context) {
 
     fun geminiKey(): String = secrets.get("gemini")
     fun fishKey(): String = secrets.get("fish")
+    fun simliKey(): String = secrets.get("simli")
 
     /** Modelo que eligió el usuario. Un fallback automático nunca modifica esta preferencia. */
     fun geminiModel(): String {
@@ -28,9 +29,10 @@ class SettingsStore(private val context: Context) {
         return normalizeGeminiModel(active)
     }
 
-    fun saveGlobalKeys(geminiApiKey: String, fishApiKey: String) {
+    fun saveGlobalKeys(geminiApiKey: String, fishApiKey: String, simliApiKey: String = simliKey()) {
         secrets.put("gemini", geminiApiKey.trim())
         secrets.put("fish", fishApiKey.trim())
+        secrets.put("simli", simliApiKey.trim())
     }
 
     /** Selección manual: pasa a ser preferida y activa inmediatamente. */
@@ -57,13 +59,18 @@ class SettingsStore(private val context: Context) {
      * key anterior deja de tener sentido y el modelo activo vuelve automáticamente al preferido.
      * Devuelve true cuando la key de Gemini efectivamente cambió.
      */
-    fun saveGlobalConnection(geminiApiKey: String, fishApiKey: String, geminiModel: String): Boolean {
+    fun saveGlobalConnection(
+        geminiApiKey: String,
+        fishApiKey: String,
+        simliApiKey: String,
+        geminiModel: String,
+    ): Boolean {
         val normalizedKey = geminiApiKey.trim()
         val previousGeminiKey = geminiKey().trim()
         val keyChanged = normalizedKey != previousGeminiKey
         val preferred = normalizeGeminiModel(geminiModel)
 
-        saveGlobalKeys(normalizedKey, fishApiKey)
+        saveGlobalKeys(normalizedKey, fishApiKey, simliApiKey)
         prefs.edit()
             .putString("preferredGeminiModel", preferred)
             .putString("geminiModel", preferred)
@@ -93,6 +100,7 @@ class SettingsStore(private val context: Context) {
         return AppConfig(
             geminiApiKey = geminiKey(),
             fishApiKey = fishKey(),
+            simliApiKey = simliKey(),
             geminiModel = geminiModel(),
             personality = personality,
             voiceTranscript = prefs.getString("voiceTranscript", "") ?: "",
