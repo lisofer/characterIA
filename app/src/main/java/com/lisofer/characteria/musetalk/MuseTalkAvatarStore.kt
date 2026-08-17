@@ -33,11 +33,7 @@ object MuseTalkAvatarStore {
         val meta = File(d, "avatar.json")
         if (!video.isFile || !meta.isFile) return null
         val json = JSONObject(meta.readText())
-        MuseTalkAvatar(
-            profileId = profileId,
-            displayName = json.optString("displayName", "avatar.mp4"),
-            videoPath = video.absolutePath,
-        )
+        MuseTalkAvatar(profileId, json.optString("displayName", "avatar.mp4"), video.absolutePath)
     }.getOrNull()
 
     suspend fun importVideo(context: Context, profileId: String, uri: Uri): MuseTalkAvatar {
@@ -46,7 +42,6 @@ object MuseTalkAvatarStore {
         val d = dir(app, profileId)
         val incoming = File(d, ".avatar-incoming.mp4")
         val name = displayName(app, uri)
-
         try {
             withContext(Dispatchers.IO) {
                 incoming.delete()
@@ -65,6 +60,8 @@ object MuseTalkAvatarStore {
                 } ?: error("No se pudo leer el MP4")
                 require(incoming.length() > 0) { "El video está vacío" }
 
+                // A different source must never reuse old VAE latents/face boxes.
+                MuseTalkPreparedStore.invalidate(app, profileId)
                 val final = File(d, "avatar.mp4")
                 final.delete()
                 if (!incoming.renameTo(final)) {
@@ -72,10 +69,7 @@ object MuseTalkAvatarStore {
                     incoming.delete()
                 }
                 File(d, "avatar.json").writeText(
-                    JSONObject()
-                        .put("displayName", name)
-                        .put("updatedAt", System.currentTimeMillis())
-                        .toString()
+                    JSONObject().put("displayName", name).put("updatedAt", System.currentTimeMillis()).toString()
                 )
             }
             _updates.value++
