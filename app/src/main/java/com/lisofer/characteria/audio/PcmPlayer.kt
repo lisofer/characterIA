@@ -11,6 +11,7 @@ import kotlin.concurrent.withLock
 class PcmPlayer(private val sampleRate: Int = 44_100) {
     private val lock = ReentrantLock()
     private var track: AudioTrack? = null
+    private var totalFramesWritten = 0L
 
     private fun ensureTrack(): AudioTrack = lock.withLock {
         track?.let { return it }
@@ -38,6 +39,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setSessionId(AudioManager.AUDIO_SESSION_ID_GENERATE)
             .build()
+        totalFramesWritten = 0L
         created.play()
         track = created
         created
@@ -45,13 +47,29 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
 
     fun write(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        // El video escucha exactamente el mismo chunk que sale por AudioTrack, sin buffer adicional.
-        LipSyncBus.pushPcm16Le(bytes)
         val t = ensureTrack()
         var offset = 0
         while (offset < bytes.size) {
+            val beforeFrames = totalFramesWritten
             val n = t.write(bytes, offset, bytes.size - offset, AudioTrack.WRITE_BLOCKING)
             if (n <= 0) break
+
+            val writtenBytes = n - (n % 2)
+            if (writtenBytes > 0) {
+                // La 213 movía la boca ANTES de meter el PCM en AudioTrack. Acá usamos el
+                // playbackHead para saber cuánto audio había delante de este bloque y programar
+                // la animación para el instante en que realmente va a sonar.
+                val playedFrames = t.playbackHeadPosition.toLong() and 0xffff_ffffL
+                val backlogFrames = (beforeFrames - playedFrames).coerceAtLeast(0L)
+                val backlogMs = (backlogFrames * 1000L / sampleRate).coerceIn(0L, 450L)
+                val slice = if (offset == 0 && writtenBytes == bytes.size) {
+                    bytes
+                } else {
+                    bytes.copyOfRange(offset, offset + writtenBytes)
+                }
+                LipSyncBus.pushPcm16Le(slice, backlogMs)
+                totalFramesWritten += writtenBytes / 2L
+            }
             offset += n
         }
     }
@@ -61,6 +79,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
         track?.let {
             runCatching { it.pause() }
             runCatching { it.flush() }
+            totalFramesWritten = 0L
             runCatching { it.play() }
         }
     }
@@ -72,5 +91,6 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
             runCatching { it.release() }
         }
         track = null
+        totalFramesWritten = 0L
     }
 }
