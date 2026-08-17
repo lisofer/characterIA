@@ -1,0 +1,66 @@
+name: Inspect MuseTalk ONNX metadata
+
+on:
+  push:
+    branches: [ "feature/characteria-musetalk" ]
+    paths:
+      - ".github/workflows/inspect-musetalk-onnx.yml"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ONNX
+        run: python -m pip install "onnx==1.19.0"
+      - name: Download graph only
+        run: |
+          curl -L --fail --retry 3 -o /tmp/unet.onnx \
+            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet.onnx?download=true"
+      - name: Inspect symbolic dimensions and batched MatMul inputs
+        run: |
+          python - <<'PY'
+          import onnx
+          from collections import Counter
+
+          m = onnx.load('/tmp/unet.onnx', load_external_data=False)
+
+          def dims(vi):
+              out=[]
+              tt=vi.type.tensor_type
+              for d in tt.shape.dim:
+                  if d.HasField('dim_value'):
+                      out.append(('value', d.dim_value))
+                  elif d.HasField('dim_param'):
+                      out.append(('param', d.dim_param))
+                  else:
+                      out.append(('unknown', None))
+              return out
+
+          print('=== GRAPH INPUTS ===')
+          for x in m.graph.input:
+              print(x.name, dims(x))
+
+          print('=== GRAPH OUTPUTS ===')
+          for x in m.graph.output:
+              print(x.name, dims(x))
+
+          params=Counter()
+          for vi in list(m.graph.input)+list(m.graph.output)+list(m.graph.value_info):
+              for kind,val in dims(vi):
+                  if kind=='param': params[val]+=1
+          print('=== SYMBOLIC DIMENSIONS ===')
+          print(params)
+
+          info={vi.name:dims(vi) for vi in list(m.graph.input)+list(m.graph.output)+list(m.graph.value_info)}
+          print('=== MATMUL NODES WITH KNOWN INPUT SHAPES ===')
+          for n in m.graph.node:
+              if n.op_type=='MatMul':
+                  a=info.get(n.input[0]); b=info.get(n.input[1])
+                  if a or b:
+                      print(n.name, 'A=',a,'B=',b)
+          PY
