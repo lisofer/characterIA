@@ -8,10 +8,15 @@ import android.os.Build
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -29,6 +34,36 @@ object MuseTalkAvatarPreprocessor {
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
+
+    // Important: preprocessing must survive recomposition / closing the Settings sheet.
+    // Never bind this long-running neural job to rememberCoroutineScope().
+    private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var prepareJob: Job? = null
+
+    @Synchronized
+    fun start(context: Context, avatar: MuseTalkAvatar) {
+        if (prepareJob?.isActive == true) return
+        val app = context.applicationContext
+        prepareJob = workerScope.launch {
+            try {
+                prepare(app, avatar)
+            } catch (_: CancellationException) {
+                // A deliberate cancellation is not a neural/model error.
+                if (_state.value is State.Preparing) _state.value = State.Idle
+            } catch (_: Throwable) {
+                // prepare() already published the concrete error in state.
+            } finally {
+                synchronized(this@MuseTalkAvatarPreprocessor) { prepareJob = null }
+            }
+        }
+    }
+
+    @Synchronized
+    fun cancel() {
+        prepareJob?.cancel()
+        prepareJob = null
+        if (_state.value is State.Preparing) _state.value = State.Idle
+    }
 
     suspend fun prepare(context: Context, avatar: MuseTalkAvatar): MuseTalkPreparedAvatar {
         val app = context.applicationContext
@@ -98,6 +133,9 @@ object MuseTalkAvatarPreprocessor {
             }
             _state.value = State.Ready(result.frames.size)
             result
+        } catch (cancelled: CancellationException) {
+            staging.deleteRecursively()
+            throw cancelled
         } catch (t: Throwable) {
             staging.deleteRecursively()
             _state.value = State.Error(t.message ?: "No pude preparar el avatar MuseTalk")
@@ -166,7 +204,6 @@ object MuseTalkAvatarPreprocessor {
     private fun expandedFaceRect(box: Rect, width: Int, height: Int): Rect {
         val w = box.width().coerceAtLeast(20)
         val h = box.height().coerceAtLeast(20)
-        // MuseTalk V1.5 benefits from a little extra jaw/chin context.
         val l = (box.left - w * .08f).toInt().coerceIn(0, width - 2)
         val r = (box.right + w * .08f).toInt().coerceIn(l + 1, width)
         val t = (box.top - h * .04f).toInt().coerceIn(0, height - 2)
