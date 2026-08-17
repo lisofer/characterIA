@@ -67,6 +67,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lisofer.characteria.simli.SimliAvatarPanel
+import com.lisofer.characteria.simli.SimliRuntimeEffect
+import com.lisofer.characteria.simli.SimliSettingsFields
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,6 +113,8 @@ private fun CharacterApp(vm: CharacterViewModel) {
     val state by vm.ui.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     var showDiagnostics by remember { mutableStateOf(false) }
+
+    SimliRuntimeEffect(state)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -232,6 +237,9 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
 
     Column(modifier = modifier.fillMaxSize()) {
         StatusHero(state)
+        if (state.config.simliEnabled && state.activeCharacterNames.size <= 1) {
+            SimliAvatarPanel()
+        }
         if (state.messages.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -461,6 +469,9 @@ private fun SettingsSheet(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            item {
+                SimliSettingsFields(config = c, onConfig = onConfig)
             }
             item {
                 Box {
