@@ -26,7 +26,7 @@ jobs:
       - name: Install ONNX conversion tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "onnx==1.19.0" "onnxconverter-common==1.16.0"
+          python -m pip install "onnx==1.19.0" "onnxconverter-common==1.16.0" "onnxruntime==1.22.1"
 
       - name: Download source MuseTalk ONNX UNet
         shell: bash
@@ -40,45 +40,48 @@ jobs:
             "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet.onnx.data?download=true"
           ls -lh model-src
 
-      - name: Convert UNet to Android-safe mixed precision
+      - name: Convert UNet to Android-safe mixed precision v2
         shell: bash
         run: |
           cat > /tmp/convert_musetalk.py <<'PY'
           import gc
+          import hashlib
           import os
           import onnx
+          import onnxruntime as ort
           from onnxconverter_common.float16 import convert_float_to_float16
 
           source = "model-src/unet.onnx"
-          output = "model-out/unet_android_mixed.onnx"
-          external_name = "unet_android_mixed.onnx.data"
+          output = "model-out/unet_android_mixed_v2.onnx"
+          external_name = "unet_android_mixed_v2.onnx.data"
 
           print("Loading MuseTalk UNet + external weights…", flush=True)
           model = onnx.load_model(source, load_external_data=True)
           op_types = sorted({node.op_type for node in model.graph.node})
           print("UNet op types:", op_types, flush=True)
 
-          # Strategy for Android:
-          # Keep only the compute-heavy linear/convolution kernels in FP16.
-          # Everything else stays FP32 so any node rejected by NNAPI can execute
-          # safely on ORT CPU. This specifically prevents com.microsoft::Gelu
-          # from receiving tensor(float16), which ORT CPU does not implement.
+          # Only the expensive kernels are converted to FP16. All normalization,
+          # activation and bookkeeping ops stay FP32. Crucially, shape inference
+          # remains ENABLED so onnxconverter-common can insert Cast nodes at every
+          # FP16<->FP32 boundary. v1 disabled it and produced a mixed-type
+          # InstanceNormalization node that ORT correctly rejected at load time.
           fp16_heavy_ops = {"Conv", "ConvTranspose", "MatMul", "Gemm"}
-          never_block = {"Cast"}
-          blocked = sorted(set(op_types) - fp16_heavy_ops - never_block)
+          blocked = sorted(set(op_types) - fp16_heavy_ops - {"Cast"})
           print("Keeping FP32:", blocked, flush=True)
 
           model = convert_float_to_float16(
               model,
               keep_io_types=True,
-              disable_shape_infer=True,
+              disable_shape_infer=False,
               op_block_list=blocked,
           )
 
-          # Mark the modified model so it is obvious which pack the app uses.
           prop = model.metadata_props.add()
           prop.key = "characteria.android_mixed_precision"
-          prop.value = "v1; FP16 Conv/ConvTranspose/MatMul/Gemm; other ops FP32"
+          prop.value = "v2; shape-inferred casts; FP16 Conv/ConvTranspose/MatMul/Gemm; other ops FP32"
+
+          print("Checking ONNX graph…", flush=True)
+          onnx.checker.check_model(model, full_check=True)
 
           print("Saving external-data model…", flush=True)
           onnx.save_model(
@@ -93,23 +96,39 @@ jobs:
           del model
           gc.collect()
 
-          for path in [output, os.path.join("model-out", external_name)]:
-              print(path, os.path.getsize(path), flush=True)
+          data_path = os.path.join("model-out", external_name)
+          for path in [output, data_path]:
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+                      h.update(chunk)
+              print(path, os.path.getsize(path), "sha256=" + h.hexdigest(), flush=True)
+
+          # Most important gate: do not publish a model that ORT itself cannot load.
+          # This catches invalid type boundaries before the user downloads 1.7 GB.
+          print("Creating ONNX Runtime CPU session as compatibility gate…", flush=True)
+          so = ort.SessionOptions()
+          so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+          session = ort.InferenceSession(output, sess_options=so, providers=["CPUExecutionProvider"])
+          print("ORT CPU session OK. Inputs:", [(i.name, i.type, i.shape) for i in session.get_inputs()], flush=True)
+          print("ORT CPU session OK. Outputs:", [(o.name, o.type, o.shape) for o in session.get_outputs()], flush=True)
+          del session
+          gc.collect()
           PY
           python /tmp/convert_musetalk.py
           ls -lh model-out
 
-      - name: Publish Android mixed model pack
+      - name: Publish Android mixed model pack v2
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG="musetalk-android-mixed-v1"
+          TAG="musetalk-android-mixed-v2"
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
           gh release create "$TAG" \
-            model-out/unet_android_mixed.onnx \
-            model-out/unet_android_mixed.onnx.data \
+            model-out/unet_android_mixed_v2.onnx \
+            model-out/unet_android_mixed_v2.onnx.data \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "MuseTalk Android Mixed Precision v1" \
-            --notes "MuseTalk 1.5 UNet converted for CharacterIA Android. Heavy Conv/ConvTranspose/MatMul/Gemm kernels remain FP16; remaining operators stay FP32 so ORT CPU fallback does not receive unsupported FP16 activations such as com.microsoft::Gelu. Derived from DgDev91/MuseTalk-ONNX / TMElyralab MuseTalk."
+            --title "MuseTalk Android Mixed Precision v2" \
+            --notes "MuseTalk 1.5 UNet for CharacterIA Android. v2 keeps shape inference enabled during mixed-precision conversion, inserts explicit FP16/FP32 boundary casts, and is validated by creating a real ONNX Runtime CPU session before publication."
