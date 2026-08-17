@@ -15,8 +15,8 @@ android {
         applicationId = "com.lisofer.characteria.musetalk"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5.0-musetalk-android-mixed"
+        versionCode = 6
+        versionName = "0.6.0-musetalk-safe-fp16"
         // MuseTalk needs a 64-bit neural runtime. Avoid bundling emulator/x86 native ORT libs.
         ndk {
             abiFilters += "arm64-v8a"
@@ -72,6 +72,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
 
-    // MuseTalk Local: mixed-precision UNet + NNAPI/XNNPACK/CPU fallback.
+    // MuseTalk Local: FP16 heavy compute + explicit FP32 fallback islands.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
 }
