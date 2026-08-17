@@ -30,8 +30,10 @@ object MuseTalkModelStore {
     )
 
     val files = listOf(
+        // Conservamos el nombre local usado por el engine para que la actualización
+        // no toque el pipeline. El contenido, sin embargo, es el UNet Android-safe v1.
         ModelFile(
-            "unet_android_safe_fp16.onnx",
+            "unet_android_mixed.onnx",
             "https://github.com/lisofer/characterIA/releases/download/musetalk-android-safe-fp16-v1/unet_android_safe_fp16.onnx",
             1_644_853_091L,
         ),
@@ -57,11 +59,11 @@ object MuseTalkModelStore {
         ),
     )
 
-    // Modelos de las builds 239/244. Se eliminan antes de medir espacio libre para
-    // no obligar al teléfono a conservar dos UNet de ~1.6–1.7 GB simultáneamente.
+    // Archivos grandes de builds anteriores. El viejo graph .onnx pequeño se deja
+    // temporalmente y se reemplaza al finalizar la descarga nueva, para que la app
+    // nunca quede apuntando a un archivo parcial.
     private val obsoleteUnetFiles = listOf(
         "unet_fp16.onnx",
-        "unet_android_mixed.onnx",
         "unet_android_mixed.onnx.data",
         "unet_android_mixed_v2.onnx",
         "unet_android_mixed_v2.onnx.data",
