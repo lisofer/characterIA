@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
  * privado de la app. La descarga es reanudable porque el UNet FP16 ronda 1.64 GB.
  */
 object MuseTalkModelStore {
-    private const val MODEL_REVISION = "dgdev91-main-2026-08"
-    private const val MIN_FREE_BYTES = 2_400_000_000L
+    private const val MODEL_REVISION = "dgdev91-main-2026-08-v2"
+    private const val MIN_FREE_BYTES = 2_500_000_000L
 
     data class ModelFile(
         val fileName: String,
@@ -27,7 +27,8 @@ object MuseTalkModelStore {
         val expectedBytes: Long,
     )
 
-    // Port ONNX de MuseTalk 1.5. Los archivos grandes viven fuera del APK.
+    // Pesos ONNX usados por el port on-device de MuseTalk. UNet/VAE tienen pesos FP16
+    // pero I/O float32; Whisper y PE quedan FP32 para compatibilidad y fidelidad.
     val files = listOf(
         ModelFile(
             "unet_fp16.onnx",
@@ -45,14 +46,14 @@ object MuseTalkModelStore {
             99_082_054L,
         ),
         ModelFile(
-            "whisper_encoder_fp16.onnx",
-            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/whisper_encoder_fp16.onnx?download=true",
-            16_462_999L,
+            "whisper_encoder.onnx",
+            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/whisper_encoder.onnx?download=true",
+            32_891_369L,
         ),
         ModelFile(
-            "positional_encoding_fp16.onnx",
-            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/positional_encoding_fp16.onnx?download=true",
-            3_840_000L,
+            "positional_encoding.onnx",
+            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/positional_encoding.onnx?download=true",
+            7_680_000L,
         ),
     )
 
@@ -92,7 +93,6 @@ object MuseTalkModelStore {
 
     fun isReady(context: Context): Boolean = files.all { spec ->
         val file = modelFile(context, spec.fileName)
-        // Dejamos margen porque HuggingFace puede regenerar el contenedor ONNX sin cambiar el grafo.
         file.isFile && file.length() >= (spec.expectedBytes * 0.94).toLong()
     }
 
@@ -106,7 +106,7 @@ object MuseTalkModelStore {
         try {
             val free = StatFs(app.filesDir.absolutePath).availableBytes
             if (free < MIN_FREE_BYTES && !isReady(app)) {
-                error("MuseTalk necesita unos 2,4 GB libres para descargar y preparar el motor.")
+                error("MuseTalk necesita unos 2,5 GB libres para descargar y preparar el motor.")
             }
 
             val overallTotal = files.sumOf { it.expectedBytes }
@@ -117,13 +117,7 @@ object MuseTalkModelStore {
                     completedBefore += spec.expectedBytes
                     return@forEachIndexed
                 }
-                downloadResumable(
-                    spec = spec,
-                    destination = destination,
-                    fileIndex = index,
-                    overallCompletedBefore = completedBefore,
-                    overallTotal = overallTotal,
-                )
+                downloadResumable(spec, destination, index, completedBefore, overallTotal)
                 completedBefore += spec.expectedBytes
             }
 
@@ -168,7 +162,7 @@ object MuseTalkModelStore {
                 body.byteStream().use { input ->
                     val buffer = ByteArray(256 * 1024)
                     var current = existing
-                    var lastEmit = 0L
+                    var lastEmit = existing
                     while (true) {
                         val n = input.read(buffer)
                         if (n < 0) break
@@ -191,7 +185,6 @@ object MuseTalkModelStore {
             }
         }
 
-        // Evita aceptar una página HTML/error pequeña como si fuera el modelo.
         if (part.length() < spec.expectedBytes * .90) {
             error("${spec.fileName} quedó incompleto (${part.length() / 1_000_000} MB)")
         }
