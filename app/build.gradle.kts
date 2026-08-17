@@ -15,8 +15,8 @@ android {
         applicationId = "com.lisofer.characteria.musetalk"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.7.0-musetalk-nnapi-safe"
+        versionCode = 8
+        versionName = "0.8.0-musetalk-reliable-loader"
         // MuseTalk needs a 64-bit neural runtime. Avoid bundling emulator/x86 native ORT libs.
         ndk {
             abiFilters += "arm64-v8a"
