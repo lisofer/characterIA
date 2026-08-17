@@ -19,24 +19,32 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * CharacterIA Visión v0.3.
- * En vez de "abrir" una foto de la boca, guarda varias bocas reales del propio video.
- */
+data class MouthTrackPoint(
+    val timeMs: Long,
+    val centerX: Float,
+    val centerY: Float,
+    val patchWidth: Float,
+    val patchHeight: Float,
+    val rotationZ: Float,
+)
+
 data class VisionAvatar(
     val profileId: String,
     val displayName: String,
     val videoPath: String,
+    val neutralPath: String,
     val restPath: String,
     val closedPath: String,
     val widePath: String,
@@ -44,10 +52,15 @@ data class VisionAvatar(
     val roundPath: String,
     val sourceWidth: Int,
     val sourceHeight: Int,
+    val durationMs: Long,
     val patchX: Float,
     val patchY: Float,
     val patchWidth: Float,
     val patchHeight: Float,
+    val neutralScaleW: Float,
+    val neutralScaleH: Float,
+    val neutralYOffset: Float,
+    val motionTrack: List<MouthTrackPoint>,
     val quality: Float,
     val analyzedFrames: Int,
 )
@@ -60,13 +73,17 @@ private data class MouthObservation(
     val patchHeight: Float,
     val openRatio: Float,
     val widthRatio: Float,
+    val faceWidth: Float,
+    val faceHeight: Float,
+    val rotationZ: Float,
 )
 
 object VisionAvatarStore {
-    private const val SCHEMA_VERSION = 3
+    private const val SCHEMA_VERSION = 4
     private const val MAX_VIDEO_BYTES = 150L * 1024L * 1024L
     private const val METADATA_NAME = "vision.json"
     private const val VIDEO_NAME = "avatar.mp4"
+    private const val NEUTRAL_NAME = "lower_face_neutral.png"
     private const val REST_NAME = "mouth_rest.png"
     private const val CLOSED_NAME = "mouth_closed.png"
     private const val WIDE_NAME = "mouth_wide.png"
@@ -91,17 +108,36 @@ object VisionAvatarStore {
         if (json.optInt("schemaVersion", 0) < SCHEMA_VERSION) return null
 
         val video = File(dir, VIDEO_NAME)
+        val neutral = File(dir, NEUTRAL_NAME)
         val rest = File(dir, REST_NAME)
         val closed = File(dir, CLOSED_NAME)
         val wide = File(dir, WIDE_NAME)
         val open = File(dir, OPEN_NAME)
         val round = File(dir, ROUND_NAME)
-        if (listOf(video, rest, closed, wide, open, round).any { !it.exists() }) return null
+        if (listOf(video, neutral, rest, closed, wide, open, round).any { !it.exists() }) return null
+
+        val trackJson = json.optJSONArray("motionTrack") ?: JSONArray()
+        val track = buildList {
+            for (i in 0 until trackJson.length()) {
+                val p = trackJson.optJSONObject(i) ?: continue
+                add(
+                    MouthTrackPoint(
+                        timeMs = p.optLong("t", 0L),
+                        centerX = p.optDouble("cx", 0.5).toFloat(),
+                        centerY = p.optDouble("cy", 0.5).toFloat(),
+                        patchWidth = p.optDouble("w", 0.2).toFloat(),
+                        patchHeight = p.optDouble("h", 0.1).toFloat(),
+                        rotationZ = p.optDouble("rz", 0.0).toFloat(),
+                    )
+                )
+            }
+        }.sortedBy { it.timeMs }
 
         VisionAvatar(
             profileId = profileId,
             displayName = json.optString("displayName", "avatar.mp4"),
             videoPath = video.absolutePath,
+            neutralPath = neutral.absolutePath,
             restPath = rest.absolutePath,
             closedPath = closed.absolutePath,
             widePath = wide.absolutePath,
@@ -109,10 +145,15 @@ object VisionAvatarStore {
             roundPath = round.absolutePath,
             sourceWidth = json.getInt("sourceWidth"),
             sourceHeight = json.getInt("sourceHeight"),
+            durationMs = json.optLong("durationMs", 1L).coerceAtLeast(1L),
             patchX = json.getDouble("patchX").toFloat(),
             patchY = json.getDouble("patchY").toFloat(),
             patchWidth = json.getDouble("patchWidth").toFloat(),
             patchHeight = json.getDouble("patchHeight").toFloat(),
+            neutralScaleW = json.optDouble("neutralScaleW", 1.56).toFloat(),
+            neutralScaleH = json.optDouble("neutralScaleH", 2.10).toFloat(),
+            neutralYOffset = json.optDouble("neutralYOffset", 0.20).toFloat(),
+            motionTrack = track,
             quality = json.optDouble("quality", 0.5).toFloat(),
             analyzedFrames = json.optInt("analyzedFrames", 0),
         )
@@ -124,11 +165,6 @@ object VisionAvatarStore {
         bump()
     }
 
-    /**
-     * El trabajo pesado ocurre sólo al importar el video. Se muestrean fotogramas,
-     * se detectan labios reales y se guardan cinco texturas con borde feathered.
-     * Durante una conversación no se ejecuta ML Kit.
-     */
     suspend fun importVideo(context: Context, profileId: String, uri: Uri): VisionAvatar {
         require(profileId.isNotBlank()) { "Primero elegí un perfil" }
         val appContext = context.applicationContext
@@ -158,18 +194,37 @@ object VisionAvatarStore {
             }
 
             val analysis = analyzeAndBuildTextures(incomingVideo, incoming)
+            val motionJson = JSONArray().apply {
+                analysis.motionTrack.forEach { p ->
+                    put(
+                        JSONObject()
+                            .put("t", p.timeMs)
+                            .put("cx", p.centerX.toDouble())
+                            .put("cy", p.centerY.toDouble())
+                            .put("w", p.patchWidth.toDouble())
+                            .put("h", p.patchHeight.toDouble())
+                            .put("rz", p.rotationZ.toDouble())
+                    )
+                }
+            }
             val json = JSONObject()
                 .put("schemaVersion", SCHEMA_VERSION)
                 .put("displayName", displayName)
                 .put("sourceWidth", analysis.sourceWidth)
                 .put("sourceHeight", analysis.sourceHeight)
+                .put("durationMs", analysis.durationMs)
                 .put("patchX", analysis.patchX.toDouble())
                 .put("patchY", analysis.patchY.toDouble())
                 .put("patchWidth", analysis.patchWidth.toDouble())
                 .put("patchHeight", analysis.patchHeight.toDouble())
+                .put("neutralScaleW", analysis.neutralScaleW.toDouble())
+                .put("neutralScaleH", analysis.neutralScaleH.toDouble())
+                .put("neutralYOffset", analysis.neutralYOffset.toDouble())
+                .put("motionTrack", motionJson)
                 .put("quality", analysis.quality.toDouble())
                 .put("analyzedFrames", analysis.analyzedFrames)
                 .put("updatedAt", System.currentTimeMillis())
+
             withContext(Dispatchers.IO) {
                 File(incoming, METADATA_NAME).writeText(json.toString())
                 val finalDir = visionDir(appContext, profileId)
@@ -190,10 +245,15 @@ object VisionAvatarStore {
     private data class AnalysisResult(
         val sourceWidth: Int,
         val sourceHeight: Int,
+        val durationMs: Long,
         val patchX: Float,
         val patchY: Float,
         val patchWidth: Float,
         val patchHeight: Float,
+        val neutralScaleW: Float,
+        val neutralScaleH: Float,
+        val neutralYOffset: Float,
+        val motionTrack: List<MouthTrackPoint>,
         val quality: Float,
         val analyzedFrames: Int,
     )
@@ -218,13 +278,23 @@ object VisionAvatarStore {
                 ?.toIntOrNull()?.coerceAtLeast(1) ?: 1280
 
             val scale = (960f / max(rawWidth, rawHeight).toFloat()).coerceAtMost(1f)
-            val targetWidth = (rawWidth * scale).toInt().coerceAtLeast(160)
-            val targetHeight = (rawHeight * scale).toInt().coerceAtLeast(160)
+            val requestWidth = (rawWidth * scale).toInt().coerceAtLeast(160)
+            val requestHeight = (rawHeight * scale).toInt().coerceAtLeast(160)
+
+            // Un MP4 vertical puede estar almacenado apaisado + rotación. La 213 usaba el ancho/
+            // alto del archivo y por eso el parche podía terminar en la franja negra. Acá usamos
+            // las dimensiones REALES del bitmap decodificado, que son las mismas que analiza ML Kit.
+            val probe = withContext(Dispatchers.IO) {
+                extractFrame(retriever, 0L, requestWidth, requestHeight)
+            } ?: error("No pude leer el primer fotograma del video")
+            val frameWidth = probe.width.coerceAtLeast(1)
+            val frameHeight = probe.height.coerceAtLeast(1)
+            probe.recycle()
 
             val sampleCount = when {
-                durationMs < 4_000L -> 20
-                durationMs < 12_000L -> 34
-                else -> 42
+                durationMs < 4_000L -> 36
+                durationMs < 12_000L -> 72
+                else -> 96
             }
             val observations = ArrayList<MouthObservation>(sampleCount)
 
@@ -232,7 +302,7 @@ object VisionAvatarStore {
                 val fraction = if (sampleCount == 1) 0.0 else index.toDouble() / (sampleCount - 1).toDouble()
                 val timeMs = (durationMs * fraction).toLong().coerceIn(0L, max(0L, durationMs - 1L))
                 val frame = withContext(Dispatchers.IO) {
-                    extractFrame(retriever, timeMs, targetWidth, targetHeight)
+                    extractFrame(retriever, timeMs, requestWidth, requestHeight)
                 } ?: return@repeat
                 try {
                     val face = detectLargestFace(detector, frame) ?: return@repeat
@@ -242,12 +312,9 @@ object VisionAvatarStore {
                 }
             }
 
-            require(observations.size >= 6) {
+            require(observations.size >= 10) {
                 "No pude seguir bien el rostro. Usá un video frontal, nítido y con buena luz."
             }
-
-            val closed = observations.minByOrNull { it.openRatio }!!
-            val open = observations.maxByOrNull { it.openRatio }!!
 
             val openMin = observations.minOf { it.openRatio }
             val openMax = observations.maxOf { it.openRatio }
@@ -259,34 +326,83 @@ object VisionAvatarStore {
             fun openN(o: MouthObservation) = ((o.openRatio - openMin) / openRange).coerceIn(0f, 1f)
             fun widthN(o: MouthObservation) = ((o.widthRatio - widthMin) / widthRange).coerceIn(0f, 1f)
 
-            val wide = observations.maxByOrNull { widthN(it) * .72f + openN(it) * .28f } ?: open
-            val round = observations.maxByOrNull { openN(it) * .72f + (1f - widthN(it)) * .28f } ?: open
-            val rest = closed
+            val rest = observations.minByOrNull { openN(it) + abs(it.rotationZ) / 90f * .22f }!!
+            val closed = observations.minByOrNull { openN(it) + abs(it.rotationZ) / 90f * .12f } ?: rest
+            val open = observations.maxByOrNull { openN(it) - abs(it.rotationZ) / 90f * .08f } ?: rest
+            val wide = observations.maxByOrNull {
+                widthN(it) * .72f + openN(it) * .28f - abs(it.rotationZ) / 90f * .05f
+            } ?: open
+            val round = observations.maxByOrNull {
+                openN(it) * .72f + (1f - widthN(it)) * .28f - abs(it.rotationZ) / 90f * .05f
+            } ?: open
 
             val anchorW = median(observations.map { it.patchWidth }).coerceAtLeast(24f)
             val anchorH = median(observations.map { it.patchHeight }).coerceAtLeast(16f)
-            val anchorLeft = (rest.centerX - anchorW / 2f).coerceIn(0f, targetWidth - 2f)
-            val anchorTop = (rest.centerY - anchorH / 2f).coerceIn(0f, targetHeight - 2f)
-            val safeAnchorW = min(anchorW, targetWidth - anchorLeft).coerceAtLeast(2f)
-            val safeAnchorH = min(anchorH, targetHeight - anchorTop).coerceAtLeast(2f)
+            val medianFaceW = median(observations.map { it.faceWidth }).coerceAtLeast(1f)
+            val medianFaceH = median(observations.map { it.faceHeight }).coerceAtLeast(1f)
 
-            saveTexture(retriever, rest, targetWidth, targetHeight, anchorW, anchorH, File(outDir, REST_NAME))
-            saveTexture(retriever, closed, targetWidth, targetHeight, anchorW, anchorH, File(outDir, CLOSED_NAME))
-            saveTexture(retriever, wide, targetWidth, targetHeight, anchorW, anchorH, File(outDir, WIDE_NAME))
-            saveTexture(retriever, open, targetWidth, targetHeight, anchorW, anchorH, File(outDir, OPEN_NAME))
-            saveTexture(retriever, round, targetWidth, targetHeight, anchorW, anchorH, File(outDir, ROUND_NAME))
+            val anchorLeft = (rest.centerX - anchorW / 2f).coerceIn(0f, frameWidth - 2f)
+            val anchorTop = (rest.centerY - anchorH / 2f).coerceIn(0f, frameHeight - 2f)
+            val safeAnchorW = min(anchorW, frameWidth - anchorLeft).coerceAtLeast(2f)
+            val safeAnchorH = min(anchorH, frameHeight - anchorTop).coerceAtLeast(2f)
+
+            // El parche neutral tapa boca + parte de mandíbula del video original. Después la boca
+            // elegida por Fish se dibuja arriba. Así nunca quedan dos bocas hablando a la vez.
+            val neutralScaleW = 1.56f
+            val neutralScaleH = 2.10f
+            val neutralYOffset = 0.20f
+
+            savePatch(
+                retriever = retriever,
+                timeMs = rest.timeMs,
+                requestWidth = requestWidth,
+                requestHeight = requestHeight,
+                centerX = rest.centerX,
+                centerY = rest.centerY + anchorH * neutralYOffset,
+                cropW = anchorW * neutralScaleW,
+                cropH = anchorH * neutralScaleH,
+                output = File(outDir, NEUTRAL_NAME),
+                featherXRatio = .13f,
+                featherYRatio = .17f,
+            )
+            saveMouthTexture(retriever, rest, requestWidth, requestHeight, anchorW, anchorH, File(outDir, REST_NAME))
+            saveMouthTexture(retriever, closed, requestWidth, requestHeight, anchorW, anchorH, File(outDir, CLOSED_NAME))
+            saveMouthTexture(retriever, wide, requestWidth, requestHeight, anchorW, anchorH, File(outDir, WIDE_NAME))
+            saveMouthTexture(retriever, open, requestWidth, requestHeight, anchorW, anchorH, File(outDir, OPEN_NAME))
+            saveMouthTexture(retriever, round, requestWidth, requestHeight, anchorW, anchorH, File(outDir, ROUND_NAME))
+
+            // Guardamos la trayectoria de la cara. En runtime sólo interpolamos números; ML Kit no
+            // corre durante la conversación y el parche puede seguir la cabeza a ~60 fps.
+            val track = observations.sortedBy { it.timeMs }.map { o ->
+                val scaleX = (o.faceWidth / medianFaceW).coerceIn(.78f, 1.28f)
+                val scaleY = (o.faceHeight / medianFaceH).coerceIn(.78f, 1.28f)
+                MouthTrackPoint(
+                    timeMs = o.timeMs,
+                    centerX = (o.centerX / frameWidth).coerceIn(0f, 1f),
+                    centerY = (o.centerY / frameHeight).coerceIn(0f, 1f),
+                    patchWidth = (anchorW * scaleX / frameWidth).coerceIn(.02f, .8f),
+                    patchHeight = (anchorH * scaleY / frameHeight).coerceIn(.015f, .6f),
+                    rotationZ = o.rotationZ.coerceIn(-20f, 20f),
+                )
+            }
 
             val motionQuality = ((openMax - openMin) / .085f).coerceIn(0f, 1f)
             val shapeQuality = ((widthMax - widthMin) / .055f).coerceIn(0f, 1f)
-            val quality = (motionQuality * .72f + shapeQuality * .28f).coerceIn(0f, 1f)
+            val trackingQuality = (observations.size.toFloat() / sampleCount.toFloat()).coerceIn(0f, 1f)
+            val quality = (motionQuality * .55f + shapeQuality * .20f + trackingQuality * .25f).coerceIn(0f, 1f)
 
             return AnalysisResult(
-                sourceWidth = targetWidth,
-                sourceHeight = targetHeight,
-                patchX = anchorLeft / targetWidth,
-                patchY = anchorTop / targetHeight,
-                patchWidth = safeAnchorW / targetWidth,
-                patchHeight = safeAnchorH / targetHeight,
+                sourceWidth = frameWidth,
+                sourceHeight = frameHeight,
+                durationMs = durationMs,
+                patchX = anchorLeft / frameWidth,
+                patchY = anchorTop / frameHeight,
+                patchWidth = safeAnchorW / frameWidth,
+                patchHeight = safeAnchorH / frameHeight,
+                neutralScaleW = neutralScaleW,
+                neutralScaleH = neutralScaleH,
+                neutralYOffset = neutralYOffset,
+                motionTrack = track,
                 quality = quality,
                 analyzedFrames = observations.size,
             )
@@ -296,41 +412,69 @@ object VisionAvatarStore {
         }
     }
 
-    private suspend fun saveTexture(
+    private suspend fun saveMouthTexture(
         retriever: MediaMetadataRetriever,
         observation: MouthObservation,
-        targetWidth: Int,
-        targetHeight: Int,
+        requestWidth: Int,
+        requestHeight: Int,
         anchorW: Float,
         anchorH: Float,
         output: File,
     ) {
+        savePatch(
+            retriever = retriever,
+            timeMs = observation.timeMs,
+            requestWidth = requestWidth,
+            requestHeight = requestHeight,
+            centerX = observation.centerX,
+            centerY = observation.centerY,
+            cropW = anchorW,
+            cropH = anchorH,
+            output = output,
+            featherXRatio = .20f,
+            featherYRatio = .24f,
+        )
+    }
+
+    private suspend fun savePatch(
+        retriever: MediaMetadataRetriever,
+        timeMs: Long,
+        requestWidth: Int,
+        requestHeight: Int,
+        centerX: Float,
+        centerY: Float,
+        cropW: Float,
+        cropH: Float,
+        output: File,
+        featherXRatio: Float,
+        featherYRatio: Float,
+    ) {
         val frame = withContext(Dispatchers.IO) {
-            extractFrame(retriever, observation.timeMs, targetWidth, targetHeight)
+            extractFrame(retriever, timeMs, requestWidth, requestHeight)
         } ?: error("No se pudo extraer un fotograma del avatar")
         try {
             val desired = RectF(
-                observation.centerX - anchorW / 2f,
-                observation.centerY - anchorH / 2f,
-                observation.centerX + anchorW / 2f,
-                observation.centerY + anchorH / 2f,
+                centerX - cropW / 2f,
+                centerY - cropH / 2f,
+                centerX + cropW / 2f,
+                centerY + cropH / 2f,
             ).clampTo(frame.width, frame.height)
             val left = floor(desired.left).toInt().coerceIn(0, frame.width - 1)
             val top = floor(desired.top).toInt().coerceIn(0, frame.height - 1)
             val right = ceil(desired.right).toInt().coerceIn(left + 1, frame.width)
             val bottom = ceil(desired.bottom).toInt().coerceIn(top + 1, frame.height)
             val crop = Bitmap.createBitmap(frame, left, top, right - left, bottom - top)
-            val fixedW = anchorW.toInt().coerceAtLeast(16)
-            val fixedH = anchorH.toInt().coerceAtLeast(12)
+            val fixedW = cropW.toInt().coerceAtLeast(16)
+            val fixedH = cropH.toInt().coerceAtLeast(12)
             val sized = if (crop.width != fixedW || crop.height != fixedH) {
                 Bitmap.createScaledBitmap(crop, fixedW, fixedH, true).also { crop.recycle() }
             } else crop
-            val feathered = feather(sized)
+            val feathered = feather(sized, featherXRatio, featherYRatio)
             sized.recycle()
             withContext(Dispatchers.IO) {
                 output.outputStream().buffered().use { out ->
                     check(feathered.compress(Bitmap.CompressFormat.PNG, 100, out)) {
-                        "No se pudo guardar una textura real de labios"
+                        "No se pudo guardar una textura del avatar"
                     }
                 }
             }
@@ -340,15 +484,14 @@ object VisionAvatarStore {
         }
     }
 
-    /** Borde alpha suave: desaparece la costura rectangular sin dibujar nada artificial. */
-    private fun feather(source: Bitmap): Bitmap {
+    private fun feather(source: Bitmap, featherXRatio: Float, featherYRatio: Float): Bitmap {
         val result = source.copy(Bitmap.Config.ARGB_8888, true)
         val w = result.width
         val h = result.height
         val pixels = IntArray(w * h)
         result.getPixels(pixels, 0, w, 0, 0, w, h)
-        val featherX = max(4f, w * .20f)
-        val featherY = max(4f, h * .24f)
+        val featherX = max(3f, w * featherXRatio)
+        val featherY = max(3f, h * featherYRatio)
 
         fun smooth(v: Float): Float {
             val x = v.coerceIn(0f, 1f)
@@ -362,9 +505,9 @@ object VisionAvatarStore {
                 val a = smooth(min(edgeX, edgeY))
                 val index = y * w + x
                 val color = pixels[index]
-                val originalAlpha = color ushr 24 and 0xFF
+                val originalAlpha = color ushr 24 and 0xff
                 val alpha = (originalAlpha * a).toInt().coerceIn(0, 255)
-                pixels[index] = (color and 0x00FFFFFF) or (alpha shl 24)
+                pixels[index] = (color and 0x00ffffff) or (alpha shl 24)
             }
         }
         result.setPixels(pixels, 0, w, 0, 0, w, h)
@@ -374,20 +517,26 @@ object VisionAvatarStore {
     private fun extractFrame(
         retriever: MediaMetadataRetriever,
         timeMs: Long,
-        targetWidth: Int,
-        targetHeight: Int,
+        requestWidth: Int,
+        requestHeight: Int,
     ): Bitmap? {
         val timeUs = timeMs * 1000L
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             retriever.getScaledFrameAtTime(
                 timeUs,
                 MediaMetadataRetriever.OPTION_CLOSEST,
-                targetWidth,
-                targetHeight,
+                requestWidth,
+                requestHeight,
             )
         } else {
             retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)?.let { raw ->
-                Bitmap.createScaledBitmap(raw, targetWidth, targetHeight, true).also { raw.recycle() }
+                val scale = min(
+                    requestWidth / raw.width.toFloat(),
+                    requestHeight / raw.height.toFloat(),
+                ).coerceAtMost(1f)
+                val w = (raw.width * scale).toInt().coerceAtLeast(1)
+                val h = (raw.height * scale).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(raw, w, h, true).also { raw.recycle() }
             }
         }
     }
@@ -446,6 +595,9 @@ object VisionAvatarStore {
             patchHeight = patchH,
             openRatio = innerGap / lipW,
             widthRatio = lipW / faceW,
+            faceWidth = faceW,
+            faceHeight = faceH,
+            rotationZ = face.headEulerAngleZ,
         )
     }
 
