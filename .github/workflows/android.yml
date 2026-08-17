@@ -47,9 +47,11 @@ jobs:
         run: |
           TAG="android-debug-${GITHUB_RUN_NUMBER}"
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          gh release create "$TAG" "$APK" \
+          NAMED_APK="CharacterIA-Simli-debug-${GITHUB_RUN_NUMBER}.apk"
+          cp "$APK" "$NAMED_APK"
+          gh release create "$TAG" "$NAMED_APK" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "CharacterIA Android Debug ${GITHUB_RUN_NUMBER}" \
-            --notes "APK de prueba generado automáticamente desde feature/android-v01." \
+            --title "CharacterIA Simli Debug ${GITHUB_RUN_NUMBER}" \
+            --notes "CharacterIA Simli 0.1, construida desde la última base limpia previa a Vision. Agrega API key global de Simli, Face ID por personaje, avatar LiveKit nativo y ruta Fish PCM -> 16 kHz -> Simli, con fallback al audio local. El avatar se apaga en modo grupal de dos personajes." \
             --prerelease
