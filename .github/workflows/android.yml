@@ -50,7 +50,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "feature/characteria-musetalk" ]]; then
             APK="CharacterIA-MuseTalk-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA MuseTalk Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="CharacterIA MuseTalk 0.4 experimental. MuseTalk 1.5 corre localmente con ONNX Runtime/NNAPI; los pesos se descargan aparte desde la app (~1.85 GB). Incluye preprocesado de avatar, benchmark real de UNet+VAE y pipeline Fish PCM -> Whisper -> MuseTalk. Se instala separado de CharacterIA estable y Visión."
+            NOTES="CharacterIA MuseTalk 0.6 experimental. MuseTalk 1.5 corre localmente con ONNX Runtime/NNAPI. Esta build usa el UNet FP16 original con islas FP32 validadas para operadores que caen al CPU, corrigiendo los fallos Gelu/InstanceNormalization de las builds 239/244. VAE/Whisper/PE existentes se reutilizan; sólo se reemplaza el UNet (~1.64 GB)."
           elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
