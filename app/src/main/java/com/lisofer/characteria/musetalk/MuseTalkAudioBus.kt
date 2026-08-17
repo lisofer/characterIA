@@ -10,11 +10,12 @@ import kotlin.concurrent.thread
 import kotlin.math.floor
 
 /**
- * Copia del audio que YA salió por AudioTrack. Nunca está en el camino crítico de voz.
- * Un worker lo convierte 44.1 kHz -> 16 kHz, que es lo que usa Whisper/MuseTalk.
+ * Video-side copy of Fish PCM. AudioTrack always gets priority; this queue may drop
+ * stale work if neural rendering cannot keep up.
  */
 object MuseTalkAudioBus {
     data class Chunk(val pcm: ByteArray, val playedAtNanos: Long)
+    data class Snapshot(val audio16k: FloatArray, val totalSamples16k: Long, val revision: Long)
 
     private const val INPUT_RATE = 44_100
     private const val OUTPUT_RATE = 16_000
@@ -27,6 +28,7 @@ object MuseTalkAudioBus {
     val revision: StateFlow<Long> = _revision.asStateFlow()
 
     @Volatile private var lastAudioNanos: Long = 0L
+    @Volatile private var totalSamples: Long = 0L
 
     init {
         thread(name = "MuseTalkAudio", isDaemon = true) {
@@ -39,6 +41,7 @@ object MuseTalkAudioBus {
                             while (ring.size >= MAX_RING_SAMPLES) ring.removeFirst()
                             ring.addLast(sample)
                         }
+                        totalSamples += converted.size
                     }
                     lastAudioNanos = chunk.playedAtNanos
                     _revision.value = _revision.value + 1L
@@ -47,7 +50,6 @@ object MuseTalkAudioBus {
         }
     }
 
-    /** Se llama DESPUÉS de escribir el PCM al AudioTrack. */
     fun offerPlayedPcm44100(bytes: ByteArray, playedAtNanos: Long = System.nanoTime()) {
         if (bytes.size < 2) return
         val copy = bytes.copyOf()
@@ -62,10 +64,10 @@ object MuseTalkAudioBus {
         return last != 0L && (System.nanoTime() - last) <= maxAgeMs * 1_000_000L
     }
 
-    /** Latest rolling 16 kHz window. Default 400 ms gives MuseTalk useful context. */
-    fun latestWindow(samples: Int = 6_400): FloatArray {
+    fun snapshot(samples: Int = 8_000): Snapshot {
         val wanted = samples.coerceIn(160, OUTPUT_RATE * 2)
         val result = FloatArray(wanted)
+        val total: Long
         synchronized(ring) {
             val available = minOf(wanted, ring.size)
             val skip = ring.size - available
@@ -74,13 +76,19 @@ object MuseTalkAudioBus {
             ring.forEach { value ->
                 if (index++ >= skip && out < wanted) result[out++] = value
             }
+            total = totalSamples
         }
-        return result
+        return Snapshot(result, total, _revision.value)
     }
+
+    fun latestWindow(samples: Int = 8_000): FloatArray = snapshot(samples).audio16k
 
     fun reset() {
         queue.clear()
-        synchronized(ring) { ring.clear() }
+        synchronized(ring) {
+            ring.clear()
+            totalSamples = 0L
+        }
         lastAudioNanos = 0L
         _revision.value = _revision.value + 1L
     }
