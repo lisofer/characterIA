@@ -50,7 +50,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "feature/characteria-musetalk" ]]; then
             APK="CharacterIA-MuseTalk-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA MuseTalk Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="CharacterIA MuseTalk 0.7 experimental. Reutiliza íntegramente el motor 0.6 ya instalado: no requiere volver a descargar el UNet de ~1.64 GB. El UNet se carga con BASIC_OPT para evitar el Split sintético inválido generado por ORT/NNAPI con ALL_OPT; si el driver aún rechaza esa sesión, la app reintenta automáticamente con XNNPACK/ORT CPU y muestra el backend real en el benchmark."
+            NOTES="CharacterIA MuseTalk 0.8 experimental, enfocada en confiabilidad. Reutiliza íntegramente el motor ya instalado. El benchmark carga sólo UNet+VAE; Whisper ya no puede romper esa medición. NNAPI queda reservado al UNet con fallback automático, mientras VAE/Whisper/encoder usan XNNPACK/ORT CPU con BASIC_OPT para evitar los Split sintéticos del driver."
           elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
