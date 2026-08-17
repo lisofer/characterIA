@@ -11,11 +11,12 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.lisofer.characteria"
+        // ID distinto para poder instalar CharacterIA y CharacterIA Visión lado a lado.
+        applicationId = "com.lisofer.characteria.vision"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0-vision"
     }
 
     buildFeatures {
@@ -62,4 +63,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.msgpack:msgpack-core:0.9.11")
+
+    // CharacterIA Visión: reproducción local del avatar y detección facial on-device.
+    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-ui:1.10.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }
