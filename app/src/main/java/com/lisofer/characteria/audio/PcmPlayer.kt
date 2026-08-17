@@ -4,7 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import com.lisofer.characteria.vision.LipSyncBus
+import com.lisofer.characteria.musetalk.MuseTalkAudioBus
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -45,8 +45,6 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
 
     fun write(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        // El video escucha exactamente el mismo chunk que sale por AudioTrack, sin buffer adicional.
-        LipSyncBus.pushPcm16Le(bytes)
         val t = ensureTrack()
         var offset = 0
         while (offset < bytes.size) {
@@ -54,10 +52,14 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
             if (n <= 0) break
             offset += n
         }
+
+        // MuseTalk escucha DESPUÉS de AudioTrack. Si el renderer va lento, sólo pierde
+        // fotogramas; jamás retrasa una sílaba de Fish.
+        if (offset > 0) MuseTalkAudioBus.offerPlayedPcm44100(bytes)
     }
 
     fun interrupt() = lock.withLock {
-        LipSyncBus.reset()
+        MuseTalkAudioBus.reset()
         track?.let {
             runCatching { it.pause() }
             runCatching { it.flush() }
@@ -66,7 +68,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
     }
 
     fun release() = lock.withLock {
-        LipSyncBus.reset()
+        MuseTalkAudioBus.reset()
         track?.let {
             runCatching { it.stop() }
             runCatching { it.release() }
