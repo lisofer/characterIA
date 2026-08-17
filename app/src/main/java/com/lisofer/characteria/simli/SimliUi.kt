@@ -29,7 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lisofer.characteria.AppConfig
 import com.lisofer.characteria.AppUiState
 import com.lisofer.characteria.SessionStatus
-import io.livekit.android.renderer.SurfaceViewRenderer
+import io.livekit.android.renderer.TextureViewRenderer
 
 @Composable
 fun SimliRuntimeEffect(state: AppUiState) {
@@ -75,8 +75,9 @@ fun SimliAvatarPanel(modifier: Modifier = Modifier) {
             AndroidView(
                 modifier = Modifier.fillMaxWidth().aspectRatio(16f / 10f),
                 factory = { context ->
-                    SurfaceViewRenderer(context).also { renderer ->
+                    TextureViewRenderer(context).also { renderer ->
                         renderer.setMirror(false)
+                        renderer.isOpaque = true
                         SimliRuntime.bindRenderer(renderer)
                     }
                 },
@@ -89,6 +90,7 @@ fun SimliAvatarPanel(modifier: Modifier = Modifier) {
             if (!runtime.videoReady) {
                 Text(
                     runtime.status,
+                    modifier = Modifier.padding(18.dp),
                     color = Color.White.copy(alpha = .82f),
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
@@ -98,7 +100,7 @@ fun SimliAvatarPanel(modifier: Modifier = Modifier) {
         Text(
             runtime.status,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            color = if (runtime.ready) Color(0xFF67E8B4) else Color(0xFFA7B6C8),
+            color = if (runtime.videoReady) Color(0xFF67E8B4) else Color(0xFFA7B6C8),
             style = MaterialTheme.typography.labelSmall,
         )
     }
