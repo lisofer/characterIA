@@ -14,12 +14,12 @@ import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
 
 /**
- * Pesos de MuseTalk descargables. El UNet usa un pack mixed-precision preparado
- * específicamente para Android: los kernels pesados permanecen FP16 y las ops que
- * pueden caer al CPU quedan FP32. Los VAE quedan FP32 por compatibilidad de fallback.
+ * Pesos de MuseTalk descargables. El UNet parte del FP16 original de MuseTalk y
+ * sólo crea pequeñas islas FP32 alrededor de operaciones que pueden caer al CPU
+ * en Android. Los VAE se mantienen FP32 para un fallback seguro.
  */
 object MuseTalkModelStore {
-    // Mantener el mismo directorio permite reutilizar Whisper/PE de la build 239.
+    // Mantener el mismo directorio permite reutilizar VAE/Whisper/PE ya descargados.
     private const val MODEL_REVISION = "dgdev91-main-2026-08-v2"
     private const val EXTRA_FREE_BYTES = 350_000_000L
 
@@ -31,14 +31,9 @@ object MuseTalkModelStore {
 
     val files = listOf(
         ModelFile(
-            "unet_android_mixed.onnx",
-            "https://github.com/lisofer/characterIA/releases/download/musetalk-android-mixed-v1/unet_android_mixed.onnx",
-            767_163L,
-        ),
-        ModelFile(
-            "unet_android_mixed.onnx.data",
-            "https://github.com/lisofer/characterIA/releases/download/musetalk-android-mixed-v1/unet_android_mixed.onnx.data",
-            1_700_551_680L,
+            "unet_android_safe_fp16.onnx",
+            "https://github.com/lisofer/characterIA/releases/download/musetalk-android-safe-fp16-v1/unet_android_safe_fp16.onnx",
+            1_644_853_091L,
         ),
         ModelFile(
             "vae_encoder.onnx",
@@ -62,10 +57,14 @@ object MuseTalkModelStore {
         ),
     )
 
-    private val obsoleteFp16Files = listOf(
+    // Modelos de las builds 239/244. Se eliminan antes de medir espacio libre para
+    // no obligar al teléfono a conservar dos UNet de ~1.6–1.7 GB simultáneamente.
+    private val obsoleteUnetFiles = listOf(
         "unet_fp16.onnx",
-        "vae_encoder_fp16.onnx",
-        "vae_decoder_fp16.onnx",
+        "unet_android_mixed.onnx",
+        "unet_android_mixed.onnx.data",
+        "unet_android_mixed_v2.onnx",
+        "unet_android_mixed_v2.onnx.data",
     )
 
     sealed interface State {
@@ -115,9 +114,10 @@ object MuseTalkModelStore {
     suspend fun install(context: Context) = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         try {
-            // La build 239 dejó estos pesos incompatibles. Se eliminan antes de medir
-            // espacio libre para que el usuario no necesite guardar ambos packs a la vez.
-            obsoleteFp16Files.forEach { name -> runCatching { modelFile(app, name).delete() } }
+            obsoleteUnetFiles.forEach { name ->
+                runCatching { modelFile(app, name).delete() }
+                runCatching { File(modelDir(app), "$name.part").delete() }
+            }
 
             val missing = files.filterNot { spec ->
                 val f = modelFile(app, spec.fileName)
@@ -128,7 +128,7 @@ object MuseTalkModelStore {
             val required = missingBytes + EXTRA_FREE_BYTES
             if (free < required) {
                 val gb = required / 1_000_000_000.0
-                error("La actualización compatible de MuseTalk necesita ~${"%.1f".format(gb)} GB libres para completar la descarga.")
+                error("La actualización segura de MuseTalk necesita ~${"%.1f".format(gb)} GB libres para completar la descarga.")
             }
 
             val overallTotal = files.sumOf { it.expectedBytes }
