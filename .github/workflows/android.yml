@@ -50,7 +50,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "feature/characteria-musetalk" ]]; then
             APK="CharacterIA-MuseTalk-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA MuseTalk Debug ${GITHUB_RUN_NUMBER}"
-            NOTES="CharacterIA MuseTalk 0.8 experimental, enfocada en confiabilidad. Reutiliza íntegramente el motor ya instalado. El benchmark carga sólo UNet+VAE; Whisper ya no puede romper esa medición. NNAPI queda reservado al UNet con fallback automático, mientras VAE/Whisper/encoder usan XNNPACK/ORT CPU con BASIC_OPT para evitar los Split sintéticos del driver."
+            NOTES="CharacterIA MuseTalk 0.9 experimental. Se eliminó por completo el benchmark manual de FPS. Reutiliza el motor MuseTalk ya instalado, sin volver a descargar ~2.08 GB. Completar la preparación 16/16 ya no carga UNet/Whisper/VAE en memoria: el motor pesado se inicia recién cuando llega PCM de Fish y se libera tras 15 s de silencio. Si una inferencia falla, se cierra la sesión neural y se intenta nuevamente en la siguiente respuesta en lugar de saturar el teléfono."
           elif [[ "$GITHUB_REF_NAME" == "feature/characteria-vision" ]]; then
             APK="CharacterIA-Vision-debug-${GITHUB_RUN_NUMBER}.apk"
             TITLE="CharacterIA Visión Debug ${GITHUB_RUN_NUMBER}"
