@@ -1,5 +1,6 @@
 package com.lisofer.characteria.fish
 
+import com.lisofer.characteria.vision.LipSyncBus
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -42,6 +43,7 @@ class FishTtsClient(
         speed: Float,
     ) {
         cancel()
+        LipSyncBus.startTurn()
         finishRequested = false
         bufferedChars = 0
         pending.clear()
@@ -111,6 +113,8 @@ class FishTtsClient(
 
     fun sendText(text: String) {
         if (text.isEmpty() || finishRequested) return
+        // No modifica el camino de audio: sólo prepara en paralelo la forma de boca.
+        LipSyncBus.queueText(text)
         val ws = socket
         if (ws != null && opened.get()) {
             sendTextNow(ws, text)
@@ -144,6 +148,7 @@ class FishTtsClient(
         synchronized(pending) { pending.clear() }
         socket?.cancel()
         socket = null
+        LipSyncBus.reset()
     }
 
     private data class FishEvent(
