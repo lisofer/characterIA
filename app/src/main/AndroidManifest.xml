@@ -10,7 +10,7 @@
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:label="CharacterIA"
+        android:label="CharacterIA Simli"
         android:theme="@style/Theme.CharacterIA"
         android:usesCleartextTraffic="false">
         <activity
