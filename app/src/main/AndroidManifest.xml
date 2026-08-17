@@ -11,6 +11,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="CharacterIA MuseTalk"
+        android:largeHeap="true"
         android:theme="@style/Theme.CharacterIA"
         android:usesCleartextTraffic="false">
         <activity
