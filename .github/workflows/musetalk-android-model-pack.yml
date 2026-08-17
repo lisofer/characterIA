@@ -23,127 +23,159 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ONNX conversion tools
+      - name: Install ONNX tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "onnx==1.19.0" "onnxconverter-common==1.16.0"
+          python -m pip install "onnx==1.19.0"
 
-      - name: Download source MuseTalk ONNX UNet
+      - name: Download known-working MuseTalk FP16 UNet
         shell: bash
         run: |
           mkdir -p model-src model-out
           curl -L --fail --retry 4 --retry-delay 5 \
-            -o model-src/unet.onnx \
-            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet.onnx?download=true"
-          curl -L --fail --retry 4 --retry-delay 5 \
-            -o model-src/unet.onnx.data \
-            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet.onnx.data?download=true"
-          ls -lh model-src
+            -o model-src/unet_fp16.onnx \
+            "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet_fp16.onnx?download=true"
+          ls -lh model-src/unet_fp16.onnx
 
-      - name: Convert UNet to Android-safe mixed precision v2
+      - name: Patch CPU fallback islands to FP32
         shell: bash
         run: |
-          cat > /tmp/convert_musetalk.py <<'PY'
-          import gc
+          cat > /tmp/patch_musetalk.py <<'PY'
+          import collections
           import hashlib
           import os
           import onnx
-          from onnxconverter_common.float16 import convert_float_to_float16
+          from onnx import helper, TensorProto
 
-          source = "model-src/unet.onnx"
-          inferred_source = "model-src/unet_inferred.onnx"
-          output = "model-out/unet_android_mixed_v2.onnx"
-          external_name = "unet_android_mixed_v2.onnx.data"
-          validation = "model-out/unet_android_mixed_v2_inferred.onnx"
+          source = "model-src/unet_fp16.onnx"
+          output = "model-out/unet_android_safe_fp16.onnx"
 
-          # The source model has >3 GB of external data. In-memory shape inference
-          # tries to SerializeToString() the whole protobuf and exceeds protobuf's
-          # size limit. infer_shapes_path is the ONNX path-based API for huge models.
-          print("Inferring source shapes/types from paths…", flush=True)
-          onnx.shape_inference.infer_shapes_path(
-              source,
-              inferred_source,
-              check_type=True,
-              strict_mode=True,
-              data_prop=False,
-          )
+          print("Loading original MuseTalk FP16 UNet…", flush=True)
+          model = onnx.load_model(source, load_external_data=True)
+          graph = model.graph
 
-          print("Loading inferred MuseTalk UNet + external weights…", flush=True)
-          model = onnx.load_model(inferred_source, load_external_data=True)
-          op_types = sorted({node.op_type for node in model.graph.node})
-          print("UNet op types:", op_types, flush=True)
+          counts = collections.Counter((n.domain or "ai.onnx", n.op_type) for n in graph.node)
+          print("Operators:", sorted(counts.items()), flush=True)
 
-          # Keep in FP16 only operators that NNAPI documents and that dominate
-          # MuseTalk UNet compute. All normalization/activation/shape ops stay FP32,
-          # so any Android fallback lands on a datatype ORT CPU can execute.
-          fp16_nnapi_ops = {"Conv", "MatMul", "Gemm"}
-          blocked = sorted(set(op_types) - fp16_nnapi_ops - {"Cast"})
-          print("FP16 / NNAPI candidates:", sorted(fp16_nnapi_ops & set(op_types)), flush=True)
-          print("Keeping FP32:", blocked, flush=True)
+          graph_output_types = {}
+          for value in graph.output:
+              try:
+                  graph_output_types[value.name] = value.type.tensor_type.elem_type
+              except Exception:
+                  pass
 
-          # Types are already populated by infer_shapes_path, so disable the
-          # converter's in-memory inference while still letting it use those types
-          # to insert Cast nodes around blocked FP32 operations.
-          model = convert_float_to_float16(
-              model,
-              keep_io_types=True,
-              disable_shape_infer=True,
-              op_block_list=blocked,
-          )
+          # The original FP16 export is kept intact. We only create small FP32
+          # "islands" around operators that are not handled by NNAPI and are known
+          # to be problematic when ORT CPU receives FP16. Heavy Conv/MatMul/Gemm
+          # remain exactly as in the official FP16 model.
+          #
+          # input positions below are the floating data inputs for each schema.
+          def fp32_input_positions(node):
+              domain = node.domain or ""
+              if domain == "com.microsoft" and node.op_type == "Gelu":
+                  return list(range(len(node.input)))
+              if node.op_type == "InstanceNormalization":
+                  return [i for i in range(min(3, len(node.input)))]
+              if node.op_type == "LayerNormalization":
+                  return [i for i in range(min(3, len(node.input)))]
+              if node.op_type in {"Erf", "Cos"}:
+                  return [0] if node.input else []
+              if node.op_type == "Where":
+                  # condition stays bool; X/Y are floating tensors.
+                  return [i for i in (1, 2) if i < len(node.input)]
+              return None
+
+          old_nodes = list(graph.node)
+          del graph.node[:]
+          patched = collections.Counter()
+
+          for idx, node in enumerate(old_nodes):
+              positions = fp32_input_positions(node)
+              if positions is None:
+                  graph.node.append(node)
+                  continue
+
+              key = f"{node.domain or 'ai.onnx'}::{node.op_type}"
+              patched[key] += 1
+
+              # Explicit FP16 -> FP32 casts make every floating input of the CPU
+              # fallback operator agree on tensor(float), avoiding the exact mixed
+              # InstanceNormalization type error seen on the Redmi device.
+              for pos in positions:
+                  if pos >= len(node.input) or not node.input[pos]:
+                      continue
+                  original = node.input[pos]
+                  casted = f"{original}__cia_fp32_in_{idx}_{pos}"
+                  graph.node.append(helper.make_node(
+                      "Cast", [original], [casted],
+                      name=f"CharacterIA_FP32_In_{idx}_{pos}",
+                      to=TensorProto.FLOAT,
+                  ))
+                  node.input[pos] = casted
+
+              original_outputs = list(node.output)
+              internal_outputs = []
+              for out_pos, original in enumerate(original_outputs):
+                  if not original:
+                      internal_outputs.append("")
+                      continue
+                  internal = f"{original}__cia_fp32_out_{idx}_{out_pos}"
+                  internal_outputs.append(internal)
+                  node.output[out_pos] = internal
+
+              graph.node.append(node)
+
+              # Return to the original FP16 graph immediately after the fallback
+              # island. Preserve an FP32 graph output if the export declares one.
+              for out_pos, original in enumerate(original_outputs):
+                  if not original:
+                      continue
+                  target_type = graph_output_types.get(original, TensorProto.FLOAT16)
+                  graph.node.append(helper.make_node(
+                      "Cast", [internal_outputs[out_pos]], [original],
+                      name=f"CharacterIA_FP16_Out_{idx}_{out_pos}",
+                      to=target_type,
+                  ))
 
           prop = model.metadata_props.add()
-          prop.key = "characteria.android_mixed_precision"
-          prop.value = "v2; path-inferred types; FP16 Conv/MatMul/Gemm only; other ops FP32"
+          prop.key = "characteria.android_safe_fp16"
+          prop.value = "v1; original MuseTalk FP16 + FP32 fallback islands for Gelu/InstanceNorm/LayerNorm/Erf/Cos/Where"
 
-          print("Saving external-data model…", flush=True)
-          onnx.save_model(
-              model,
-              output,
-              save_as_external_data=True,
-              all_tensors_to_one_file=True,
-              location=external_name,
-              size_threshold=1024,
-              convert_attribute=False,
-          )
+          print("Patched nodes:", dict(patched), flush=True)
+          if not patched:
+              raise RuntimeError("No fallback nodes were patched; unexpected MuseTalk graph")
+
+          # The checker performs schema/type validation. Because every patched
+          # operator receives explicit Cast->FLOAT outputs, this catches malformed
+          # type boundaries before the 1.6 GB model is published.
+          print("Checking patched ONNX graph…", flush=True)
+          onnx.checker.check_model(model, full_check=False)
+          print("Saving…", flush=True)
+          onnx.save_model(model, output)
           del model
-          gc.collect()
 
-          # Validate from file paths too. This is the gate for the exact type error
-          # reported on Android (InstanceNormalization receiving float16 + float).
-          print("Strict checking saved mixed model…", flush=True)
+          print("Checking saved model from path…", flush=True)
           onnx.checker.check_model(output, full_check=True)
-          onnx.shape_inference.infer_shapes_path(
-              output,
-              validation,
-              check_type=True,
-              strict_mode=True,
-              data_prop=False,
-          )
-          onnx.checker.check_model(validation, full_check=True)
-          os.remove(validation)
 
-          data_path = os.path.join("model-out", external_name)
-          for path in [output, data_path]:
-              h = hashlib.sha256()
-              with open(path, "rb") as f:
-                  for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
-                      h.update(chunk)
-              print(path, os.path.getsize(path), "sha256=" + h.hexdigest(), flush=True)
+          h = hashlib.sha256()
+          with open(output, "rb") as f:
+              for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+                  h.update(chunk)
+          print(output, os.path.getsize(output), "sha256=" + h.hexdigest(), flush=True)
           PY
-          python /tmp/convert_musetalk.py
+          python /tmp/patch_musetalk.py
           ls -lh model-out
 
-      - name: Publish Android mixed model pack v2
+      - name: Publish Android-safe FP16 model
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG="musetalk-android-mixed-v2"
+          TAG="musetalk-android-safe-fp16-v1"
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
           gh release create "$TAG" \
-            model-out/unet_android_mixed_v2.onnx \
-            model-out/unet_android_mixed_v2.onnx.data \
+            model-out/unet_android_safe_fp16.onnx \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "MuseTalk Android Mixed Precision v2" \
-            --notes "MuseTalk 1.5 UNet for CharacterIA Android. v2 uses path-based strict shape/type inference for the >3 GB source model, keeps only NNAPI-friendly Conv/MatMul/Gemm in FP16, and keeps normalization/activation/fallback operators in FP32."
+            --title "MuseTalk Android Safe FP16 v1" \
+            --notes "Original MuseTalk 1.5 FP16 UNet with surgical FP32 fallback islands around Gelu, InstanceNormalization, LayerNormalization, Erf, Cos and Where. Heavy FP16 compute stays unchanged for Android NNAPI; model passes ONNX schema/type validation before publication."
