@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import com.lisofer.characteria.vision.LipSyncBus
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -44,6 +45,8 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
 
     fun write(bytes: ByteArray) {
         if (bytes.isEmpty()) return
+        // El video escucha exactamente el mismo chunk que sale por AudioTrack, sin buffer adicional.
+        LipSyncBus.pushPcm16Le(bytes)
         val t = ensureTrack()
         var offset = 0
         while (offset < bytes.size) {
@@ -54,6 +57,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
     }
 
     fun interrupt() = lock.withLock {
+        LipSyncBus.reset()
         track?.let {
             runCatching { it.pause() }
             runCatching { it.flush() }
@@ -62,6 +66,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
     }
 
     fun release() = lock.withLock {
+        LipSyncBus.reset()
         track?.let {
             runCatching { it.stop() }
             runCatching { it.release() }
