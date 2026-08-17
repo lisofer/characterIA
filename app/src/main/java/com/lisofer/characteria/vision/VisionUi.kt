@@ -4,10 +4,9 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -31,14 +30,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,10 +53,6 @@ private val VisionPanel = Color(0xFF0B1722)
 private val VisionMuted = Color(0xFFA7B6C8)
 private val VisionMint = Color(0xFF67E8B4)
 
-/**
- * Resuelve qué avatar corresponde mostrar.
- * Dos personajes activos = sin video, deliberadamente.
- */
 @Composable
 fun VisionAvatarHost(state: AppUiState) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -107,10 +99,14 @@ fun VisionProfileSettings(profileId: String) {
         if (uri == null || profileId.isBlank()) return@rememberLauncherForActivityResult
         scope.launch {
             importing = true
-            feedback = "Analizando rostro y boca…"
+            feedback = "Buscando formas reales de boca en el video…"
             runCatching { VisionAvatarStore.importVideo(context, profileId, uri) }
-                .onSuccess {
-                    feedback = "✓ Avatar listo. La boca se detectó y preparó en el teléfono."
+                .onSuccess { result ->
+                    feedback = when {
+                        result.quality >= .72f -> "✓ Avatar preparado · variedad de boca excelente"
+                        result.quality >= .42f -> "✓ Avatar preparado · calidad buena"
+                        else -> "✓ Listo, pero el video casi no mueve la boca. Para más realismo usá uno donde la persona hable unos segundos."
+                    }
                 }
                 .onFailure {
                     feedback = it.message ?: "No pude preparar el video"
@@ -126,10 +122,10 @@ fun VisionProfileSettings(profileId: String) {
             .background(VisionPanel)
             .padding(14.dp)
     ) {
-        Text("Avatar de video · Visión", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        Text("Avatar de video · Visión Real", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Opcional. Cargá un MP4 corto, frontal y con poco movimiento. CharacterIA detecta la boca una sola vez; durante la charla el video se reproduce sin audio y el lipsync sigue el PCM de la voz.",
+            "Opcional. La app busca en el propio video bocas reales cerradas, abiertas, anchas y redondas. No dibuja dientes ni separa los labios artificialmente. Para el mejor resultado: 8–15 s, rostro frontal, poco movimiento de cabeza y algunos segundos hablando.",
             color = VisionMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -141,7 +137,7 @@ fun VisionProfileSettings(profileId: String) {
                 enabled = !importing && profileId.isNotBlank(),
                 onClick = { picker.launch(arrayOf("video/mp4")) },
             ) {
-                Text(if (importing) "Preparando video…" else "Cargar video del personaje")
+                Text(if (importing) "Preparando avatar real…" else "Cargar video del personaje")
             }
         } else {
             Text(
@@ -149,13 +145,18 @@ fun VisionProfileSettings(profileId: String) {
                 color = VisionMint,
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text(
+                "Análisis: ${avatar.analyzedFrames} fotogramas · calidad ${qualityText(avatar.quality)}",
+                color = VisionMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !importing,
                 onClick = { picker.launch(arrayOf("video/mp4")) },
             ) {
-                Text(if (importing) "Preparando video…" else "Cambiar video")
+                Text(if (importing) "Preparando avatar real…" else "Cambiar video")
             }
             TextButton(
                 modifier = Modifier.fillMaxWidth(),
@@ -176,23 +177,31 @@ fun VisionProfileSettings(profileId: String) {
     }
 }
 
+private fun qualityText(value: Float): String = when {
+    value >= .72f -> "excelente"
+    value >= .42f -> "buena"
+    else -> "limitada"
+}
+
 @Composable
 private fun VisionAvatarStage(avatar: VisionAvatar) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val level by LipSyncBus.level.collectAsStateWithLifecycle()
-    val mouthOpen by animateFloatAsState(
-        targetValue = level,
-        animationSpec = tween(durationMillis = 42, easing = LinearEasing),
-        label = "mouth-open",
-    )
-    val overlayAlpha by animateFloatAsState(
-        targetValue = if (level > .018f) 1f else 0f,
-        animationSpec = tween(durationMillis = if (level > .018f) 35 else 95),
-        label = "mouth-alpha",
-    )
+    val lip by LipSyncBus.state.collectAsStateWithLifecycle()
 
-    val mouthImage = remember(avatar.mouthImagePath) {
-        BitmapFactory.decodeFile(avatar.mouthImagePath)?.asImageBitmap()
+    val textures = remember(
+        avatar.restPath,
+        avatar.closedPath,
+        avatar.widePath,
+        avatar.openPath,
+        avatar.roundPath,
+    ) {
+        mapOf(
+            MouthViseme.REST to loadBitmap(avatar.restPath),
+            MouthViseme.CLOSED to loadBitmap(avatar.closedPath),
+            MouthViseme.WIDE to loadBitmap(avatar.widePath),
+            MouthViseme.OPEN to loadBitmap(avatar.openPath),
+            MouthViseme.ROUND to loadBitmap(avatar.roundPath),
+        )
     }
 
     val player = remember(avatar.videoPath) {
@@ -212,7 +221,7 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .height(280.dp)
             .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(22.dp))
             .background(Color.Black)
@@ -230,8 +239,7 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
             update = { it.player = player },
         )
 
-        if (mouthImage != null && avatar.sourceWidth > 0 && avatar.sourceHeight > 0) {
-            // PlayerView usa FIT: calculamos exactamente el rectángulo real del video dentro del panel.
+        if (avatar.sourceWidth > 0 && avatar.sourceHeight > 0) {
             val containerW = maxWidth.value
             val containerH = maxHeight.value
             val scale = min(
@@ -243,77 +251,33 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
             val videoLeft = (containerW - renderedW) * .5f
             val videoTop = (containerH - renderedH) * .5f
 
-            val mouthLeft = videoLeft + avatar.mouthX * avatar.sourceWidth * scale
-            val mouthTop = videoTop + avatar.mouthY * avatar.sourceHeight * scale
-            val mouthW = max(8f, avatar.mouthWidth * avatar.sourceWidth * scale)
-            val mouthH = max(6f, avatar.mouthHeight * avatar.sourceHeight * scale)
+            val patchLeft = videoLeft + avatar.patchX * avatar.sourceWidth * scale
+            val patchTop = videoTop + avatar.patchY * avatar.sourceHeight * scale
+            val patchW = max(12f, avatar.patchWidth * avatar.sourceWidth * scale)
+            val patchH = max(10f, avatar.patchHeight * avatar.sourceHeight * scale)
 
-            MouthOverlay(
+            val targetViseme = if (lip.level < .015f) MouthViseme.REST else lip.viseme
+            Crossfade(
+                targetState = targetViseme,
+                animationSpec = tween(durationMillis = 42),
+                label = "real-mouth-viseme",
                 modifier = Modifier
-                    .offset(mouthLeft.dp, mouthTop.dp)
-                    .width(mouthW.dp)
-                    .height(mouthH.dp)
-                    .alpha(overlayAlpha),
-                image = mouthImage,
-                openness = mouthOpen,
-            )
-        }
-
-        Text(
-            "VISIÓN",
-            modifier = Modifier
-                .padding(20.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.Black.copy(alpha = .48f))
-                .padding(horizontal = 9.dp, vertical = 4.dp),
-            color = VisionMint,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-}
-
-@Composable
-private fun MouthOverlay(
-    modifier: Modifier,
-    image: androidx.compose.ui.graphics.ImageBitmap,
-    openness: Float,
-) {
-    Canvas(modifier = modifier.clip(RoundedCornerShape(50))) {
-        val dstW = size.width.toInt().coerceAtLeast(1)
-        val dstH = size.height.toInt().coerceAtLeast(2)
-        val srcW = image.width.coerceAtLeast(1)
-        val srcH = image.height.coerceAtLeast(2)
-        val srcHalf = srcH / 2
-        val dstHalf = dstH / 2
-        val open = openness.coerceIn(0f, 1f)
-        val separation = (dstH * .24f * open).toInt()
-
-        clipRect {
-            if (separation > 1) {
-                val gapTop = dstHalf - separation * .48f
-                val gapHeight = max(2f, separation.toFloat())
-                drawRoundRect(
-                    color = Color(0xFF17090B),
-                    topLeft = androidx.compose.ui.geometry.Offset(dstW * .10f, gapTop),
-                    size = androidx.compose.ui.geometry.Size(dstW * .80f, gapHeight),
-                    cornerRadius = CornerRadius(gapHeight * .5f, gapHeight * .5f),
-                )
+                    .offset(patchLeft.dp, patchTop.dp)
+                    .width(patchW.dp)
+                    .height(patchH.dp),
+            ) { viseme ->
+                textures[viseme]?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        modifier = Modifier.matchParentSize(),
+                        contentScale = ContentScale.FillBounds,
+                    )
+                }
             }
-
-            drawImage(
-                image = image,
-                srcOffset = IntOffset(0, 0),
-                srcSize = IntSize(srcW, srcHalf),
-                dstOffset = IntOffset(0, -separation / 2),
-                dstSize = IntSize(dstW, dstHalf),
-            )
-            drawImage(
-                image = image,
-                srcOffset = IntOffset(0, srcHalf),
-                srcSize = IntSize(srcW, srcH - srcHalf),
-                dstOffset = IntOffset(0, dstHalf + separation / 2),
-                dstSize = IntSize(dstW, dstH - dstHalf),
-            )
         }
     }
 }
+
+private fun loadBitmap(path: String): ImageBitmap? =
+    BitmapFactory.decodeFile(path)?.asImageBitmap()
