@@ -33,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -107,9 +106,10 @@ fun VisionProfileSettings(profileId: String) {
         if (uri == null || profileId.isBlank()) return@rememberLauncherForActivityResult
         scope.launch {
             importing = true
-            feedback = "Preparando rostro, boca neutral y seguimiento…"
+            feedback = "Analizando el único video y preparando las bocas…"
             runCatching { VisionAvatarStore.importVideo(context, profileId, uri) }
                 .onSuccess { result ->
+                    runCatching { File(result.videoPath).parentFile?.resolve("idle_track_v1.json")?.delete() }
                     feedback = when {
                         result.quality >= .72f -> "✓ Avatar preparado · seguimiento excelente"
                         result.quality >= .42f -> "✓ Avatar preparado · seguimiento bueno"
@@ -133,7 +133,7 @@ fun VisionProfileSettings(profileId: String) {
         Text("Avatar de video · Visión Smooth", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Podés usar un video donde la persona esté hablando. La app conserva ojos, cabeza, hombros y gestos del video, pero neutraliza la boca original y anima una sola boca con la voz de Fish. Todo el trabajo pesado se hace una vez al importar.",
+            "Usás un solo MP4. CharacterIA encuentra automáticamente dentro de ese mismo video el tramo donde la boca está más relajada y lo usa como loop visible. Del resto del mismo archivo extrae las formas de boca para Fish. Ya no tapa mandíbula ni media cara con una máscara.",
             color = VisionMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -145,14 +145,10 @@ fun VisionProfileSettings(profileId: String) {
                 enabled = !importing && profileId.isNotBlank(),
                 onClick = { picker.launch(arrayOf("video/mp4")) },
             ) {
-                Text(if (importing) "Preparando avatar…" else "Cargar video del personaje")
+                Text(if (importing) "Preparando avatar…" else "Cargar único video del personaje")
             }
         } else {
-            Text(
-                "Video: ${avatar.displayName}",
-                color = VisionMint,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Text("Video: ${avatar.displayName}", color = VisionMint, style = MaterialTheme.typography.bodySmall)
             Text(
                 "Seguimiento: ${avatar.analyzedFrames} muestras · calidad ${qualityText(avatar.quality)}",
                 color = VisionMuted,
@@ -173,9 +169,7 @@ fun VisionProfileSettings(profileId: String) {
                     VisionAvatarStore.remove(context, profileId)
                     feedback = "Avatar eliminado de este perfil."
                 },
-            ) {
-                Text("Quitar video")
-            }
+            ) { Text("Quitar video") }
         }
 
         feedback?.let {
@@ -195,8 +189,15 @@ private fun qualityText(value: Float): String = when {
 private fun VisionAvatarStage(avatar: VisionAvatar) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lip by LipSyncBus.state.collectAsStateWithLifecycle()
+    var idle by remember(avatar.videoPath) { mutableStateOf<VisionIdleAnalyzer.Result?>(null) }
+    var idleFailed by remember(avatar.videoPath) { mutableStateOf(false) }
 
-    val neutral = remember(avatar.neutralPath) { loadBitmap(avatar.neutralPath) }
+    LaunchedEffect(avatar.videoPath) {
+        runCatching { VisionIdleAnalyzer.loadOrAnalyze(context, avatar) }
+            .onSuccess { idle = it }
+            .onFailure { idleFailed = true }
+    }
+
     val textures = remember(
         avatar.restPath,
         avatar.closedPath,
@@ -213,11 +214,24 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
         )
     }
 
-    val player = remember(avatar.videoPath) {
+    val idleStart = idle?.startMs ?: 0L
+    val idleEnd = idle?.endMs ?: avatar.durationMs.coerceAtLeast(1L)
+    val useClip = idle != null && idleEnd > idleStart + 100L
+
+    val player = remember(avatar.videoPath, idleStart, idleEnd, useClip) {
         ExoPlayer.Builder(context).build().apply {
             volume = 0f
             repeatMode = Player.REPEAT_MODE_ONE
-            setMediaItem(MediaItem.fromUri(Uri.fromFile(File(avatar.videoPath))))
+            val itemBuilder = MediaItem.Builder().setUri(Uri.fromFile(File(avatar.videoPath)))
+            if (useClip) {
+                itemBuilder.setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(idleStart)
+                        .setEndPositionMs(idleEnd)
+                        .build()
+                )
+            }
+            setMediaItem(itemBuilder.build())
             prepare()
             playWhenReady = true
         }
@@ -235,8 +249,10 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
         onDispose { player.release() }
     }
 
-    val track = remember(avatar.motionTrack, playerPositionMs) {
-        interpolateTrack(avatar, playerPositionMs)
+    val sourcePositionMs = if (useClip) idleStart + playerPositionMs else playerPositionMs
+    val activeTrack = idle?.track?.takeIf { it.isNotEmpty() } ?: avatar.motionTrack
+    val track = remember(activeTrack, sourcePositionMs) {
+        interpolateTrack(activeTrack, avatar, sourcePositionMs)
     }
 
     BoxWithConstraints(
@@ -260,7 +276,7 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
             update = { it.player = player },
         )
 
-        if (avatar.sourceWidth > 0 && avatar.sourceHeight > 0) {
+        if (avatar.sourceWidth > 0 && avatar.sourceHeight > 0 && (idle != null || idleFailed)) {
             val containerW = maxWidth.value
             val containerH = maxHeight.value
             val scale = min(
@@ -279,46 +295,17 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
             val patchLeft = centerX - patchW * .5f
             val patchTop = centerY - patchH * .5f
 
-            // Tapa siempre la boca/mandíbula original del video. El MP4 puede estar hablando,
-            // pero en pantalla queda una base neutral antes de dibujar el lipsync nuevo.
-            val neutralW = patchW * avatar.neutralScaleW
-            val neutralH = patchH * avatar.neutralScaleH
-            val neutralLeft = centerX - neutralW * .5f
-            val neutralTop = centerY + patchH * avatar.neutralYOffset - neutralH * .5f
-            neutral?.let { bitmap ->
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .offset(neutralLeft.dp, neutralTop.dp)
-                        .width(neutralW.dp)
-                        .height(neutralH.dp)
-                        .graphicsLayer(
-                            rotationZ = track.rotationZ,
-                            transformOrigin = TransformOrigin.Center,
-                        ),
-                    contentScale = ContentScale.FillBounds,
-                )
-            }
-
-            // Una sola boca. El PCM genera apertura continua a ~60 Hz; el visema sólo elige la
-            // forma fotográfica que se mezcla suavemente encima del rostro neutralizado.
             val targetViseme = if (lip.speaking) lip.viseme else MouthViseme.REST
-            val mouthAlpha = when {
-                !lip.speaking -> 0f
-                targetViseme == MouthViseme.CLOSED -> 0.28f + lip.level * .48f
-                targetViseme == MouthViseme.REST -> lip.openness * .55f
-                else -> 0.18f + lip.openness * .82f
-            }.coerceIn(0f, 1f)
-            val continuousScaleX = (1f + lip.widthBias * .08f).coerceIn(.94f, 1.08f)
-            val continuousScaleY = (.975f + lip.openness * .055f).coerceIn(.975f, 1.035f)
+            val continuousScaleX = (1f + lip.widthBias * .09f).coerceIn(.93f, 1.09f)
+            val continuousScaleY = (.97f + lip.openness * .085f).coerceIn(.97f, 1.055f)
+            val verticalNudge = if (lip.speaking) patchH * lip.openness * .018f else 0f
 
             Crossfade(
                 targetState = targetViseme,
-                animationSpec = tween(durationMillis = 64),
-                label = "smooth-mouth-viseme",
+                animationSpec = tween(durationMillis = 58),
+                label = "single-video-mouth",
                 modifier = Modifier
-                    .offset(patchLeft.dp, patchTop.dp)
+                    .offset(patchLeft.dp, (patchTop + verticalNudge).dp)
                     .width(patchW.dp)
                     .height(patchH.dp)
                     .graphicsLayer(
@@ -326,8 +313,8 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
                         scaleX = continuousScaleX,
                         scaleY = continuousScaleY,
                         transformOrigin = TransformOrigin.Center,
-                    )
-                    .alpha(mouthAlpha),
+                        alpha = if (lip.speaking) .98f else .94f,
+                    ),
             ) { viseme ->
                 textures[viseme]?.let { bitmap ->
                     Image(
@@ -342,8 +329,11 @@ private fun VisionAvatarStage(avatar: VisionAvatar) {
     }
 }
 
-private fun interpolateTrack(avatar: VisionAvatar, positionMs: Long): MouthTrackPoint {
-    val points = avatar.motionTrack
+private fun interpolateTrack(
+    points: List<MouthTrackPoint>,
+    avatar: VisionAvatar,
+    positionMs: Long,
+): MouthTrackPoint {
     if (points.isEmpty()) {
         return MouthTrackPoint(
             timeMs = positionMs,
