@@ -48,6 +48,7 @@ class ProfileStore(context: Context) {
         geminiKey: String,
         fishKey: String,
         geminiModel: String = DEFAULT_GEMINI_MODEL,
+        simliKey: String = "",
     ): AppConfig? = runCatching {
         val file = configFile(id)
         if (!file.exists()) return null
@@ -57,11 +58,14 @@ class ProfileStore(context: Context) {
             profileName = json.optString("name"),
             geminiApiKey = geminiKey,
             fishApiKey = fishKey,
+            simliApiKey = simliKey,
             geminiModel = geminiModel,
             personality = json.optString("personality", ""),
             voiceTranscript = json.optString("voiceTranscript", ""),
             voiceName = json.optString("voiceName", ""),
             voiceSpeed = json.optDouble("voiceSpeed", 1.0).toFloat(),
+            simliEnabled = json.optBoolean("simliEnabled", false),
+            simliFaceId = json.optString("simliFaceId", ""),
         )
     }.getOrNull()
 
@@ -79,6 +83,8 @@ class ProfileStore(context: Context) {
             .put("voiceTranscript", config.voiceTranscript)
             .put("voiceName", config.voiceName)
             .put("voiceSpeed", config.voiceSpeed.toDouble())
+            .put("simliEnabled", config.simliEnabled)
+            .put("simliFaceId", config.simliFaceId.trim())
             .put("createdAt", oldCreatedAt)
             .put("updatedAt", System.currentTimeMillis())
         file.writeText(json.toString())
