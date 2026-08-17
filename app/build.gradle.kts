@@ -15,8 +15,8 @@ android {
         applicationId = "com.lisofer.characteria.vision"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-vision-real"
+        versionCode = 4
+        versionName = "0.4.0-vision-smooth"
     }
 
     buildFeatures {
@@ -64,7 +64,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.msgpack:msgpack-core:0.9.11")
 
-    // CharacterIA Visión: reproducción local del avatar y detección facial on-device.
+    // CharacterIA Visión Smooth: reproducción local + análisis facial sólo al importar.
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
