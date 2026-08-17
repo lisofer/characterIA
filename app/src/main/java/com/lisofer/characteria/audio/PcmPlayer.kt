@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import com.lisofer.characteria.simli.SimliRuntime
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -44,6 +45,9 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
 
     fun write(bytes: ByteArray) {
         if (bytes.isEmpty()) return
+        // Once Simli is ready, its LiveKit audio is the single playback path so face + voice stay aligned.
+        if (SimliRuntime.routePcm(bytes)) return
+
         val t = ensureTrack()
         var offset = 0
         while (offset < bytes.size) {
@@ -54,6 +58,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
     }
 
     fun interrupt() = lock.withLock {
+        SimliRuntime.clearBuffer()
         track?.let {
             runCatching { it.pause() }
             runCatching { it.flush() }
@@ -62,6 +67,7 @@ class PcmPlayer(private val sampleRate: Int = 44_100) {
     }
 
     fun release() = lock.withLock {
+        SimliRuntime.stop()
         track?.let {
             runCatching { it.stop() }
             runCatching { it.release() }
