@@ -26,15 +26,13 @@ class InvocationForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME).orEmpty().ifBlank { "CharacterIA Visión" }
+        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME).orEmpty().ifBlank { "CharacterIA MuseTalk" }
         val active = intent?.getBooleanExtra(EXTRA_ACTIVE, false) == true
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
             buildNotification(profileName, active),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else 0,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
         )
         return START_NOT_STICKY
     }
@@ -44,25 +42,20 @@ class InvocationForegroundService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "Modo invocación · Visión",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Mantiene el micrófono activo mientras CharacterIA Visión espera la frase de invocación."
+            NotificationChannel(CHANNEL_ID, "Modo invocación · MuseTalk", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Mantiene el micrófono activo mientras CharacterIA MuseTalk espera la frase de invocación."
                 setShowBadge(false)
             }
         )
     }
 
     private fun updateNotification(profileName: String, active: Boolean) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(profileName, active))
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(profileName, active))
     }
 
     private fun buildNotification(profileName: String, active: Boolean) = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-        .setContentTitle(if (active) "$profileName está activo" else "CharacterIA Visión · $profileName")
+        .setContentTitle(if (active) "$profileName está activo" else "CharacterIA MuseTalk · $profileName")
         .setContentText(
             if (active) "Cambiar: «nombre, are you here?» · cerrar: «get out»."
             else "Esperando «nombre del personaje, are you here?»."
@@ -72,8 +65,7 @@ class InvocationForegroundService : Service() {
         .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .setContentIntent(
             PendingIntent.getActivity(
-                this,
-                0,
+                this, 0,
                 Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -81,8 +73,8 @@ class InvocationForegroundService : Service() {
         .build()
 
     companion object {
-        private const val CHANNEL_ID = "characteria_vision_invocation"
-        private const val NOTIFICATION_ID = 4201
+        private const val CHANNEL_ID = "characteria_musetalk_invocation"
+        private const val NOTIFICATION_ID = 4301
         private const val EXTRA_PROFILE_NAME = "profile_name"
         private const val EXTRA_ACTIVE = "active"
         @Volatile private var instance: InvocationForegroundService? = null
