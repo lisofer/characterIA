@@ -11,12 +11,12 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // ID distinto para poder instalar CharacterIA y CharacterIA Visión lado a lado.
-        applicationId = "com.lisofer.characteria.vision"
+        // Variante totalmente separada: estable, Vision y MuseTalk pueden convivir.
+        applicationId = "com.lisofer.characteria.musetalk"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-vision-real"
+        versionCode = 4
+        versionName = "0.4.0-musetalk-local"
     }
 
     buildFeatures {
@@ -64,8 +64,11 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.msgpack:msgpack-core:0.9.11")
 
-    // CharacterIA Visión: reproducción local del avatar y detección facial on-device.
+    // Reproducción del video/avatar y detección facial para preparar los crops.
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
+
+    // MuseTalk Local: ejecuta los modelos ONNX directamente dentro de Android.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
 }
