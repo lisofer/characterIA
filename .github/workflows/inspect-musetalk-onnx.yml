@@ -21,46 +21,43 @@ jobs:
         run: |
           curl -L --fail --retry 3 -o /tmp/unet.onnx \
             "https://huggingface.co/DgDev91/MuseTalk-ONNX/resolve/main/unet.onnx?download=true"
-      - name: Inspect symbolic dimensions and batched MatMul inputs
+      - name: Inspect inferred batched MatMul shapes
         run: |
           python - <<'PY'
           import onnx
-          from collections import Counter
 
           m = onnx.load('/tmp/unet.onnx', load_external_data=False)
-
-          def dims(vi):
-              out=[]
-              tt=vi.type.tensor_type
-              for d in tt.shape.dim:
-                  if d.HasField('dim_value'):
-                      out.append(('value', d.dim_value))
-                  elif d.HasField('dim_param'):
-                      out.append(('param', d.dim_param))
-                  else:
-                      out.append(('unknown', None))
-              return out
-
           print('=== GRAPH INPUTS ===')
           for x in m.graph.input:
-              print(x.name, dims(x))
+              print(x.name, [(d.dim_value if d.HasField('dim_value') else d.dim_param) for d in x.type.tensor_type.shape.dim])
 
-          print('=== GRAPH OUTPUTS ===')
-          for x in m.graph.output:
-              print(x.name, dims(x))
+          try:
+              m = onnx.shape_inference.infer_shapes(m, check_type=False, strict_mode=False, data_prop=False)
+              print('shape inference: OK')
+          except Exception as e:
+              print('shape inference warning:', repr(e))
 
-          params=Counter()
-          for vi in list(m.graph.input)+list(m.graph.output)+list(m.graph.value_info):
-              for kind,val in dims(vi):
-                  if kind=='param': params[val]+=1
-          print('=== SYMBOLIC DIMENSIONS ===')
-          print(params)
+          def shape(vi):
+              if vi is None or not vi.type.HasField('tensor_type'):
+                  return None
+              result=[]
+              for d in vi.type.tensor_type.shape.dim:
+                  if d.HasField('dim_value'): result.append(d.dim_value)
+                  elif d.HasField('dim_param'): result.append(d.dim_param)
+                  else: result.append('?')
+              return result
 
-          info={vi.name:dims(vi) for vi in list(m.graph.input)+list(m.graph.output)+list(m.graph.value_info)}
-          print('=== MATMUL NODES WITH KNOWN INPUT SHAPES ===')
+          all_vi=list(m.graph.input)+list(m.graph.output)+list(m.graph.value_info)
+          info={vi.name:vi for vi in all_vi}
+          init_shape={i.name:list(i.dims) for i in m.graph.initializer}
+
+          print('=== RANK >= 3 MATMULS ===')
           for n in m.graph.node:
-              if n.op_type=='MatMul':
-                  a=info.get(n.input[0]); b=info.get(n.input[1])
-                  if a or b:
-                      print(n.name, 'A=',a,'B=',b)
+              if n.op_type != 'MatMul': continue
+              a=shape(info.get(n.input[0])) or init_shape.get(n.input[0])
+              b=shape(info.get(n.input[1])) or init_shape.get(n.input[1])
+              rank=max(len(a or []), len(b or []))
+              if rank >= 3:
+                  flag=' *** ZERO/UNKNOWN ***' if any(v in (0,'?') for v in (a or [])+(b or [])) else ''
+                  print(n.name, 'A=',a,'B=',b,flag)
           PY
