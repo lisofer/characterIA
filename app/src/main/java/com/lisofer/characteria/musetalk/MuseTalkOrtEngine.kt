@@ -19,6 +19,12 @@ import kotlin.math.roundToInt
  * avatar latent 8x32x32 + prompt -> safe FP16 UNet -> 4x32x32 -> VAE -> RGB 256x256
  *
  * Audio remains the master clock. Neural rendering is best-effort and may drop frames.
+ *
+ * Reliability rule for Android:
+ * - only the UNet is allowed to try NNAPI;
+ * - VAE/Whisper/encoder run through XNNPACK/ORT CPU;
+ * - renderer and audio front-end are loaded independently so a benchmark of the renderer
+ *   cannot fail because Whisper or another auxiliary model dislikes the device NNAPI driver.
  */
 class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     data class BenchmarkResult(
@@ -45,19 +51,59 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     private var positional: OrtSession? = null
     private var unetBackend = "sin cargar"
 
+    /** Loads only what is needed to synthesize a neural face frame. */
     @Synchronized
-    fun loadGenerator() {
+    private fun loadRenderer() {
         check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
         if (unet == null) unet = createUnetSession()
-        if (decoder == null) decoder = createSession("vae_decoder.onnx", true)
-        if (whisper == null) whisper = createSession("whisper_encoder.onnx", true)
-        if (positional == null) positional = createSession("positional_encoding.onnx", false)
+        // Keep VAE off NNAPI: the UNet is the large hot path; reliability matters more here.
+        if (decoder == null) {
+            decoder = createSession(
+                fileName = "vae_decoder.onnx",
+                preferNnapi = false,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            )
+        }
+    }
+
+    /** Loads the audio-conditioning path only when actual speech has to be encoded. */
+    @Synchronized
+    private fun loadAudioFrontend() {
+        check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
+        // Whisper's transformer/MLP graph is intentionally kept away from NNAPI. Some Android
+        // NNAPI drivers/ORT partitions synthesize invalid Split operations for this graph.
+        if (whisper == null) {
+            whisper = createSession(
+                fileName = "whisper_encoder.onnx",
+                preferNnapi = false,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            )
+        }
+        if (positional == null) {
+            positional = createSession(
+                fileName = "positional_encoding.onnx",
+                preferNnapi = false,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            )
+        }
+    }
+
+    @Synchronized
+    fun loadGenerator() {
+        loadRenderer()
+        loadAudioFrontend()
     }
 
     @Synchronized
     fun loadEncoder() {
         check(MuseTalkModelStore.isReady(context)) { "Primero descargá el motor MuseTalk compatible." }
-        if (encoder == null) encoder = createSession("vae_encoder.onnx", true)
+        if (encoder == null) {
+            encoder = createSession(
+                fileName = "vae_encoder.onnx",
+                preferNnapi = false,
+                optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
+            )
+        }
     }
 
     @Synchronized
@@ -94,7 +140,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     @Synchronized
     fun audioPrompts16k(audio16k: FloatArray, takeLastFrames: Int = 4): List<FloatArray> {
         require(audio16k.isNotEmpty()) { "Ventana de audio vacía" }
-        loadGenerator()
+        loadAudioFrontend()
         val raw = runWhisper(audio16k)
         val totalFrames = floor(audio16k.size / 16_000.0 * 25.0).toInt().coerceAtLeast(1)
         val count = takeLastFrames.coerceIn(1, totalFrames)
@@ -108,7 +154,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     fun generateFace(latent8x32x32: FloatArray, encodedAudio50x384: FloatArray): FloatArray {
         require(latent8x32x32.size == 8 * 32 * 32) { "Avatar latent inválido" }
         require(encodedAudio50x384.size == 50 * 384) { "Audio MuseTalk inválido" }
-        loadGenerator()
+        loadRenderer()
 
         val u = requireNotNull(unet)
         val latentTensor = tensor(latent8x32x32, longArrayOf(1, 8, 32, 32))
@@ -131,7 +177,9 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
 
     @Synchronized
     fun benchmark(iterations: Int = 3): BenchmarkResult {
-        loadGenerator()
+        // Deliberately do NOT load Whisper/positional encoding here. This button measures the
+        // renderer and must not fail because an auxiliary model is incompatible with NNAPI.
+        loadRenderer()
         val zeroLatent = FloatArray(8 * 32 * 32)
         val zeroAudio = FloatArray(50 * 384)
         val u = requireNotNull(unet)
@@ -220,13 +268,9 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
     }
 
     /**
-     * ORT ALL_OPT rewrites parts of MuseTalk's attention graph before NNAPI sees it.
-     * On the user's device that rewrite generates an invalid synthetic Split
-     * (AddNnapiSplit count=0). The source ONNX has no Split node, so for the UNet
-     * we deliberately keep graph optimization at BASIC while retaining NNAPI FP16.
-     * If the device driver still rejects session construction, retry once without
-     * NNAPI so the benchmark can establish a real XNNPACK/CPU baseline instead of
-     * terminating during model load.
+     * Keep the UNet as the only NNAPI candidate. If NNAPI rejects model construction on a
+     * particular Android driver, retry the same model through XNNPACK/ORT CPU. No other MuseTalk
+     * component is allowed to make the whole pipeline depend on NNAPI compatibility.
      */
     private fun createUnetSession(): OrtSession {
         return try {
@@ -236,23 +280,25 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
                 optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
             ).also { unetBackend = "UNet NNAPI FP16 · BASIC_OPT" }
         } catch (nnapiError: Throwable) {
-            val message = nnapiError.message.orEmpty()
-            if (!message.contains("AddNnapiSplit", ignoreCase = true) &&
-                !message.contains("does not evenly divide", ignoreCase = true)) {
-                throw nnapiError
-            }
             createSession(
                 fileName = "unet_android_mixed.onnx",
                 preferNnapi = false,
                 optimizationLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
-            ).also { unetBackend = "UNet XNNPACK/ORT CPU · fallback por NNAPI Split" }
+            ).also {
+                val cause = nnapiError.message.orEmpty().lineSequence().firstOrNull().orEmpty()
+                unetBackend = if (cause.isBlank()) {
+                    "UNet XNNPACK/ORT CPU · fallback NNAPI"
+                } else {
+                    "UNet XNNPACK/ORT CPU · fallback NNAPI"
+                }
+            }
         }
     }
 
     private fun createSession(
         fileName: String,
         preferNnapi: Boolean,
-        optimizationLevel: OrtSession.SessionOptions.OptLevel = OrtSession.SessionOptions.OptLevel.ALL_OPT,
+        optimizationLevel: OrtSession.SessionOptions.OptLevel = OrtSession.SessionOptions.OptLevel.BASIC_OPT,
     ): OrtSession {
         val path = MuseTalkModelStore.modelFile(context, fileName).absolutePath
         val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
@@ -270,7 +316,7 @@ class MuseTalkOrtEngine(private val context: Context) : AutoCloseable {
             env.createSession(path, options).also { ownedSessionOptions += options }
         } catch (t: Throwable) {
             runCatching { options.close() }
-            throw t
+            throw IllegalStateException("No pude cargar $fileName: ${t.message ?: t.javaClass.simpleName}", t)
         }
     }
 
