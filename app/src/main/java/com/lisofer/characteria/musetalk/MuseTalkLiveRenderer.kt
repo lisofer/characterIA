@@ -15,8 +15,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Live on-device renderer. Audio is the master: this consumer is allowed to skip video
- * work whenever inference is slower than realtime.
+ * Live on-device renderer.
+ *
+ * Preparing an avatar must stay cheap after it reaches 16/16: the heavy ONNX sessions are
+ * created only after Fish actually starts delivering PCM. Audio always remains the master
+ * clock and video work is allowed to drop frames. After a long silence the neural sessions
+ * are released so CharacterIA gives RAM back to Android.
  */
 object MuseTalkLiveRenderer {
     data class RenderedFrame(
@@ -32,6 +36,8 @@ object MuseTalkLiveRenderer {
         data class Error(val message: String) : State
     }
 
+    private const val RELEASE_AFTER_SILENCE_MS = 15_000L
+
     private val _frame = MutableStateFlow<RenderedFrame?>(null)
     val frame: StateFlow<RenderedFrame?> = _frame.asStateFlow()
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -39,32 +45,55 @@ object MuseTalkLiveRenderer {
 
     suspend fun run(context: Context, prepared: MuseTalkPreparedAvatar) = withContext(Dispatchers.Default) {
         val app = context.applicationContext
-        _state.value = State.Loading("Cargando MuseTalk en memoria…")
-        val engine = MuseTalkOrtEngine(app)
-        try {
-            engine.loadGenerator()
-            // Latents are tiny (~32 KB/frame), so keep all of them hot in memory.
-            val latents = prepared.frames.map { MuseTalkPreparedStore.readLatent(it.latentPath) }
-            var audioFrameClock = 0L
-            var avatarFrameClock = 0L
-            var lastNeuralMs = 40L
-            var skipped = 0L
-            var fpsWindowStart = System.nanoTime()
-            var fpsFrames = 0
-            var measuredFps = 0f
-            _state.value = State.Idle
+        // Latents are tiny (~32 KB/frame). Reading these does not load MuseTalk itself.
+        val latents = prepared.frames.map { MuseTalkPreparedStore.readLatent(it.latentPath) }
 
+        var engine: MuseTalkOrtEngine? = null
+        var audioFrameClock = 0L
+        var avatarFrameClock = 0L
+        var lastNeuralMs = 40L
+        var skipped = 0L
+        var fpsWindowStart = System.nanoTime()
+        var fpsFrames = 0
+        var measuredFps = 0f
+        var lastSpeechNanos = 0L
+        var waitForFreshSpeechAfterError = false
+        _state.value = State.Idle
+
+        try {
             while (currentCoroutineContext().isActive) {
-                if (!MuseTalkAudioBus.hasRecentSpeech()) {
+                val speakingNow = MuseTalkAudioBus.hasRecentSpeech()
+
+                if (!speakingNow) {
                     _frame.value = null
-                    _state.value = State.Idle
-                    delay(18)
+                    if (_state.value !is State.Error) _state.value = State.Idle
+
+                    if (waitForFreshSpeechAfterError) {
+                        waitForFreshSpeechAfterError = false
+                        _state.value = State.Idle
+                    }
+
+                    if (engine != null && lastSpeechNanos != 0L) {
+                        val idleMs = (System.nanoTime() - lastSpeechNanos) / 1_000_000L
+                        if (idleMs >= RELEASE_AFTER_SILENCE_MS) {
+                            engine?.close()
+                            engine = null
+                        }
+                    }
+                    delay(20)
+                    continue
+                }
+
+                lastSpeechNanos = System.nanoTime()
+                if (waitForFreshSpeechAfterError) {
+                    // Do not hammer the same failing inference continuously during one Fish turn.
+                    delay(30)
                     continue
                 }
 
                 val snapshot = MuseTalkAudioBus.snapshot(8_000) // 500 ms rolling context
-                val currentClock = snapshot.totalSamples16k / 640L // 16k / 25fps = 640 samples/frame
-                if (currentClock < audioFrameClock) audioFrameClock = currentClock // interruption/reset
+                val currentClock = snapshot.totalSamples16k / 640L // 16 kHz / 25 fps
+                if (currentClock < audioFrameClock) audioFrameClock = currentClock
                 var newFrames = (currentClock - audioFrameClock).toInt()
                 if (newFrames <= 0) {
                     delay(4)
@@ -72,7 +101,6 @@ object MuseTalkLiveRenderer {
                 }
                 audioFrameClock = currentClock
 
-                // Dynamic dropping: preserve cadence on fast phones, freshness on slow phones.
                 val capacity = when {
                     lastNeuralMs <= 45L -> 4
                     lastNeuralMs <= 85L -> 2
@@ -83,43 +111,62 @@ object MuseTalkLiveRenderer {
                     newFrames = capacity
                 }
 
-                val prompts = engine.audioPrompts16k(snapshot.audio16k, newFrames)
-                for (promptIndex in prompts.indices) {
-                    if (!currentCoroutineContext().isActive) break
-                    // If fresher Fish audio arrived and we are already slow, discard intermediate frames.
-                    if (lastNeuralMs > 70 && promptIndex < prompts.lastIndex && MuseTalkAudioBus.revision.value != snapshot.revision) {
-                        skipped++
-                        continue
+                try {
+                    val activeEngine = engine ?: MuseTalkOrtEngine(app).also {
+                        engine = it
+                        _state.value = State.Loading("Iniciando lipsync con la voz…")
                     }
 
-                    val sourceIndex = pingPongIndex(avatarFrameClock++, prepared.frames.size)
-                    val meta = prepared.frames[sourceIndex]
-                    val latent = latents[sourceIndex]
-                    val started = System.nanoTime()
-                    val face = engine.generateFace(latent, prompts[promptIndex])
-                    val source = BitmapFactory.decodeFile(meta.framePath)
-                        ?: error("No pude abrir frame MuseTalk ${meta.framePath}")
-                    val output = blendNeuralFace(source, face, meta)
-                    if (source !== output && !source.isRecycled) source.recycle()
-                    lastNeuralMs = (System.nanoTime() - started) / 1_000_000L
+                    // Both the audio front-end and renderer are lazy. No large model is loaded
+                    // merely because the 16/16 preparation has completed.
+                    val prompts = activeEngine.audioPrompts16k(snapshot.audio16k, newFrames)
+                    for (promptIndex in prompts.indices) {
+                        if (!currentCoroutineContext().isActive) break
+                        if (lastNeuralMs > 70 && promptIndex < prompts.lastIndex &&
+                            MuseTalkAudioBus.revision.value != snapshot.revision
+                        ) {
+                            skipped++
+                            continue
+                        }
 
-                    _frame.value = RenderedFrame(prepared.profileId, output, System.nanoTime())
-                    fpsFrames++
-                    val now = System.nanoTime()
-                    val elapsed = (now - fpsWindowStart) / 1_000_000_000.0
-                    if (elapsed >= 1.0) {
-                        measuredFps = (fpsFrames / elapsed).toFloat()
-                        fpsFrames = 0
-                        fpsWindowStart = now
+                        val sourceIndex = pingPongIndex(avatarFrameClock++, prepared.frames.size)
+                        val meta = prepared.frames[sourceIndex]
+                        val latent = latents[sourceIndex]
+                        _state.value = State.Loading("Generando labios…")
+                        val started = System.nanoTime()
+                        val face = activeEngine.generateFace(latent, prompts[promptIndex])
+                        val source = BitmapFactory.decodeFile(meta.framePath)
+                            ?: error("No pude abrir frame MuseTalk ${meta.framePath}")
+                        val output = blendNeuralFace(source, face, meta)
+                        if (source !== output && !source.isRecycled) source.recycle()
+                        lastNeuralMs = (System.nanoTime() - started) / 1_000_000L
+
+                        _frame.value = RenderedFrame(prepared.profileId, output, System.nanoTime())
+                        fpsFrames++
+                        val now = System.nanoTime()
+                        val elapsed = (now - fpsWindowStart) / 1_000_000_000.0
+                        if (elapsed >= 1.0) {
+                            measuredFps = (fpsFrames / elapsed).toFloat()
+                            fpsFrames = 0
+                            fpsWindowStart = now
+                        }
+                        _state.value = State.Speaking(lastNeuralMs, measuredFps, skipped)
                     }
-                    _state.value = State.Speaking(lastNeuralMs, measuredFps, skipped)
+                } catch (t: Throwable) {
+                    _frame.value = null
+                    engine?.close()
+                    engine = null
+                    audioFrameClock = currentClock
+                    waitForFreshSpeechAfterError = true
+                    _state.value = State.Error(
+                        t.message ?: "No pude generar el lipsync. Voy a reintentar en la próxima respuesta."
+                    )
                 }
             }
-        } catch (t: Throwable) {
-            _frame.value = null
-            _state.value = State.Error(t.message ?: "MuseTalk falló en este dispositivo")
         } finally {
-            engine.close()
+            _frame.value = null
+            engine?.close()
+            _state.value = State.Idle
         }
     }
 
@@ -155,7 +202,6 @@ object MuseTalkLiveRenderer {
 
         for (y in 0 until h) {
             val ny = y.toFloat() / max(1, h - 1)
-            // Preserve eyes/forehead. MuseTalk changes the jaw/lips and gradually enters around mid-face.
             val vertical = smoothStep(.36f, .60f, ny)
             for (x in 0 until w) {
                 val nx = x.toFloat() / max(1, w - 1)
