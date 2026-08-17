@@ -26,7 +26,7 @@ class InvocationForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME).orEmpty().ifBlank { "CharacterIA" }
+        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME).orEmpty().ifBlank { "CharacterIA Visión" }
         val active = intent?.getBooleanExtra(EXTRA_ACTIVE, false) == true
         ServiceCompat.startForeground(
             this,
@@ -46,10 +46,10 @@ class InvocationForegroundService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Modo invocación",
+                "Modo invocación · Visión",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Mantiene el micrófono activo mientras CharacterIA espera la frase de invocación."
+                description = "Mantiene el micrófono activo mientras CharacterIA Visión espera la frase de invocación."
                 setShowBadge(false)
             }
         )
@@ -62,7 +62,7 @@ class InvocationForegroundService : Service() {
 
     private fun buildNotification(profileName: String, active: Boolean) = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-        .setContentTitle(if (active) "$profileName está activo" else "CharacterIA · $profileName")
+        .setContentTitle(if (active) "$profileName está activo" else "CharacterIA Visión · $profileName")
         .setContentText(
             if (active) "Cambiar: «nombre, are you here?» · cerrar: «get out»."
             else "Esperando «nombre del personaje, are you here?»."
@@ -81,8 +81,8 @@ class InvocationForegroundService : Service() {
         .build()
 
     companion object {
-        private const val CHANNEL_ID = "characteria_invocation"
-        private const val NOTIFICATION_ID = 4101
+        private const val CHANNEL_ID = "characteria_vision_invocation"
+        private const val NOTIFICATION_ID = 4201
         private const val EXTRA_PROFILE_NAME = "profile_name"
         private const val EXTRA_ACTIVE = "active"
         @Volatile private var instance: InvocationForegroundService? = null
