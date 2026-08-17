@@ -62,12 +62,15 @@ data class AppConfig(
     val profileName: String = "",
     val geminiApiKey: String = "",
     val fishApiKey: String = "",
+    val simliApiKey: String = "",
     /** Modelo preferido elegido por el usuario. */
     val geminiModel: String = DEFAULT_GEMINI_MODEL,
     val personality: String = "",
     val voiceTranscript: String = "",
     val voiceName: String = "",
     val voiceSpeed: Float = 1f,
+    val simliEnabled: Boolean = false,
+    val simliFaceId: String = "",
 )
 
 data class AppUiState(
@@ -83,5 +86,8 @@ data class AppUiState(
     val activeCharacterNames: List<String> = emptyList(),
     /** Puede diferir del preferido cuando hay fallback por cuota. */
     val activeGeminiModel: String = DEFAULT_GEMINI_MODEL,
+    val simliStatus: String = "Simli apagado",
+    val simliSessionActive: Boolean = false,
+    val simliVideoReady: Boolean = false,
     val diagnostics: List<String> = emptyList(),
 )
