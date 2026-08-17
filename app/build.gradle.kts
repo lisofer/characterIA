@@ -11,11 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.lisofer.characteria"
+        applicationId = "com.lisofer.characteria.simli"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.0-simli"
     }
 
     buildFeatures {
@@ -62,4 +62,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("org.msgpack:msgpack-core:0.9.11")
+    implementation("io.livekit:livekit-android:2.27.0")
 }
