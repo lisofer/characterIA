@@ -1,5 +1,8 @@
 package com.lisofer.characteria.musetalk
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.ArrayDeque
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -15,11 +18,15 @@ object MuseTalkAudioBus {
 
     private const val INPUT_RATE = 44_100
     private const val OUTPUT_RATE = 16_000
-    private const val MAX_RING_SAMPLES = OUTPUT_RATE * 4 // 4 s; lo viejo se descarta.
+    private const val MAX_RING_SAMPLES = OUTPUT_RATE * 4
 
     private val queue = ArrayBlockingQueue<Chunk>(10)
     private val ring = ArrayDeque<Float>(MAX_RING_SAMPLES)
     private val running = AtomicBoolean(true)
+    private val _revision = MutableStateFlow(0L)
+    val revision: StateFlow<Long> = _revision.asStateFlow()
+
+    @Volatile private var lastAudioNanos: Long = 0L
 
     init {
         thread(name = "MuseTalkAudio", isDaemon = true) {
@@ -33,6 +40,8 @@ object MuseTalkAudioBus {
                             ring.addLast(sample)
                         }
                     }
+                    lastAudioNanos = chunk.playedAtNanos
+                    _revision.value = _revision.value + 1L
                 }
             }
         }
@@ -43,16 +52,18 @@ object MuseTalkAudioBus {
         if (bytes.size < 2) return
         val copy = bytes.copyOf()
         if (!queue.offer(Chunk(copy, playedAtNanos))) {
-            queue.poll() // el video puede perder audio viejo; la voz jamás espera.
+            queue.poll()
             queue.offer(Chunk(copy, playedAtNanos))
         }
     }
 
-    /**
-     * Devuelve la ventana MÁS RECIENTE sin bloquear. 3200 samples = 200 ms a 16 kHz.
-     * Si todavía no hay suficiente audio, completa el comienzo con silencio.
-     */
-    fun latestWindow(samples: Int = 3_200): FloatArray {
+    fun hasRecentSpeech(maxAgeMs: Long = 650L): Boolean {
+        val last = lastAudioNanos
+        return last != 0L && (System.nanoTime() - last) <= maxAgeMs * 1_000_000L
+    }
+
+    /** Latest rolling 16 kHz window. Default 400 ms gives MuseTalk useful context. */
+    fun latestWindow(samples: Int = 6_400): FloatArray {
         val wanted = samples.coerceIn(160, OUTPUT_RATE * 2)
         val result = FloatArray(wanted)
         synchronized(ring) {
@@ -70,6 +81,8 @@ object MuseTalkAudioBus {
     fun reset() {
         queue.clear()
         synchronized(ring) { ring.clear() }
+        lastAudioNanos = 0L
+        _revision.value = _revision.value + 1L
     }
 
     private fun resample44100To16000(pcm: ByteArray): FloatArray {
