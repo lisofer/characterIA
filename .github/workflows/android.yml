@@ -53,5 +53,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "CharacterIA Simli Debug ${GITHUB_RUN_NUMBER}" \
-            --notes "CharacterIA Simli 0.1, construida desde la última base limpia previa a Vision. Agrega API key global de Simli, Face ID por personaje, avatar LiveKit nativo y ruta Fish PCM -> 16 kHz -> Simli, con fallback al audio local. El avatar se apaga en modo grupal de dos personajes." \
+            --notes "CharacterIA Simli 0.2. Corrige el panel negro: usa TextureView dentro de Compose, inicializa LiveKit/render en el hilo principal, calienta la sesión con 1 s de silencio PCM y no marca el avatar listo hasta recibir un frame real. Mantiene Fish -> PCM 16 kHz -> Simli y fallback local." \
             --prerelease
