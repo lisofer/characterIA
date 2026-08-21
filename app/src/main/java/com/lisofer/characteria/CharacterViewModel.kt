@@ -648,6 +648,81 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun invokeProfiles(profileIds: List<String>) {
+        val targetIds = profileIds.distinct().take(2)
+        if (targetIds.size != 2) {
+            _ui.update {
+                it.copy(
+                    status = SessionStatus.ERROR,
+                    statusDetail = "Seleccioná exactamente dos personajes",
+                )
+            }
+            return
+        }
+
+        val selectedProfiles = targetIds.mapNotNull { id -> _ui.value.profiles.firstOrNull { it.id == id } }
+        if (selectedProfiles.size != 2) {
+            _ui.update {
+                it.copy(
+                    status = SessionStatus.ERROR,
+                    statusDetail = "No se pudieron cargar los dos personajes seleccionados",
+                )
+            }
+            return
+        }
+
+        if (desiredConnected || _ui.value.backgroundModeEnabled) {
+            if (_ui.value.backgroundModeEnabled) {
+                stopBackgroundMode("Cambiando de invocación")
+            } else {
+                disconnectNormalSession("Cambiando a invocación grupal")
+            }
+        }
+
+        saveConfig()
+        val context = getApplication<Application>()
+        runCatching {
+            InvocationForegroundService.start(context, "CharacterIA", active = false)
+        }.onFailure { error ->
+            _ui.update {
+                it.copy(
+                    status = SessionStatus.ERROR,
+                    statusDetail = "No se pudo iniciar la invocación: ${error.message}",
+                )
+            }
+            diag("Invocación directa: ${error::class.simpleName}: ${error.message}")
+            return
+        }
+
+        desiredConnected = true
+        connectionPurpose = ConnectionPurpose.WAKE
+        resetManualInputState()
+        activeBackgroundProfileIds = emptyList()
+        pendingInvocationProfileIds = null
+        ignoreInvocationCommandsUntilMs = 0L
+        currentUserMessageId = null
+        currentAiMessageId = null
+        turnCompletePending = false
+        turnFinalizeJob?.cancel()
+        turnFinalizeJob = null
+        resetGroupOutput()
+
+        val displayName = selectedProfiles.joinToString(" + ") { it.name }
+        _ui.update {
+            it.copy(
+                status = SessionStatus.CONNECTING,
+                statusDetail = "Invocando a $displayName…",
+                backgroundModeEnabled = true,
+                invocationActive = true,
+                activeCharacterNames = selectedProfiles.map { profile -> profile.name },
+                settingsOpen = false,
+            )
+        }
+        invocationConnectStartedAtMs = SystemClock.elapsedRealtime()
+        diag("Invocación manual seleccionada: $displayName")
+        activateBackgroundCharacters(targetIds)
+    }
+
     private fun startBackgroundMode() {
         val armError = when {
             _ui.value.config.geminiApiKey.isBlank() -> "Falta la API key de Gemini"
@@ -749,7 +824,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
         turnCompletePending = false
-        // Keep AudioRecord alive across invocation switches. Gemini drops PCM while setupComplete=false.
         gemini.disconnect()
         cancelFish("Cambio de personaje")
         player.interrupt()
@@ -814,7 +888,6 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         discardCurrentUserMessage()
         finalizeAiMessage()
         persistConversation()
-        // Keep the same microphone capture alive while returning to the wake Gemini session.
         gemini.disconnect()
         cancelFish(reason)
         player.interrupt()
