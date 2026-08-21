@@ -122,7 +122,6 @@ private fun CharacterApp(vm: CharacterViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var textInputExpanded by remember { mutableStateOf(false) }
     var draftText by remember { mutableStateOf("") }
-    var pendingDirectInvocationIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -144,15 +143,6 @@ private fun CharacterApp(vm: CharacterViewModel) {
         else vm.setSettingsOpen(true)
     }
 
-    val directInvocationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val selected = pendingDirectInvocationIds
-        pendingDirectInvocationIds = emptyList()
-        if (granted && selected.size == 2) vm.invokeProfiles(selected)
-        else vm.setSettingsOpen(true)
-    }
-
     val voicePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -167,7 +157,8 @@ private fun CharacterApp(vm: CharacterViewModel) {
                     Column {
                         Text("CharacterIA", fontWeight = FontWeight.Black)
                         Text(
-                            (state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ") ?: state.config.profileName.ifBlank { "Sin perfil" }),
+                            state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ")
+                                ?: state.config.profileName.ifBlank { "Sin perfil" },
                             style = MaterialTheme.typography.labelSmall,
                             color = Muted,
                         )
@@ -193,7 +184,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
                         )
                     }
                     IconButton(onClick = vm::clearChat) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = "Borrar chat de este perfil")
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Borrar esta conversación")
                     }
                     IconButton(onClick = { vm.setSettingsOpen(true) }) {
                         Icon(Icons.Default.Settings, contentDescription = "Configuración")
@@ -210,13 +201,9 @@ private fun CharacterApp(vm: CharacterViewModel) {
                 onToggleTextInput = {
                     val opening = !textInputExpanded
                     textInputExpanded = opening
-                    if (
-                        opening &&
-                        (state.backgroundModeEnabled ||
-                            (state.status != SessionStatus.DISCONNECTED && state.status != SessionStatus.ERROR))
-                    ) {
-                        // Modo teclado = micrófono realmente cerrado desde el momento en que se abre.
-                        vm.disconnect()
+                    if (opening) {
+                        // Teclado = micrófono cerrado, pero el chat (también el grupal) sigue siendo el mismo.
+                        vm.enterTextMode()
                     }
                 },
                 onSendText = { text -> vm.sendText(text) },
@@ -253,15 +240,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
             onPickVoice = { voicePicker.launch(arrayOf("audio/*")) },
             onSelectProfile = vm::selectProfile,
             onNewProfile = vm::newProfile,
-            onInvokeProfiles = { profileIds ->
-                val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                if (permission == PackageManager.PERMISSION_GRANTED) {
-                    vm.invokeProfiles(profileIds)
-                } else {
-                    pendingDirectInvocationIds = profileIds
-                    directInvocationPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
+            onInvokeProfiles = vm::invokeProfiles,
             onSave = vm::saveConfig,
         )
     }
@@ -279,10 +258,12 @@ private fun Conversation(modifier: Modifier, state: AppUiState) {
         if (state.messages.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                    Text("Hablá normalmente.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Escribí, hablá o mandá un audio.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
+                    val chatName = state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ")
+                        ?: state.config.profileName.ifBlank { "este perfil" }
                     Text(
-                        "El chat de ${state.config.profileName.ifBlank { "este perfil" }} se guarda en este teléfono hasta que lo borres.",
+                        "El chat con $chatName se guarda en este teléfono hasta que lo borres.",
                         color = Muted,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -337,10 +318,14 @@ private fun StatusHero(state: AppUiState) {
                 } else {
                     "Micrófono activo · podés interrumpir"
                 }
-                SessionStatus.SPEAKING -> "Fish Audio · ${state.config.profileName.ifBlank { "voz clonada" }}"
+                SessionStatus.SPEAKING -> {
+                    val names = state.activeCharacterNames.takeIf { it.size > 1 }?.joinToString(" + ")
+                        ?: state.config.profileName.ifBlank { "voz clonada" }
+                    "Fish Audio · $names"
+                }
                 SessionStatus.INVOCATION_ARMED -> "Segundo plano · «[personaje], are you here?»"
                 SessionStatus.INVOCATION_ACTIVE -> "Cambiar: «[personaje], are you here?» · salir: «get out»"
-                SessionStatus.RECONNECTING -> "Recuperando el contexto del perfil"
+                SessionStatus.RECONNECTING -> "Recuperando el contexto de la conversación"
                 else -> state.activeGeminiModel
             }
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Muted)
@@ -559,9 +544,9 @@ private fun SettingsSheet(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Invocar dos personajes", fontWeight = FontWeight.Black)
+                    Text("Chat con dos personajes", fontWeight = FontWeight.Black)
                     Text(
-                        "Elegí dos perfiles para abrir la conversación directamente, sin decir «personaje1 + personaje2, are you here?». La invocación por voz sigue funcionando igual.",
+                        "Elegí dos perfiles y abrí un chat compartido. Después podés escribirles, hablar de forma continua o mandar un audio manteniendo apretado el micrófono. La invocación por voz «are you here?» sigue siendo una función aparte.",
                         color = Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -594,7 +579,7 @@ private fun SettingsSheet(
                     ) {
                         Text(
                             if (selectedNames.size == 2) {
-                                "Invocar ${selectedNames.joinToString(" + ")}"
+                                "Abrir chat ${selectedNames.joinToString(" + ")}"
                             } else {
                                 "Seleccioná 2 personajes"
                             },
