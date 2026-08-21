@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.text.Normalizer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -49,6 +50,15 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     private var turnCompletePending = false
     private var desiredConnected = false
     private var connectionPurpose = ConnectionPurpose.NORMAL
+
+    private var manualConnectRequested = false
+    private var manualInputMode = false
+    private var pushToTalkPressed = false
+    private var pendingTypedText: String? = null
+    private val pttAudioLock = Any()
+    private val pttAudioBuffer = ByteArrayOutputStream()
+    @Volatile private var pttBuffering = false
+    private var pendingPttEnd = false
 
     private var pendingInvocationProfileIds: List<String>? = null
     private var activeBackgroundProfileIds: List<String> = emptyList()
@@ -79,6 +89,9 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     status = if (reconnecting) SessionStatus.RECONNECTING else SessionStatus.CONNECTING,
                     statusDetail = message,
                 )
+            }
+            if (manualInputMode && reconnecting && pushToTalkPressed) {
+                pttBuffering = true
             }
             diag(message)
         }
@@ -121,8 +134,29 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 ConnectionPurpose.NORMAL -> {
-                    startMic()
-                    _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
+                    if (manualInputMode) {
+                        pttBuffering = false
+                        flushBufferedPttAudio()
+                        when {
+                            pendingPttEnd -> {
+                                pendingPttEnd = false
+                                gemini.endAudioStream()
+                                _ui.update { it.copy(status = SessionStatus.THINKING, statusDetail = "Procesando tu audio…") }
+                            }
+                            pushToTalkPressed -> {
+                                startManualMic()
+                                _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Mantené apretado · escuchando") }
+                            }
+                            else -> {
+                                mic.stop()
+                                _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Conectado · micrófono cerrado") }
+                            }
+                        }
+                        sendPendingTypedTextIfPossible()
+                    } else {
+                        startMic()
+                        _ui.update { it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando") }
+                    }
                 }
             }
         }
@@ -278,6 +312,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                         status = SessionStatus.INVOCATION_ACTIVE,
                         statusDetail = "${activeDisplayName()} activo · escuchando",
                     )
+                } else if (manualInputMode && !pushToTalkPressed) {
+                    it.copy(status = SessionStatus.LISTENING, statusDetail = "Conectado · micrófono cerrado")
                 } else {
                     it.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
                 }
@@ -306,6 +342,10 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             } else {
+                mic.stop()
+                pushToTalkPressed = false
+                pttBuffering = false
+                pendingPttEnd = false
                 _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = message) }
             }
         }
@@ -368,6 +408,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         conversationProfileIds = listOf(profileId)
         activeBackgroundProfileIds = emptyList()
         settings.setActiveProfileId(profileId)
+        resetManualInputState()
         _ui.value = _ui.value.copy(
             config = config,
             profiles = summaries,
@@ -489,6 +530,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         pendingInvocationProfileIds = null
         activeBackgroundProfileIds = emptyList()
         resetGroupOutput()
+        resetManualInputState()
         _ui.update { state ->
             state.copy(
                 status = SessionStatus.DISCONNECTED,
@@ -546,6 +588,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun connect() {
+        val requestedManualMode = manualConnectRequested
+        manualConnectRequested = false
         validateForConnect()?.let { error ->
             _ui.update { it.copy(status = SessionStatus.ERROR, statusDetail = error, settingsOpen = true) }
             return
@@ -555,6 +599,14 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         saveConfig()
         desiredConnected = true
         connectionPurpose = ConnectionPurpose.NORMAL
+        manualInputMode = requestedManualMode
+        if (!manualInputMode) {
+            pushToTalkPressed = false
+            pendingTypedText = null
+            pendingPttEnd = false
+            pttBuffering = false
+            resetPttAudioBuffer()
+        }
         activeBackgroundProfileIds = emptyList()
         conversationProfileIds = listOf(_ui.value.config.profileId)
         currentUserMessageId = null
@@ -570,7 +622,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update {
             it.copy(
                 status = SessionStatus.CONNECTING,
-                statusDetail = "Conectando…",
+                statusDetail = if (manualInputMode) "Conectando entrada manual…" else "Conectando…",
                 backgroundModeEnabled = false,
                 invocationActive = false,
                 activeCharacterNames = emptyList(),
@@ -628,6 +680,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
 
         desiredConnected = true
         connectionPurpose = ConnectionPurpose.WAKE
+        resetManualInputState()
         activeBackgroundProfileIds = emptyList()
         pendingInvocationProfileIds = null
         ignoreInvocationCommandsUntilMs = 0L
@@ -815,6 +868,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         activeBackgroundProfileIds = emptyList()
         pendingInvocationProfileIds = null
         resetGroupOutput()
+        resetManualInputState()
         _ui.update {
             it.copy(
                 status = SessionStatus.DISCONNECTED,
@@ -849,6 +903,7 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         connectionPurpose = ConnectionPurpose.NORMAL
         activeBackgroundProfileIds = emptyList()
         resetGroupOutput()
+        resetManualInputState()
         _ui.update {
             it.copy(
                 status = SessionStatus.DISCONNECTED,
@@ -861,6 +916,120 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
         diag(detail)
     }
 
+    fun sendText(text: String) {
+        val value = text.trim()
+        if (value.isBlank()) return
+
+        if (_ui.value.backgroundModeEnabled) {
+            stopBackgroundMode("Cambio a entrada por teclado")
+        }
+
+        manualInputMode = true
+        pushToTalkPressed = false
+        pendingPttEnd = false
+        pttBuffering = false
+        resetPttAudioBuffer()
+        mic.stop()
+
+        if (!desiredConnected || _ui.value.status == SessionStatus.DISCONNECTED || _ui.value.status == SessionStatus.ERROR) {
+            pendingTypedText = value
+            manualConnectRequested = true
+            connect()
+            return
+        }
+
+        gemini.endAudioStream()
+        pendingTypedText = value
+        sendPendingTypedTextIfPossible()
+    }
+
+    fun startPushToTalk() {
+        if (_ui.value.backgroundModeEnabled) {
+            stopBackgroundMode("Cambio a pulsar para hablar")
+        }
+
+        if (validateForConnect() != null) {
+            manualConnectRequested = true
+            connect()
+            return
+        }
+
+        finalizeCurrentMessages()
+        persistConversation()
+        if (fish != null) cancelFish("Interrupción por pulsar para hablar")
+        player.interrupt()
+
+        manualInputMode = true
+        pushToTalkPressed = true
+        pendingTypedText = null
+        pendingPttEnd = false
+        resetPttAudioBuffer()
+        mic.stop()
+
+        val needsConnection = !desiredConnected ||
+            _ui.value.status == SessionStatus.DISCONNECTED ||
+            _ui.value.status == SessionStatus.ERROR
+
+        if (needsConnection) {
+            pttBuffering = true
+            manualConnectRequested = true
+            connect()
+            if (_ui.value.status == SessionStatus.ERROR) {
+                pushToTalkPressed = false
+                pttBuffering = false
+                return
+            }
+        } else {
+            pttBuffering = _ui.value.status == SessionStatus.CONNECTING ||
+                _ui.value.status == SessionStatus.RECONNECTING
+        }
+
+        startManualMic()
+        _ui.update {
+            it.copy(
+                status = if (pttBuffering) SessionStatus.CONNECTING else SessionStatus.LISTENING,
+                statusDetail = if (pttBuffering) "Conectando · seguí apretando…" else "Mantené apretado · escuchando",
+            )
+        }
+    }
+
+    fun stopPushToTalk() {
+        if (!pushToTalkPressed) return
+        pushToTalkPressed = false
+        mic.stop()
+
+        if (pttBuffering) {
+            pendingPttEnd = true
+            _ui.update { it.copy(status = SessionStatus.CONNECTING, statusDetail = "Enviando tu audio…") }
+        } else {
+            gemini.endAudioStream()
+            _ui.update { it.copy(status = SessionStatus.THINKING, statusDetail = "Procesando tu audio…") }
+        }
+    }
+
+    private fun sendPendingTypedTextIfPossible() {
+        val text = pendingTypedText ?: return
+        if (_ui.value.status == SessionStatus.CONNECTING || _ui.value.status == SessionStatus.RECONNECTING) return
+        if (sendTypedTextNow(text)) pendingTypedText = null
+    }
+
+    private fun sendTypedTextNow(text: String): Boolean {
+        if (fish != null) cancelFish("Interrupción por texto")
+        player.interrupt()
+        finalizeCurrentMessages()
+        persistConversation()
+
+        val sent = gemini.sendText(text)
+        if (!sent) return false
+
+        updateMessage(Speaker.USER, text, partial = false)
+        finalizeUserMessage()
+        persistConversation()
+        _ui.update { it.copy(status = SessionStatus.THINKING, statusDetail = "Pensando…") }
+        diag("Mensaje de texto enviado")
+        return true
+    }
+
     private fun startMic() {
         if (!desiredConnected) return
         mic.start { pcm -> gemini.sendPcm16(pcm) }
@@ -868,6 +1037,55 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                 _ui.update { state -> state.copy(status = SessionStatus.ERROR, statusDetail = it.message ?: "Error de micrófono") }
             }
             .onSuccess { diag("Micrófono 16 kHz activo · bloques de 40 ms") }
+    }
+
+    private fun startManualMic() {
+        mic.start { pcm ->
+            if (pttBuffering) bufferPttAudio(pcm) else gemini.sendPcm16(pcm)
+        }.onFailure {
+            _ui.update { state -> state.copy(status = SessionStatus.ERROR, statusDetail = it.message ?: "Error de micrófono") }
+        }.onSuccess {
+            diag(if (pttBuffering) "Micrófono PTT activo · almacenando mientras conecta" else "Micrófono PTT activo")
+        }
+    }
+
+    private fun bufferPttAudio(pcm: ByteArray) {
+        synchronized(pttAudioLock) {
+            val remaining = MAX_PTT_BUFFER_BYTES - pttAudioBuffer.size()
+            if (remaining <= 0) return
+            pttAudioBuffer.write(pcm, 0, minOf(remaining, pcm.size))
+        }
+    }
+
+    private fun flushBufferedPttAudio() {
+        val bytes = synchronized(pttAudioLock) {
+            val data = pttAudioBuffer.toByteArray()
+            pttAudioBuffer.reset()
+            data
+        }
+        if (bytes.isEmpty()) return
+
+        var offset = 0
+        while (offset < bytes.size) {
+            val end = minOf(offset + PTT_CHUNK_BYTES, bytes.size)
+            gemini.sendPcm16(bytes.copyOfRange(offset, end))
+            offset = end
+        }
+        diag("Audio PTT almacenado enviado · ${bytes.size} bytes")
+    }
+
+    private fun resetPttAudioBuffer() {
+        synchronized(pttAudioLock) { pttAudioBuffer.reset() }
+    }
+
+    private fun resetManualInputState() {
+        manualConnectRequested = false
+        manualInputMode = false
+        pushToTalkPressed = false
+        pendingTypedText = null
+        pendingPttEnd = false
+        pttBuffering = false
+        resetPttAudioBuffer()
     }
 
     private fun ensureFish(profileIdOverride: String? = null) {
@@ -913,6 +1131,8 @@ class CharacterViewModel(application: Application) : AndroidViewModel(applicatio
                                 status = SessionStatus.INVOCATION_ACTIVE,
                                 statusDetail = "${activeDisplayName()} activo · escuchando",
                             )
+                        } else if (manualInputMode && !pushToTalkPressed) {
+                            state.copy(status = SessionStatus.LISTENING, statusDetail = "Conectado · micrófono cerrado")
                         } else {
                             state.copy(status = SessionStatus.LISTENING, statusDetail = "Escuchando")
                         }
@@ -1283,6 +1503,7 @@ FORMATO TÉCNICO OBLIGATORIO:
         turnCompletePending = false
         turnFinalizeJob?.cancel()
         turnFinalizeJob = null
+        resetManualInputState()
 
         if (targetConversationIds.distinct().size == 2) {
             profiles.clearGroupChat(targetConversationIds)
@@ -1417,6 +1638,7 @@ FORMATO TÉCNICO OBLIGATORIO:
         mic.stop()
         gemini.disconnect()
         fish?.cancel()
+        resetManualInputState()
         InvocationForegroundService.stop(getApplication())
         player.release()
         super.onCleared()
@@ -1426,6 +1648,8 @@ FORMATO TÉCNICO OBLIGATORIO:
         private const val INVOCATION_SUFFIX = "are you here"
         private const val EXIT_PHRASE = "get out"
         private const val GROUP_PREFIX_FALLBACK_CHARS = 16
+        private const val PTT_CHUNK_BYTES = 1_280
+        private const val MAX_PTT_BUFFER_BYTES = 640_000
         private val GROUP_SPEAKER_MARKERS = listOf("[[P1]]", "[[P2]]")
         private const val WAKE_SYSTEM_PROMPT = """Sos un detector silencioso de comandos de voz. No converses, no respondas y no intentes ayudar. Tu única tarea es escuchar el audio para que la transcripción de entrada permita detectar frases con el formato «nombre del personaje, are you here?» o «nombre y nombre, are you here?», y el comando «get out». Aunque escuches preguntas o conversaciones, permanecé en silencio."""
     }
