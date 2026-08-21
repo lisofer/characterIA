@@ -42,6 +42,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -140,6 +141,12 @@ private fun CharacterApp(vm: CharacterViewModel) {
     ) { granted ->
         if (granted) vm.toggleBackgroundMode()
         else vm.setSettingsOpen(true)
+    }
+
+    val directInvocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) vm.setSettingsOpen(true)
     }
 
     val voicePicker = rememberLauncherForActivityResult(
@@ -242,6 +249,14 @@ private fun CharacterApp(vm: CharacterViewModel) {
             onPickVoice = { voicePicker.launch(arrayOf("audio/*")) },
             onSelectProfile = vm::selectProfile,
             onNewProfile = vm::newProfile,
+            onInvokeProfiles = { profileIds ->
+                val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                if (permission == PackageManager.PERMISSION_GRANTED) {
+                    vm.invokeProfiles(profileIds)
+                } else {
+                    directInvocationPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
             onSave = vm::saveConfig,
         )
     }
@@ -493,11 +508,13 @@ private fun SettingsSheet(
     onPickVoice: () -> Unit,
     onSelectProfile: (String) -> Unit,
     onNewProfile: () -> Unit,
+    onInvokeProfiles: (List<String>) -> Unit,
     onSave: () -> Unit,
 ) {
     val c = state.config
     var modelMenu by remember { mutableStateOf(false) }
     var profileMenu by remember { mutableStateOf(false) }
+    var invocationSelection by remember { mutableStateOf(setOf<String>()) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
         LazyColumn(
@@ -533,6 +550,52 @@ private fun SettingsSheet(
             item {
                 OutlinedButton(onClick = onNewProfile, modifier = Modifier.fillMaxWidth()) {
                     Text("+ Nuevo perfil")
+                }
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Invocar dos personajes", fontWeight = FontWeight.Black)
+                    Text(
+                        "Elegí dos perfiles para abrir la conversación directamente, sin decir «personaje1 + personaje2, are you here?». La invocación por voz sigue funcionando igual.",
+                        color = Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    state.profiles.forEach { profile ->
+                        val checked = profile.id in invocationSelection
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { selected ->
+                                    invocationSelection = when {
+                                        selected && invocationSelection.size < 2 -> invocationSelection + profile.id
+                                        !selected -> invocationSelection - profile.id
+                                        else -> invocationSelection
+                                    }
+                                },
+                            )
+                            Text(profile.name, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    val selectedNames = state.profiles
+                        .filter { it.id in invocationSelection }
+                        .map { it.name }
+                    Button(
+                        onClick = { onInvokeProfiles(invocationSelection.toList()) },
+                        enabled = invocationSelection.size == 2,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) {
+                        Text(
+                            if (selectedNames.size == 2) {
+                                "Invocar ${selectedNames.joinToString(" + ")}"
+                            } else {
+                                "Seleccioná 2 personajes"
+                            },
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
             item {
