@@ -1,26 +1,88 @@
 # CharacterIA
 
-CharacterIA es una app Android experimental para conversar por voz o texto con personajes configurables, usando Gemini Live para la conversación y Fish Audio para la voz clonada.
+App Android nativa para conversar por voz con un personaje de IA usando:
 
-## Android v02
+- **Gemini Live** como cerebro conversacional y VAD.
+- **Fish Audio** (`s2.1-pro-free`) para responder con una voz clonada a partir de una muestra local.
+- **AudioRecord / AudioTrack** para entrada y reproducción PCM en tiempo real.
+- **Jetpack Compose** para la interfaz.
 
-La rama `feature/android-v02` parte de `feature/android-v01` y mantiene tres modos de entrada separados:
+## Flujo
 
-- **Teclado:** escribe sin dejar el micrófono abierto.
-- **Conversación continua:** el botón central mantiene el micrófono activo para una charla fluida.
-- **Pulsar para hablar:** el botón derecho abre el micrófono solamente mientras se mantiene presionado.
+```text
+Micrófono (PCM 16 kHz)
+        ↓
+Gemini Live WebSocket
+        ↓
+Transcripción de salida incremental
+        ↓
+Fish Audio WebSocket TTS
+        ↓
+PCM 44.1 kHz
+        ↓
+AudioTrack
+```
 
-También permite invocar dos personajes de dos maneras:
+La conexión de Gemini permanece abierta entre turnos. La app habilita `sessionResumption` y `contextWindowCompression` para poder recuperar conexiones renovadas por el servidor y sostener conversaciones largas.
 
-- por voz, como antes: `personaje1 + personaje2, are you here?`;
-- desde **Configuración > Perfiles**, seleccionando dos perfiles y tocando **Invocar**.
+## Configuración en el teléfono
 
-La conversación grupal conserva el historial compartido de esa pareja de personajes.
+1. Abrí **Configuración**.
+2. Pegá tu API key de Gemini.
+3. Pegá tu API key de Fish Audio.
+4. Cargá una muestra de voz de 10–30 segundos.
+5. Escribí la transcripción exacta de esa muestra.
+6. Ajustá la personalidad si querés.
+7. Guardá y tocá **Conectar**.
+8. Permití el micrófono.
 
-## Rendimiento
+Las API keys se cifran localmente mediante **Android Keystore**. La muestra de voz se copia al almacenamiento privado de la app y no se incluye en backups.
 
-`android-v02` incluye reproducción PCM de Fish Audio en un hilo dedicado, menor buffering de salida, modo de baja latencia de Fish y menos animaciones de scroll durante el streaming de Gemini.
+> Esta versión es una app personal/prototipo. Para distribuirla a terceros conviene reemplazar la API key directa de Gemini por tokens efímeros emitidos por un backend propio.
 
-## Compilación
+## Conversación continua
 
-El workflow de GitHub Actions genera automáticamente una APK debug para las ramas `feature/**`.
+Gemini recibe PCM mono, 16 bits, 16 kHz en bloques de ~100 ms. Se usa VAD automático para detectar el final del turno. Mientras Fish reproduce la respuesta, el micrófono permanece activo y Android intenta cancelar el eco mediante `VOICE_COMMUNICATION` + `AcousticEchoCanceler`, permitiendo interrumpir la respuesta hablando.
+
+Fish se abre por WebSocket por cada respuesta. La muestra y su transcripción se envían como referencia zero-shot y el texto de Gemini se entrega incrementalmente. El audio vuelve como PCM y se reproduce a medida que llega.
+
+## Build
+
+El proyecto usa:
+
+- Android Gradle Plugin **8.13.2**
+- Gradle **8.13**
+- Kotlin / Compose Compiler **2.3.21**
+- Compose BOM **2026.06.00**
+- `compileSdk = 36`
+- `targetSdk = 36`
+- JDK 17
+
+El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
+
+Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 8.13.
+
+## Estado v0.1
+
+Incluido:
+
+- conversación de audio continua;
+- Gemini 3.1 Flash Live y fallback 2.5;
+- transcripción de usuario/IA en pantalla;
+- Fish Audio streaming con `s2.1-pro-free`;
+- clonación zero-shot con muestra local;
+- interrupción de audio;
+- reconexión Gemini con session resumption;
+- compresión de contexto;
+- configuración editable de personalidad;
+- almacenamiento cifrado de API keys;
+- diagnóstico dentro de la app.
+
+Próximos pasos útiles:
+
+- memoria autobiográfica persistente;
+- convertir la muestra de Fish en `reference_id` persistente para reducir latencia;
+- botón **“yo no diría eso”** para corregir personalidad;
+- perfiles de personalidad versionados;
+- modo manos libres con foreground service;
+- tokens efímeros de Gemini para una distribución pública segura.
