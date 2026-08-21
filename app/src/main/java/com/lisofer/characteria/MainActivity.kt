@@ -212,10 +212,10 @@ private fun CharacterApp(vm: CharacterViewModel) {
                     textInputExpanded = opening
                     if (
                         opening &&
-                        !state.backgroundModeEnabled &&
-                        state.status != SessionStatus.DISCONNECTED &&
-                        state.status != SessionStatus.ERROR
+                        (state.backgroundModeEnabled ||
+                            (state.status != SessionStatus.DISCONNECTED && state.status != SessionStatus.ERROR))
                     ) {
+                        // Modo teclado = micrófono realmente cerrado desde el momento en que se abre.
                         vm.disconnect()
                     }
                 },
