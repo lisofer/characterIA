@@ -125,6 +125,31 @@ class GeminiLiveClient(
         socket?.send(message.toString())
     }
 
+    fun sendText(text: String): Boolean {
+        if (!setupComplete || text.isBlank()) return false
+        inputTranscript.reset()
+        val message = JSONObject()
+            .put("realtimeInput", JSONObject().put("text", text))
+        val sent = socket?.send(message.toString()) == true
+        listener.onDiagnostic(
+            if (sent) "Gemini recibió entrada de texto"
+            else "Gemini no pudo enviar la entrada de texto"
+        )
+        return sent
+    }
+
+    fun endAudioStream(): Boolean {
+        if (!setupComplete) return false
+        val message = JSONObject()
+            .put("realtimeInput", JSONObject().put("audioStreamEnd", true))
+        val sent = socket?.send(message.toString()) == true
+        listener.onDiagnostic(
+            if (sent) "Gemini recibió fin de audio"
+            else "Gemini no pudo enviar fin de audio"
+        )
+        return sent
+    }
+
     private fun openSocket(isReconnect: Boolean) {
         val cfg = config ?: return
         val resumeHandle = if (isReconnect) sessionHandle else null
@@ -357,7 +382,6 @@ class GeminiLiveClient(
                     resumeHandle?.takeIf { it.isNotBlank() }?.let { put("handle", it) }
                 }
             )
-
 
         if (cfg.personality.isNotBlank()) {
             setup.put(

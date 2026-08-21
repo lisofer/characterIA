@@ -34,6 +34,7 @@ class FishTtsClient(
     private val pending = ArrayDeque<String>()
     @Volatile private var finishRequested = false
     private var bufferedChars = 0
+    private var firstFlushDone = false
 
     fun start(
         apiKey: String,
@@ -44,6 +45,7 @@ class FishTtsClient(
         cancel()
         finishRequested = false
         bufferedChars = 0
+        firstFlushDone = false
         pending.clear()
 
         val request = Request.Builder()
@@ -59,7 +61,7 @@ class FishTtsClient(
                 val start = packStart(referenceAudio, referenceTranscript, speed)
                 webSocket.send(start.toByteString())
                 opened.set(true)
-                listener.onDiagnostic("Fish WebSocket abierto")
+                listener.onDiagnostic("Fish WebSocket abierto · modo baja latencia")
                 listener.onReady()
 
                 synchronized(pending) {
@@ -122,9 +124,18 @@ class FishTtsClient(
     private fun sendTextNow(ws: WebSocket, text: String) {
         ws.send(packText(text).toByteString())
         bufferedChars += text.length
-        if (bufferedChars >= 30 && text.any { it == '.' || it == '?' || it == '!' || it == '…' || it == '\n' }) {
+
+        val sentenceBoundary = text.any { it == '.' || it == '?' || it == '!' || it == '…' || it == '\n' || it == ',' || it == ';' || it == ':' }
+        val shouldFlush =
+            (!firstFlushDone && bufferedChars >= 24) ||
+                (firstFlushDone && bufferedChars >= 45 && sentenceBoundary) ||
+                bufferedChars >= 90
+
+        if (shouldFlush) {
             ws.send(packEvent("flush").toByteString())
+            firstFlushDone = true
             bufferedChars = 0
+            listener.onDiagnostic("Fish flush anticipado para reducir latencia")
         }
     }
 
@@ -162,8 +173,8 @@ class FishTtsClient(
             p.packString("text"); p.packString("")
             p.packString("format"); p.packString("pcm")
             p.packString("sample_rate"); p.packInt(44_100)
-            p.packString("chunk_length"); p.packInt(150)
-            p.packString("latency"); p.packString("balanced")
+            p.packString("chunk_length"); p.packInt(100)
+            p.packString("latency"); p.packString("low")
             p.packString("normalize"); p.packBoolean(true)
             p.packString("temperature"); p.packDouble(0.7)
             p.packString("top_p"); p.packDouble(0.7)
