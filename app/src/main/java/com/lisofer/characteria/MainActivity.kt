@@ -8,9 +8,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,14 +28,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,7 +55,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -60,8 +66,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -109,13 +119,20 @@ private fun CharacterTheme(content: @Composable () -> Unit) {
 private fun CharacterApp(vm: CharacterViewModel) {
     val state by vm.ui.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var showDiagnostics by remember { mutableStateOf(false) }
+    var textInputExpanded by remember { mutableStateOf(false) }
+    var draftText by remember { mutableStateOf("") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) vm.connect()
         else vm.setSettingsOpen(true)
+    }
+
+    val pttPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) vm.setSettingsOpen(true)
     }
 
     val invocationPermissionLauncher = rememberLauncherForActivityResult(
@@ -164,8 +181,8 @@ private fun CharacterApp(vm: CharacterViewModel) {
                             tint = if (state.backgroundModeEnabled) Mint else Muted,
                         )
                     }
-                    IconButton(onClick = { showDiagnostics = true }) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = "Diagnóstico")
+                    IconButton(onClick = vm::clearChat) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Borrar chat de este perfil")
                     }
                     IconButton(onClick = { vm.setSettingsOpen(true) }) {
                         Icon(Icons.Default.Settings, contentDescription = "Configuración")
@@ -176,13 +193,37 @@ private fun CharacterApp(vm: CharacterViewModel) {
         bottomBar = {
             BottomControls(
                 state = state,
+                textInputExpanded = textInputExpanded,
+                draftText = draftText,
+                onDraftTextChange = { draftText = it },
+                onToggleTextInput = {
+                    val opening = !textInputExpanded
+                    textInputExpanded = opening
+                    if (
+                        opening &&
+                        !state.backgroundModeEnabled &&
+                        state.status != SessionStatus.DISCONNECTED &&
+                        state.status != SessionStatus.ERROR
+                    ) {
+                        vm.disconnect()
+                    }
+                },
+                onSendText = { text -> vm.sendText(text) },
                 onConnect = {
                     val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                     if (permission == PackageManager.PERMISSION_GRANTED) vm.connect()
                     else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 },
                 onDisconnect = vm::disconnect,
-                onClear = vm::clearChat,
+                onPushToTalkStart = {
+                    val permission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                    if (permission == PackageManager.PERMISSION_GRANTED) {
+                        vm.startPushToTalk()
+                    } else {
+                        pttPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onPushToTalkStop = vm::stopPushToTalk,
             )
         }
     ) { padding ->
@@ -202,23 +243,6 @@ private fun CharacterApp(vm: CharacterViewModel) {
             onSelectProfile = vm::selectProfile,
             onNewProfile = vm::newProfile,
             onSave = vm::saveConfig,
-        )
-    }
-
-    if (showDiagnostics) {
-        AlertDialog(
-            onDismissRequest = { showDiagnostics = false },
-            title = { Text("Diagnóstico") },
-            text = {
-                SelectionContainer {
-                    LazyColumn(modifier = Modifier.height(420.dp)) {
-                        items(state.diagnostics) { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showDiagnostics = false }) { Text("Cerrar") }
-            }
         )
     }
 }
@@ -288,7 +312,11 @@ private fun StatusHero(state: AppUiState) {
         Column(Modifier.weight(1f)) {
             Text(state.statusDetail, fontWeight = FontWeight.SemiBold)
             val subtitle = when (state.status) {
-                SessionStatus.LISTENING -> "Micrófono activo · podés interrumpir"
+                SessionStatus.LISTENING -> if (state.statusDetail.contains("micrófono cerrado")) {
+                    "Podés escribir o mantener apretado el micrófono"
+                } else {
+                    "Micrófono activo · podés interrumpir"
+                }
                 SessionStatus.SPEAKING -> "Fish Audio · ${state.config.profileName.ifBlank { "voz clonada" }}"
                 SessionStatus.INVOCATION_ARMED -> "Segundo plano · «[personaje], are you here?»"
                 SessionStatus.INVOCATION_ACTIVE -> "Cambiar: «[personaje], are you here?» · salir: «get out»"
@@ -331,43 +359,126 @@ private fun MessageBubble(message: ChatMessage, aiName: String) {
 @Composable
 private fun BottomControls(
     state: AppUiState,
+    textInputExpanded: Boolean,
+    draftText: String,
+    onDraftTextChange: (String) -> Unit,
+    onToggleTextInput: () -> Unit,
+    onSendText: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
-    onClear: () -> Unit,
+    onPushToTalkStart: () -> Unit,
+    onPushToTalkStop: () -> Unit,
 ) {
     val connected = !state.backgroundModeEnabled &&
         state.status != SessionStatus.DISCONNECTED &&
         state.status != SessionStatus.ERROR
-    Row(
+    val focusRequester = remember { FocusRequester() }
+    var pttPressed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(textInputExpanded) {
+        if (textInputExpanded) focusRequester.requestFocus()
+    }
+
+    fun submitText() {
+        val text = draftText.trim()
+        if (text.isBlank()) return
+        onSendText(text)
+        onDraftTextChange("")
+    }
+
+    Column(
         modifier = Modifier.fillMaxWidth().background(Surface).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        OutlinedButton(onClick = onClear) {
-            Icon(Icons.Default.DeleteSweep, contentDescription = "Borrar chat de este perfil")
+        if (textInputExpanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = draftText,
+                    onValueChange = onDraftTextChange,
+                    modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                    placeholder = { Text("Escribí un mensaje…") },
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { submitText() }),
+                )
+                FilledIconButton(
+                    onClick = { submitText() },
+                    enabled = draftText.isNotBlank(),
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "Enviar mensaje")
+                }
+            }
         }
-        Button(
-            modifier = Modifier.weight(1f).height(54.dp),
-            onClick = if (connected) onDisconnect else onConnect,
-            enabled = !state.backgroundModeEnabled,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (connected) Color(0xFF612536) else Mint,
-                contentColor = if (connected) Color.White else Color(0xFF042117),
-            )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(if (connected) Icons.Default.Stop else Icons.Default.Mic, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(
-                when {
-                    state.backgroundModeEnabled -> "Modo invocación activo"
-                    connected -> "Desconectar"
-                    else -> "Conectar"
-                },
-                fontWeight = FontWeight.Black,
-            )
-        }
-        FilledIconButton(onClick = { }, enabled = false) {
-            Icon(Icons.Default.Mic, contentDescription = null)
+            OutlinedButton(
+                onClick = onToggleTextInput,
+                modifier = Modifier.height(54.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+            ) {
+                Icon(
+                    Icons.Default.Keyboard,
+                    contentDescription = if (textInputExpanded) "Cerrar teclado" else "Abrir teclado para escribir",
+                    tint = if (textInputExpanded) Mint else Muted,
+                )
+            }
+
+            Button(
+                modifier = Modifier.weight(1f).height(54.dp),
+                onClick = if (connected) onDisconnect else onConnect,
+                enabled = !state.backgroundModeEnabled,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (connected) Color(0xFF612536) else Mint,
+                    contentColor = if (connected) Color.White else Color(0xFF042117),
+                )
+            ) {
+                Icon(if (connected) Icons.Default.Stop else Icons.Default.Mic, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    when {
+                        state.backgroundModeEnabled -> "Modo invocación activo"
+                        connected -> "Desconectar"
+                        else -> "Conectar"
+                    },
+                    fontWeight = FontWeight.Black,
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .background(if (pttPressed) Mint else Surface2, CircleShape)
+                    .border(1.dp, if (pttPressed) Mint else Muted.copy(alpha = .55f), CircleShape)
+                    .pointerInput(state.backgroundModeEnabled) {
+                        if (state.backgroundModeEnabled) return@pointerInput
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            pttPressed = true
+                            onPushToTalkStart()
+                            try {
+                                waitForUpOrCancellation()
+                            } finally {
+                                pttPressed = false
+                                onPushToTalkStop()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = "Mantener apretado para hablar",
+                    tint = if (pttPressed) Color(0xFF042117) else Muted,
+                )
+            }
         }
     }
 }
