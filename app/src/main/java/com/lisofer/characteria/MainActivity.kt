@@ -122,6 +122,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var textInputExpanded by remember { mutableStateOf(false) }
     var draftText by remember { mutableStateOf("") }
+    var pendingDirectInvocationIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -146,7 +147,10 @@ private fun CharacterApp(vm: CharacterViewModel) {
     val directInvocationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (!granted) vm.setSettingsOpen(true)
+        val selected = pendingDirectInvocationIds
+        pendingDirectInvocationIds = emptyList()
+        if (granted && selected.size == 2) vm.invokeProfiles(selected)
+        else vm.setSettingsOpen(true)
     }
 
     val voicePicker = rememberLauncherForActivityResult(
@@ -254,6 +258,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
                 if (permission == PackageManager.PERMISSION_GRANTED) {
                     vm.invokeProfiles(profileIds)
                 } else {
+                    pendingDirectInvocationIds = profileIds
                     directInvocationPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
