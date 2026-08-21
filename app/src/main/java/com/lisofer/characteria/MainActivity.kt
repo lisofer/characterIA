@@ -270,7 +270,7 @@ private fun CharacterApp(vm: CharacterViewModel) {
 @Composable
 private fun Conversation(modifier: Modifier, state: AppUiState) {
     val listState = rememberLazyListState()
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text) {
+    LaunchedEffect(state.messages.size) {
         if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
     }
 
