@@ -202,7 +202,6 @@ private fun CharacterApp(vm: CharacterViewModel) {
                     val opening = !textInputExpanded
                     textInputExpanded = opening
                     if (opening) {
-                        // Teclado = micrófono cerrado, pero el chat (también el grupal) sigue siendo el mismo.
                         vm.enterTextMode()
                     }
                 },
@@ -546,7 +545,7 @@ private fun SettingsSheet(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Chat con dos personajes", fontWeight = FontWeight.Black)
                     Text(
-                        "Elegí dos perfiles y abrí un chat compartido. Después podés escribirles, hablar de forma continua o mandar un audio manteniendo apretado el micrófono. La invocación por voz «are you here?» sigue siendo una función aparte.",
+                        "Elegí dos perfiles y abrí un chat compartido. No activa el micrófono. Después elegís cómo hablarles: teclado, botón central para charla continua o micrófono derecho para mandar un audio. La invocación por voz «are you here?» sigue siendo una función aparte.",
                         color = Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )
