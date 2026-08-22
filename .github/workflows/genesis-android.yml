@@ -1,10 +1,8 @@
-name: Android APK
+name: Genesis Android APK
 
 on:
   push:
-    branches: [ main, "feature/**" ]
-  pull_request:
-    branches: [ main ]
+    branches: [ "feature/genesis-v00" ]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +22,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install required Android SDK packages
+      - name: Install Android SDK packages
         shell: bash
         run: |
           SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
@@ -39,17 +37,17 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Publish versioned debug APK
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+      - name: Publish debug APK
+        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          TAG="android-debug-${GITHUB_RUN_NUMBER}"
+          TAG="genesis-debug-${GITHUB_RUN_NUMBER}"
           APK="app/build/outputs/apk/debug/app-debug.apk"
           gh release create "$TAG" "$APK" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "CharacterIA Android Debug ${GITHUB_RUN_NUMBER}" \
-            --notes "APK de prueba generado automáticamente desde feature/android-v01." \
+            --title "Genesis v00 Debug ${GITHUB_RUN_NUMBER}" \
+            --notes "APK experimental de Genesis v00, rama feature/genesis-v00." \
             --prerelease

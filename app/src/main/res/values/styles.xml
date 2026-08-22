@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.CharacterIA" parent="android:style/Theme.Material.NoActionBar">
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#071019</item>
-        <item name="android:navigationBarColor">#071019</item>
+        <item name="android:statusBarColor">#0A0C0E</item>
+        <item name="android:navigationBarColor">#0A0C0E</item>
+        <item name="android:colorAccent">#D9E6E1</item>
+        <item name="android:windowBackground">#0A0C0E</item>
     </style>
 </resources>

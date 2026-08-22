@@ -1,88 +1,46 @@
-# CharacterIA
+# GENESIS v00
 
-App Android nativa para conversar por voz con un personaje de IA usando:
+Rama experimental completamente nueva dentro de `characterIA`.
 
-- **Gemini Live** como cerebro conversacional y VAD.
-- **Fish Audio** (`s2.1-pro-free`) para responder con una voz clonada a partir de una muestra local.
-- **AudioRecord / AudioTrack** para entrada y reproducción PCM en tiempo real.
-- **Jetpack Compose** para la interfaz.
+**Objetivo:** una población de humanos digitales extremadamente livianos, persistentes y autónomos. El mundo corre localmente; Gemini aparece sólo cuando hace falta lenguaje o una bifurcación cognitiva compleja.
 
-## Flujo
+## Principios
 
-```text
-Micrófono (PCM 16 kHz)
-        ↓
-Gemini Live WebSocket
-        ↓
-Transcripción de salida incremental
-        ↓
-Fish Audio WebSocket TTS
-        ↓
-PCM 44.1 kHz
-        ↓
-AudioTrack
-```
+- Sin guion, quests ni eventos narrativos programados.
+- Español para conversar con los habitantes.
+- No hay matrimonio, monogamia, heterosexualidad, clases sociales ni instituciones codificadas como reglas culturales. Los vínculos pueden surgir entre cualquier par de personas.
+- La reproducción biológica está separada de la atracción/afecto social.
+- Cada humano guarda un estado compacto: cuerpo, rasgos, necesidades, relaciones significativas, recuerdos e ideas.
+- La memoria es subjetiva y limitada.
+- Nacimiento, envejecimiento, enfermedad y muerte existen en el kernel.
+- El clima usa una dinámica caótica simple; los desastres son consecuencias del estado físico, no eventos escritos por Gemini.
+- Los habitantes pueden transmitir ideas entre sí.
+- Gemini no escribe la trama: ocasionalmente actúa como la cognición privada de una persona y puede proponer una intención o una idea nueva.
 
-La conexión de Gemini permanece abierta entre turnos. La app habilita `sessionResumption` y `contextWindowCompression` para poder recuperar conexiones renovadas por el servidor y sostener conversaciones largas.
+## Tiempo
 
-## Configuración en el teléfono
+El mundo guarda el último timestamp real del teléfono. Al volver a abrir la app calcula el tiempo real transcurrido y lo multiplica por la escala elegida.
 
-1. Abrí **Configuración**.
-2. Pegá tu API key de Gemini.
-3. Pegá tu API key de Fish Audio.
-4. Cargá una muestra de voz de 10–30 segundos.
-5. Escribí la transcripción exacta de esa muestra.
-6. Ajustá la personalidad si querés.
-7. Guardá y tocá **Conectar**.
-8. Permití el micrófono.
+Controles iniciales: `PAUSA`, `1×`, `10×`, `100×`, `1000×`, `+1 día`, `+30 días`, `+1 año`.
 
-Las API keys se cifran localmente mediante **Android Keystore**. La muestra de voz se copia al almacenamiento privado de la app y no se incluye en backups.
+El catch-up usa pasos cada vez más gruesos para poder saltar meses/años sin simular cada frame.
 
-> Esta versión es una app personal/prototipo. Para distribuirla a terceros conviene reemplazar la API key directa de Gemini por tokens efímeros emitidos por un backend propio.
+## IA
 
-## Conversación continua
+En la app tocá **API** y pegá tu Gemini API key. Se usa `gemini-2.5-flash-lite` mediante REST directo, sin SDK pesado.
 
-Gemini recibe PCM mono, 16 bits, 16 kHz en bloques de ~100 ms. Se usa VAD automático para detectar el final del turno. Mientras Fish reproduce la respuesta, el micrófono permanece activo y Android intenta cancelar el eco mediante `VOICE_COMMUNICATION` + `AcousticEchoCanceler`, permitiendo interrumpir la respuesta hablando.
+- Conversar con una persona: llamada a Gemini.
+- Pensamiento autónomo: como máximo aproximadamente una llamada cada 90 s reales **y** cada 12 h simuladas.
+- Movimiento, fisiología, vínculos, reproducción, enfermedad, clima y tiempo: locales, sin API.
 
-Fish se abre por WebSocket por cada respuesta. La muestra y su transcripción se envían como referencia zero-shot y el texto de Gemini se entrega incrementalmente. El audio vuelve como PCM y se reproduce a medida que llega.
+La key se guarda localmente en preferencias de la app en esta v00.
 
-## Build
+## Peso
 
-El proyecto usa:
+El proyecto evita Compose, AndroidX, motores de juego y SDKs de IA. Usa `android.app.Activity`, `Canvas`, archivos binarios y `HttpURLConnection` para mantener el APK y el runtime lo más chicos posible.
 
-- Android Gradle Plugin **8.13.2**
-- Gradle **8.13**
-- Kotlin / Compose Compiler **2.3.21**
-- Compose BOM **2026.06.00**
-- `compileSdk = 36`
-- `targetSdk = 36`
-- JDK 17
+## Estado de v00
 
-El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
+Primera prueba de concepto: 40 humanos, barrio pixel 2D, tiempo persistente, relaciones sin restricción de sexo, reproducción biológica, enfermedad, muerte, recuerdos compactos, ideas transmisibles y chat por texto.
 
-Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 8.13.
-
-## Estado v0.1
-
-Incluido:
-
-- conversación de audio continua;
-- Gemini 3.1 Flash Live y fallback 2.5;
-- transcripción de usuario/IA en pantalla;
-- Fish Audio streaming con `s2.1-pro-free`;
-- clonación zero-shot con muestra local;
-- interrupción de audio;
-- reconexión Gemini con session resumption;
-- compresión de contexto;
-- configuración editable de personalidad;
-- almacenamiento cifrado de API keys;
-- diagnóstico dentro de la app.
-
-Próximos pasos útiles:
-
-- memoria autobiográfica persistente;
-- convertir la muestra de Fish en `reference_id` persistente para reducir latencia;
-- botón **“yo no diría eso”** para corregir personalidad;
-- perfiles de personalidad versionados;
-- modo manos libres con foreground service;
-- tokens efímeros de Gemini para una distribución pública segura.
+La meta inmediata no es que parezca un juego terminado. Es dejarlo correr, adelantar años y comprobar si al volver existen vidas verdaderamente diferentes.

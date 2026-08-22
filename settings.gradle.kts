@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CharacterIA"
+rootProject.name = "Genesis"
 include(":app")
