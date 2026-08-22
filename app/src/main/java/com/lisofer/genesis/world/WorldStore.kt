@@ -27,7 +27,7 @@ class WorldStore(private val context: Context) {
     fun save(world: WorldState) {
         DataOutputStream(BufferedOutputStream(tempFile.outputStream())).use { out ->
             out.writeInt(0x47454E31)
-            out.writeInt(1)
+            out.writeInt(2)
             out.writeDouble(world.simMinute)
             out.writeDouble(world.timeScale)
             out.writeLong(world.lastRealEpochMs)
@@ -92,7 +92,7 @@ class WorldStore(private val context: Context) {
     private fun read(): WorldState {
         DataInputStream(BufferedInputStream(worldFile.inputStream())).use { input ->
             require(input.readInt() == 0x47454E31)
-            require(input.readInt() == 1)
+            require(input.readInt() == 2)
             val world = WorldState(
                 simMinute = input.readDouble(),
                 timeScale = input.readDouble(),
@@ -181,9 +181,9 @@ class WorldStore(private val context: Context) {
                 targetY = home.second,
                 homeX = home.first,
                 homeY = home.second,
-                health = (0.82 + rng.nextDouble() * 0.18).toFloat(),
-                hunger = rng.nextFloat() * 0.35f,
-                energy = (0.55 + rng.nextDouble() * 0.4).toFloat(),
+                health = (0.90 + rng.nextDouble() * 0.10).toFloat(),
+                hunger = rng.nextFloat() * 0.25f,
+                energy = (0.65 + rng.nextDouble() * 0.32).toFloat(),
                 socialNeed = rng.nextFloat(),
                 curiosityNeed = rng.nextFloat(),
                 infection = 0f,
@@ -209,7 +209,7 @@ class WorldStore(private val context: Context) {
             climateB = 0.731,
             temperatureC = 21.0,
             stormSeverity = 0.0,
-            foodAbundance = 0.82,
+            foodAbundance = 0.90,
             lastClimateDay = 0,
             socialAccumulatorMin = 0.0,
             lastAiSimMinute = -DAY_MINUTES,
