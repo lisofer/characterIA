@@ -70,7 +70,8 @@ class SimulationEngine(private val world: WorldState) {
     @Synchronized
     fun humanSummary(id: Int): String? {
         val h = world.humans.firstOrNull { it.id == id } ?: return null
-        return "${h.name} · ${h.ageYears(world.simMinute).toInt()} años · salud ${(h.health * 100).toInt()}%"
+        val status = if (h.alive) "salud ${(h.health * 100).toInt()}%" else "falleció"
+        return "${h.name} · ${h.ageYears(world.simMinute).toInt()} años · $status"
     }
 
     @Synchronized
@@ -192,7 +193,8 @@ Respondé JSON puro con esta forma:
                 remaining < DAY_MINUTES -> min(5.0, remaining)
                 remaining < DAY_MINUTES * 30.0 -> min(30.0, remaining)
                 remaining < YEAR_MINUTES * 5.0 -> min(360.0, remaining)
-                else -> min(DAY_MINUTES, remaining)
+                remaining < YEAR_MINUTES * 50.0 -> min(DAY_MINUTES, remaining)
+                else -> min(DAY_MINUTES * 3.0, remaining)
             }
             step(dt)
             remaining -= dt
@@ -228,52 +230,56 @@ Respondé JSON puro con esta forma:
 
         world.socialAccumulatorMin += dt
         if (world.socialAccumulatorMin >= if (coarse) 180.0 else 5.0) {
-            if (coarse) coarseSocial(dt) else detailedSocial(world.socialAccumulatorMin)
+            if (coarse) coarseSocial(world.socialAccumulatorMin) else detailedSocial(world.socialAccumulatorMin)
             world.socialAccumulatorMin = 0.0
         }
     }
 
     private fun updateBiology(h: Human, dt: Double) {
         val days = dt / DAY_MINUTES
-        h.hunger = (h.hunger + (dt / (DAY_MINUTES * 1.35)).toFloat()).coerceIn(0f, 1f)
-        h.energy = (h.energy - (dt / (DAY_MINUTES * 1.05)).toFloat()).coerceIn(0f, 1f)
-        h.socialNeed = (h.socialNeed + (dt / (DAY_MINUTES * 3.2) * (0.45 + h.traits[0])).toFloat()).coerceIn(0f, 1f)
-        h.curiosityNeed = (h.curiosityNeed + (dt / (DAY_MINUTES * 4.5) * (0.35 + h.traits[4])).toFloat()).coerceIn(0f, 1f)
+        h.hunger = (h.hunger + (dt / (DAY_MINUTES * 1.65)).toFloat()).coerceIn(0f, 1f)
+        h.energy = (h.energy - (dt / (DAY_MINUTES * 1.30)).toFloat()).coerceIn(0f, 1f)
+        h.socialNeed = (h.socialNeed + (dt / (DAY_MINUTES * 3.8) * (0.40 + h.traits[0])).toFloat()).coerceIn(0f, 1f)
+        h.curiosityNeed = (h.curiosityNeed + (dt / (DAY_MINUTES * 5.2) * (0.30 + h.traits[4])).toFloat()).coerceIn(0f, 1f)
 
         val atHome = distance(h.x, h.y, h.homeX, h.homeY) < 1.1f
-        if (atHome && h.hunger > 0.48f) {
-            val eaten = (0.65 * world.foodAbundance * min(1.0, dt / 180.0)).toFloat()
+        if (atHome && h.hunger > 0.38f) {
+            val eaten = (0.82 * world.foodAbundance * min(1.0, dt / 180.0)).toFloat()
             h.hunger = (h.hunger - eaten).coerceAtLeast(0f)
         }
-        if (atHome && h.energy < 0.50f) {
-            h.energy = (h.energy + (dt / 600.0).toFloat()).coerceAtMost(1f)
+        if (atHome && h.energy < 0.62f) {
+            h.energy = (h.energy + (dt / 430.0).toFloat()).coerceAtMost(1f)
         }
 
-        if (h.hunger > 0.93f) h.health -= (days * (0.07 + h.hunger * 0.08)).toFloat()
-        if (h.energy < 0.06f) h.health -= (days * 0.025).toFloat()
+        if (h.hunger > 0.96f) h.health -= (days * (0.028 + h.hunger * 0.022)).toFloat()
+        if (h.energy < 0.025f) h.health -= (days * 0.008).toFloat()
 
         if (h.infection > 0.001f) {
-            h.infection = (h.infection + (days * 0.18)).toFloat().coerceAtMost(1f)
-            h.health -= (days * h.infection * 0.06).toFloat()
-            if (rng.chance(days * (0.08 + h.immunity * 0.35))) {
-                h.immunity = (h.immunity + 0.35f).coerceAtMost(1f)
-                h.infection *= 0.35f
+            h.infection = (h.infection + (days * 0.07)).toFloat().coerceAtMost(1f)
+            h.health -= (days * h.infection * 0.014).toFloat()
+            if (rng.chance(days * (0.18 + h.immunity * 0.42))) {
+                h.immunity = (h.immunity + 0.30f).coerceAtMost(1f)
+                h.infection *= 0.20f
                 remember(h, "Me recuperé de una enfermedad.", 0.62f, 0.35f, h.id)
             }
         } else {
-            h.immunity = (h.immunity - (days * 0.002).toFloat()).coerceAtLeast(0f)
+            h.immunity = (h.immunity - (days * 0.0012).toFloat()).coerceAtLeast(0f)
+            if (h.hunger < 0.72f && h.energy > 0.18f) {
+                h.health = (h.health + (days * 0.0045).toFloat()).coerceAtMost(1f)
+            }
         }
 
         val age = h.ageYears(world.simMinute)
         val baseDailyMortality = when {
-            age < 45 -> 0.000004
-            age < 65 -> 0.000020
-            age < 80 -> 0.00011
-            else -> 0.00011 * 1.105.pow(age - 80.0)
+            age < 1 -> 0.000010
+            age < 50 -> 0.000001
+            age < 65 -> 0.000006
+            age < 80 -> 0.000035
+            else -> 0.000035 * 1.09.pow(age - 80.0)
         }
-        val healthFactor = 1.0 + (1.0 - h.health) * 8.0
+        val healthFactor = 1.0 + (1.0 - h.health) * 3.0
         if (rng.chance(days * baseDailyMortality * healthFactor) || h.health <= 0f) {
-            die(h, if (h.health <= 0f) "su estado físico se deterioró" else "murió")
+            die(h, if (h.health <= 0f) "murió tras un deterioro severo de su salud" else "murió")
         }
     }
 
@@ -291,33 +297,41 @@ Respondé JSON puro con esta forma:
     }
 
     private fun coarseMovement(h: Human, dt: Double) {
-        if (h.hunger > 0.62f || h.energy < 0.30f) {
-            h.x = h.homeX; h.y = h.homeY
-        } else if (rng.chance(min(0.85, dt / DAY_MINUTES))) {
+        if (h.hunger > 0.52f || h.energy < 0.38f) {
+            h.x = h.homeX
+            h.y = h.homeY
+            h.targetX = h.homeX
+            h.targetY = h.homeY
+        } else if (rng.chance(min(0.90, dt / DAY_MINUTES * 1.5))) {
             val p = WorldStore.randomBuildable(rng)
-            h.x = p.first; h.y = p.second
-            h.targetX = p.first; h.targetY = p.second
+            h.x = p.first
+            h.y = p.second
+            h.targetX = p.first
+            h.targetY = p.second
             h.curiosityNeed = (h.curiosityNeed - 0.08f).coerceAtLeast(0f)
         }
     }
 
     private fun chooseTarget(h: Human) {
         when {
-            h.hunger > 0.62f || h.energy < 0.32f -> {
-                h.targetX = h.homeX; h.targetY = h.homeY
+            h.hunger > 0.52f || h.energy < 0.38f -> {
+                h.targetX = h.homeX
+                h.targetY = h.homeY
             }
-            h.socialNeed > 0.60f -> {
+            h.socialNeed > 0.56f -> {
                 val candidates = world.humans.filter { it.alive && it.id != h.id }
                 if (candidates.isNotEmpty()) {
                     val known = h.relations.entries.maxByOrNull { it.value.affection + it.value.familiarity }
                     val t = known?.let { entry -> candidates.firstOrNull { it.id == entry.key } }
                         ?: candidates[rng.nextInt(candidates.size)]
-                    h.targetX = t.x; h.targetY = t.y
+                    h.targetX = t.x
+                    h.targetY = t.y
                 }
             }
             else -> {
                 val p = WorldStore.randomBuildable(rng)
-                h.targetX = p.first; h.targetY = p.second
+                h.targetX = p.first
+                h.targetY = p.second
                 h.curiosityNeed = (h.curiosityNeed - 0.06f).coerceAtLeast(0f)
             }
         }
@@ -327,16 +341,19 @@ Respondé JSON puro con esta forma:
         val living = world.humans.filter { it.alive }
         val buckets = HashMap<Int, MutableList<Human>>()
         living.forEach { h ->
-            val cx = h.x.toInt(); val cy = h.y.toInt()
+            val cx = h.x.toInt()
+            val cy = h.y.toInt()
             buckets.getOrPut(cx + cy * 64) { mutableListOf() }.add(h)
         }
         val processed = HashSet<Long>()
         living.forEach { a ->
-            val ax = a.x.toInt(); val ay = a.y.toInt()
+            val ax = a.x.toInt()
+            val ay = a.y.toInt()
             for (ox in -1..1) for (oy in -1..1) {
                 buckets[ax + ox + (ay + oy) * 64]?.forEach { b ->
                     if (a.id == b.id) return@forEach
-                    val lo = min(a.id, b.id); val hi = max(a.id, b.id)
+                    val lo = min(a.id, b.id)
+                    val hi = max(a.id, b.id)
                     val key = (lo.toLong() shl 32) or hi.toLong()
                     if (!processed.add(key)) return@forEach
                     if (distance(a.x, a.y, b.x, b.y) <= 1.25f) interact(a, b, dt)
@@ -348,7 +365,7 @@ Respondé JSON puro con esta forma:
     private fun coarseSocial(dt: Double) {
         val living = world.humans.filter { it.alive }
         if (living.size < 2) return
-        val attempts = max(1, min(living.size, (living.size * dt / DAY_MINUTES / 2.0).roundToInt()))
+        val attempts = max(1, min(living.size * 2, (living.size * dt / DAY_MINUTES).roundToInt()))
         repeat(attempts) {
             val a = living[rng.nextInt(living.size)]
             var b = living[rng.nextInt(living.size)]
@@ -358,24 +375,31 @@ Respondé JSON puro con esta forma:
     }
 
     private fun interact(a: Human, b: Human, dt: Double) {
-        val probability = min(0.85, dt / 45.0 * (0.16 + (a.traits[0] + b.traits[0]) * 0.18))
+        val probability = min(0.88, dt / 45.0 * (0.16 + (a.traits[0] + b.traits[0]) * 0.18))
         if (!rng.chance(probability)) return
 
         val ra = relation(a, b.id)
         val rb = relation(b, a.id)
         val compatibility = 1f - abs(a.traits[1] - b.traits[1]) * 0.30f - abs(a.traits[4] - b.traits[4]) * 0.20f
         val chemistry = pairChemistry(a.id, b.id)
-        val tone = (compatibility * 0.55f + (a.traits[7] + b.traits[7]) * 0.18f + (rng.nextFloat() - 0.5f) * 0.35f).coerceIn(0f, 1f)
 
-        ra.familiarity = (ra.familiarity + 0.015f).coerceAtMost(1f)
-        rb.familiarity = (rb.familiarity + 0.015f).coerceAtMost(1f)
-        val delta = (tone - 0.46f) * 0.035f
+        if (ra.familiarity <= 0.0001f && rb.familiarity <= 0.0001f) {
+            val baseline = ((chemistry - 0.50f) * 0.72f).coerceIn(-0.36f, 0.36f)
+            ra.attraction = (baseline + (rng.nextFloat() - 0.5f) * 0.08f).coerceIn(-1f, 1f)
+            rb.attraction = (baseline + (rng.nextFloat() - 0.5f) * 0.08f).coerceIn(-1f, 1f)
+        }
+
+        val tone = (compatibility * 0.55f + (a.traits[7] + b.traits[7]) * 0.18f + (rng.nextFloat() - 0.5f) * 0.35f).coerceIn(0f, 1f)
+        ra.familiarity = (ra.familiarity + 0.018f).coerceAtMost(1f)
+        rb.familiarity = (rb.familiarity + 0.018f).coerceAtMost(1f)
+        val delta = (tone - 0.46f) * 0.040f
         ra.trust = (ra.trust + delta).coerceIn(-1f, 1f)
         rb.trust = (rb.trust + delta).coerceIn(-1f, 1f)
-        ra.affection = (ra.affection + delta * 0.8f).coerceIn(-1f, 1f)
-        rb.affection = (rb.affection + delta * 0.8f).coerceIn(-1f, 1f)
-        ra.attraction = (ra.attraction + (chemistry - 0.45f) * 0.018f + delta * 0.25f).coerceIn(-1f, 1f)
-        rb.attraction = (rb.attraction + (chemistry - 0.45f) * 0.018f + delta * 0.25f).coerceIn(-1f, 1f)
+        ra.affection = (ra.affection + delta * 0.95f).coerceIn(-1f, 1f)
+        rb.affection = (rb.affection + delta * 0.95f).coerceIn(-1f, 1f)
+        ra.attraction = (ra.attraction + (chemistry - 0.46f) * 0.010f + delta * 0.35f).coerceIn(-1f, 1f)
+        rb.attraction = (rb.attraction + (chemistry - 0.46f) * 0.010f + delta * 0.35f).coerceIn(-1f, 1f)
+
         if (tone < 0.28f) {
             ra.resentment = (ra.resentment + 0.03f).coerceAtMost(1f)
             rb.resentment = (rb.resentment + 0.03f).coerceAtMost(1f)
@@ -387,7 +411,7 @@ Respondé JSON puro con esta forma:
         a.socialNeed = (a.socialNeed - 0.08f).coerceAtLeast(0f)
         b.socialNeed = (b.socialNeed - 0.08f).coerceAtLeast(0f)
 
-        if (rng.chance(0.12)) {
+        if (rng.chance(0.10)) {
             remember(a, "Tuve un encuentro con ${b.name}; me dejó una impresión ${if (delta >= 0) "agradable" else "incómoda"}.", 0.28f, delta * 5f, b.id)
             remember(b, "Tuve un encuentro con ${a.name}; me dejó una impresión ${if (delta >= 0) "agradable" else "incómoda"}.", 0.28f, delta * 5f, a.id)
         }
@@ -395,32 +419,50 @@ Respondé JSON puro con esta forma:
         if (a.ideas.isNotEmpty() && rng.chance(0.08)) learnIdea(b, a.ideas[rng.nextInt(a.ideas.size)], a.id)
         if (b.ideas.isNotEmpty() && rng.chance(0.08)) learnIdea(a, b.ideas[rng.nextInt(b.ideas.size)], b.id)
 
-        if (a.infection > 0.2f && b.infection < 0.05f && rng.chance(0.08 * (1.0 - b.immunity))) b.infection = 0.12f
-        if (b.infection > 0.2f && a.infection < 0.05f && rng.chance(0.08 * (1.0 - a.immunity))) a.infection = 0.12f
+        if (a.infection > 0.20f && b.infection < 0.05f && rng.chance(0.025 * (1.0 - b.immunity))) b.infection = 0.10f
+        if (b.infection > 0.20f && a.infection < 0.05f && rng.chance(0.025 * (1.0 - a.immunity))) a.infection = 0.10f
 
-        val adultA = a.ageYears(world.simMinute) >= 16.0
-        val adultB = b.ageYears(world.simMinute) >= 16.0
-        val mutual = min(min(ra.affection, rb.affection), min(ra.attraction, rb.attraction))
-        if (adultA && adultB && mutual > 0.42f && ra.trust > 0.18f && rb.trust > 0.18f) {
-            val female = if (a.biologicalSex == 1) a else if (b.biologicalSex == 1) b else null
-            val male = if (a.biologicalSex == 0) a else if (b.biologicalSex == 0) b else null
-            if (female != null && male != null && female.pregnancyDueMinute < 0.0 && female.ageYears(world.simMinute) < 48.0) {
-                val chancePerEncounter = 0.0012 * (0.4 + mutual)
-                if (rng.chance(chancePerEncounter)) {
-                    female.pregnancyDueMinute = world.simMinute + DAY_MINUTES * (260.0 + rng.nextDouble() * 25.0)
-                    female.parentA = female.id
-                    female.parentB = male.id
-                    remember(female, "Estoy atravesando un embarazo; ${male.name} es el otro progenitor.", 0.93f, 0.55f, male.id)
-                    remember(male, "${female.name} está atravesando un embarazo y soy el otro progenitor.", 0.87f, 0.50f, female.id)
-                }
-            }
-        }
+        tryConception(a, b, ra, rb)
 
-        if (tone < 0.18f && (a.traits[5] + b.traits[5] + a.traits[6] + b.traits[6]) > 2.2f && rng.chance(0.025)) {
+        if (tone < 0.15f && (a.traits[5] + b.traits[5] + a.traits[6] + b.traits[6]) > 2.45f && rng.chance(0.012)) {
             val victim = if (rng.chance(0.5)) a else b
-            victim.health = (victim.health - (0.04f + rng.nextFloat() * 0.12f)).coerceAtLeast(0f)
+            victim.health = (victim.health - (0.03f + rng.nextFloat() * 0.08f)).coerceAtLeast(0f)
             remember(a, "El encuentro con ${b.name} terminó en una agresión.", 0.86f, -0.75f, b.id)
             remember(b, "El encuentro con ${a.name} terminó en una agresión.", 0.86f, -0.75f, a.id)
+        }
+    }
+
+    private fun tryConception(a: Human, b: Human, ra: Relation, rb: Relation) {
+        if (a.biologicalSex == b.biologicalSex) return
+        val female = if (a.biologicalSex == 1) a else b
+        val male = if (a.biologicalSex == 0) a else b
+        if (female.pregnancyDueMinute >= 0.0) return
+
+        val femaleAge = female.ageYears(world.simMinute)
+        val maleAge = male.ageYears(world.simMinute)
+        if (femaleAge !in 18.0..43.0 || maleAge !in 16.0..75.0) return
+
+        val mutualAttraction = min(ra.attraction, rb.attraction)
+        val mutualTrust = min(ra.trust, rb.trust)
+        val mutualFamiliarity = min(ra.familiarity, rb.familiarity)
+        if (mutualAttraction < 0.10f || mutualTrust < -0.08f || mutualFamiliarity < 0.045f) return
+
+        val fertilityByAge = when {
+            femaleAge < 30.0 -> 1.0
+            femaleAge < 36.0 -> 0.82
+            femaleAge < 40.0 -> 0.55
+            else -> 0.25
+        }
+        val chancePerEncounter = 0.0026 * fertilityByAge *
+            (0.55 + mutualAttraction.coerceAtLeast(0f)) *
+            (0.80 + mutualFamiliarity.coerceAtMost(0.8f))
+
+        if (rng.chance(chancePerEncounter)) {
+            female.pregnancyDueMinute = world.simMinute + DAY_MINUTES * (260.0 + rng.nextDouble() * 25.0)
+            female.parentA = female.id
+            female.parentB = male.id
+            remember(female, "Estoy atravesando un embarazo; ${male.name} es el otro progenitor.", 0.93f, 0.55f, male.id)
+            remember(male, "${female.name} está atravesando un embarazo y soy el otro progenitor.", 0.87f, 0.50f, female.id)
         }
     }
 
@@ -429,25 +471,32 @@ Respondé JSON puro con esta forma:
         world.climateB = (3.79 * world.climateB * (1.0 - world.climateB)).coerceIn(0.0001, 0.9999)
         world.temperatureC = 7.0 + world.climateA * 30.0
         val rawStorm = world.climateA * 0.57 + world.climateB * 0.63 + rng.nextDouble() * 0.16
-        world.stormSeverity = ((rawStorm - 0.94) / 0.28).coerceIn(0.0, 1.0)
-        world.foodAbundance = (world.foodAbundance * 0.985 + (0.72 - world.stormSeverity * 0.55) * 0.015).coerceIn(0.06, 1.0)
+        world.stormSeverity = ((rawStorm - 1.18) / 0.14).coerceIn(0.0, 1.0)
+        world.foodAbundance = (world.foodAbundance * 0.97 + (0.90 - world.stormSeverity * 0.28) * 0.03).coerceIn(0.35, 1.0)
         world.lastClimateDay = day
 
-        if (rng.chance(0.0014)) {
+        if (rng.chance(0.00055)) {
             val candidates = world.humans.filter { it.alive && it.infection < 0.05f }
-            if (candidates.isNotEmpty()) candidates[rng.nextInt(candidates.size)].infection = 0.16f
+            if (candidates.isNotEmpty()) candidates[rng.nextInt(candidates.size)].infection = 0.10f
         }
 
         if (world.stormSeverity > 0.72) {
             val severity = world.stormSeverity
             world.humans.filter { it.alive }.forEach { h ->
                 val sheltered = distance(h.x, h.y, h.homeX, h.homeY) < 1.4f
-                val hit = severity * if (sheltered) 0.008 else 0.07
-                h.health = (h.health - hit.toFloat() * (0.5f + rng.nextFloat())).coerceAtLeast(0f)
-                if (severity > 0.86 || rng.chance(0.25)) {
+                val hit = severity * if (sheltered) 0.0015 else 0.012
+                h.health = (h.health - hit.toFloat() * (0.4f + rng.nextFloat() * 0.8f)).coerceAtLeast(0f)
+                if (severity > 0.84 || rng.chance(0.15)) {
                     remember(h, "Una tormenta excepcional golpeó el lugar donde vivo.", 0.82f, -0.52f, -1)
                 }
-                if (h.health <= 0f) die(h, "murió durante una tormenta extrema")
+
+                // A truly catastrophic storm can kill, but it is deliberately rare.
+                if (severity > 0.97) {
+                    val fatalChance = if (sheltered) 0.0008 else 0.008
+                    if (rng.chance(fatalChance)) {
+                        die(h, "murió durante una tormenta extraordinaria")
+                    }
+                }
             }
         }
     }
@@ -455,30 +504,60 @@ Respondé JSON puro con esta forma:
     private fun makeChild(mother: Human): Human {
         val father = world.humans.firstOrNull { it.id == mother.parentB }
         val id = world.nextHumanId++
-        val names = listOf("Ari", "Luz", "Nilo", "Uma", "Teo", "Iris", "Lía", "Gael", "Noa", "Ciro", "Mía", "Río")
+        val names = listOf("Ari", "Luz", "Nilo", "Uma", "Teo", "Iris", "Lía", "Gael", "Noa", "Ciro", "Mía", "Río", "Sol", "Luca", "Milo", "Eva")
         val traits = FloatArray(8) { i ->
             val base = if (father != null) (mother.traits[i] + father.traits[i]) / 2f else mother.traits[i]
-            (base + (rng.nextFloat() - 0.5f) * 0.22f).coerceIn(0.03f, 0.97f)
+            (base + (rng.nextFloat() - 0.5f) * 0.24f).coerceIn(0.03f, 0.97f)
         }
         val child = Human(
             id = id,
             name = names[rng.nextInt(names.size)] + if (id > 99) "-$id" else "",
             biologicalSex = rng.nextInt(2),
             birthMinute = world.simMinute,
-            x = mother.x, y = mother.y,
-            targetX = mother.x, targetY = mother.y,
-            homeX = mother.homeX, homeY = mother.homeY,
-            health = (0.78 + rng.nextDouble() * 0.20).toFloat(),
-            hunger = 0.12f, energy = 0.72f, socialNeed = 0.20f, curiosityNeed = 0.85f,
-            infection = 0f, immunity = 0f, pregnancyDueMinute = -1.0,
-            parentA = mother.id, parentB = father?.id ?: -1, alive = true, goal = "",
-            traits = traits, relations = mutableMapOf(), memories = mutableListOf(), ideas = mutableListOf()
+            x = mother.x,
+            y = mother.y,
+            targetX = mother.x,
+            targetY = mother.y,
+            homeX = mother.homeX,
+            homeY = mother.homeY,
+            health = (0.86 + rng.nextDouble() * 0.13).toFloat(),
+            hunger = 0.10f,
+            energy = 0.78f,
+            socialNeed = 0.18f,
+            curiosityNeed = 0.88f,
+            infection = 0f,
+            immunity = mother.immunity * 0.10f,
+            pregnancyDueMinute = -1.0,
+            parentA = mother.id,
+            parentB = father?.id ?: -1,
+            alive = true,
+            goal = "",
+            traits = traits,
+            relations = mutableMapOf(),
+            memories = mutableListOf(),
+            ideas = mutableListOf()
         )
-        relation(mother, child.id).apply { familiarity = 1f; trust = 0.9f; affection = 0.9f }
-        relation(child, mother.id).apply { familiarity = 1f; trust = 0.8f; affection = 0.8f }
+        relation(mother, child.id).apply {
+            familiarity = 1f
+            trust = 0.9f
+            affection = 0.9f
+        }
+        relation(child, mother.id).apply {
+            familiarity = 1f
+            trust = 0.8f
+            affection = 0.8f
+        }
         father?.let {
-            relation(it, child.id).apply { familiarity = 1f; trust = 0.85f; affection = 0.85f }
-            relation(child, it.id).apply { familiarity = 1f; trust = 0.75f; affection = 0.75f }
+            relation(it, child.id).apply {
+                familiarity = 1f
+                trust = 0.85f
+                affection = 0.85f
+            }
+            relation(child, it.id).apply {
+                familiarity = 1f
+                trust = 0.75f
+                affection = 0.75f
+            }
             remember(it, "Nació ${child.name}, mi descendiente con ${mother.name}.", 1f, 0.75f, child.id)
         }
         remember(mother, "Nació ${child.name}, mi descendiente.", 1f, 0.75f, child.id)
@@ -506,9 +585,17 @@ Respondé JSON puro con esta forma:
     }
 
     private fun remember(h: Human, text: String, importance: Float, valence: Float, sourceId: Int) {
-        h.memories += Memory(world.simMinute, importance.coerceIn(0f, 1f), valence.coerceIn(-1f, 1f), sourceId, text.take(220))
+        h.memories += Memory(
+            world.simMinute,
+            importance.coerceIn(0f, 1f),
+            valence.coerceIn(-1f, 1f),
+            sourceId,
+            text.take(220)
+        )
         if (h.memories.size > 64) {
-            val removable = h.memories.withIndex().minByOrNull { it.value.importance * 0.75f + (it.index.toFloat() / h.memories.size) * 0.25f }
+            val removable = h.memories.withIndex().minByOrNull {
+                it.value.importance * 0.75f + (it.index.toFloat() / h.memories.size) * 0.25f
+            }
             if (removable != null) h.memories.removeAt(removable.index)
         }
     }
@@ -523,6 +610,8 @@ Respondé JSON puro con esta forma:
         return ((z ushr 11).toDouble() / (1L shl 53).toDouble()).toFloat()
     }
 
-    private fun distance(ax: Float, ay: Float, bx: Float, by: Float): Float = hypot((ax - bx).toDouble(), (ay - by).toDouble()).toFloat()
+    private fun distance(ax: Float, ay: Float, bx: Float, by: Float): Float =
+        hypot((ax - bx).toDouble(), (ay - by).toDouble()).toFloat()
+
     private fun fmt(v: Float): String = "%.2f".format(v)
 }
