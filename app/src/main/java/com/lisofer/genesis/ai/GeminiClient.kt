@@ -9,7 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class GeminiClient {
-    private val model = "gemini-2.5-flash-lite"
+    // Gemini 2.5 Flash-Lite is no longer available to new API users.
+    private val model = "gemini-3.5-flash-lite"
 
     fun chat(apiKey: String, prompt: String): Result<String> = runCatching {
         val text = generate(apiKey, prompt, jsonMode = false, temperature = 0.95, maxTokens = 320)
