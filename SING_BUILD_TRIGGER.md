@@ -1,0 +1,1 @@
+CharacterIA Sing side-by-side build trigger.
