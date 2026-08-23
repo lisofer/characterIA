@@ -1,54 +1,83 @@
-# CharacterIA
+# CharacterIA Sing
 
-App Android nativa para conversar por voz con un personaje de IA usando:
+Rama experimental de CharacterIA basada en `feature/android-v02`. Conserva los tres modos de entrada de la versión actual:
 
-- **Gemini Live** como cerebro conversacional y VAD.
-- **Fish Audio** (`s2.1-pro-free`) para responder con una voz clonada a partir de una muestra local.
-- **AudioRecord / AudioTrack** para entrada y reproducción PCM en tiempo real.
-- **Jetpack Compose** para la interfaz.
+- **Teclado**: escribir sin dejar el micrófono escuchando.
+- **Conversación**: botón central para charla fluida con escucha continua.
+- **Pulsar para hablar**: botón derecho para grabar/enviar audio sin escuchar el ambiente fuera de la pulsación.
+
+También conserva perfiles múltiples y conversaciones con hasta dos personajes seleccionados.
+
+## Objetivo de esta rama
+
+Probar canto espontáneo dentro de una conversación usando Fish Audio sin reemplazar la referencia zero-shot actual por un `reference_id` fijo.
+
+CharacterIA Sing mantiene el perfil normal de Fish para habla y detecta automáticamente señales de canto antes de abrir el WebSocket de TTS. Puede reconocer:
+
+- marcas como `[SING]`, `<SING>` o `[[SING]]`;
+- símbolos musicales como `♪` o `🎵`;
+- expresiones como `te canto`, `una copla`, `una payada`, `una canción`;
+- respuestas con estructura de verso de varias líneas cortas.
+
+Cuando detecta canto usa un perfil más estable:
+
+```text
+temperature = 0.25
+top_p = 0.45
+repetition_penalty = 1.08
+chunk_length = 120
+latency = normal
+condition_on_previous_chunks = true
+```
+
+Para habla normal conserva:
+
+```text
+temperature = 0.7
+top_p = 0.7
+repetition_penalty = 1.2
+chunk_length = 100
+latency = low
+condition_on_previous_chunks = true
+```
+
+El modo canto además hace flushes más cortos para intentar mantener mayor coherencia entre frases.
+
+> Importante: esto busca estabilizar la melodía inventada por Fish; todavía no impone notas, MIDI ni una curva F0 externa. Fish puede seguir desafinando o cambiar de centro tonal, pero debería reducirse parte de la variabilidad.
 
 ## Flujo
 
 ```text
-Micrófono (PCM 16 kHz)
+Micrófono / teclado / PTT
         ↓
-Gemini Live WebSocket
+Gemini Live
         ↓
-Transcripción de salida incremental
+Transcripción incremental
         ↓
-Fish Audio WebSocket TTS
+Detector habla / canto
+        ↓
+Fish Audio zero-shot
+   ↙                ↘
+Habla normal      Perfil Sing
         ↓
 PCM 44.1 kHz
         ↓
 AudioTrack
 ```
 
-La conexión de Gemini permanece abierta entre turnos. La app habilita `sessionResumption` y `contextWindowCompression` para poder recuperar conexiones renovadas por el servidor y sostener conversaciones largas.
-
-## Configuración en el teléfono
+## Configuración
 
 1. Abrí **Configuración**.
 2. Pegá tu API key de Gemini.
 3. Pegá tu API key de Fish Audio.
-4. Cargá una muestra de voz de 10–30 segundos.
+4. Cargá una muestra de voz.
 5. Escribí la transcripción exacta de esa muestra.
-6. Ajustá la personalidad si querés.
-7. Guardá y tocá **Conectar**.
-8. Permití el micrófono.
+6. Ajustá la personalidad del personaje.
+7. Guardá y conectá.
 
-Las API keys se cifran localmente mediante **Android Keystore**. La muestra de voz se copia al almacenamiento privado de la app y no se incluye en backups.
-
-> Esta versión es una app personal/prototipo. Para distribuirla a terceros conviene reemplazar la API key directa de Gemini por tokens efímeros emitidos por un backend propio.
-
-## Conversación continua
-
-Gemini recibe PCM mono, 16 bits, 16 kHz en bloques de ~100 ms. Se usa VAD automático para detectar el final del turno. Mientras Fish reproduce la respuesta, el micrófono permanece activo y Android intenta cancelar el eco mediante `VOICE_COMMUNICATION` + `AcousticEchoCanceler`, permitiendo interrumpir la respuesta hablando.
-
-Fish se abre por WebSocket por cada respuesta. La muestra y su transcripción se envían como referencia zero-shot y el texto de Gemini se entrega incrementalmente. El audio vuelve como PCM y se reproduce a medida que llega.
+La voz sigue enviándose como referencia zero-shot. Esta rama no crea ni fija modelos de voz en Fish.
 
 ## Build
-
-El proyecto usa:
 
 - Android Gradle Plugin **8.13.2**
 - Gradle **8.13**
@@ -58,31 +87,4 @@ El proyecto usa:
 - `targetSdk = 36`
 - JDK 17
 
-El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
-
-Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 36 instalado y Gradle 8.13.
-
-## Estado v0.1
-
-Incluido:
-
-- conversación de audio continua;
-- Gemini 3.1 Flash Live y fallback 2.5;
-- transcripción de usuario/IA en pantalla;
-- Fish Audio streaming con `s2.1-pro-free`;
-- clonación zero-shot con muestra local;
-- interrupción de audio;
-- reconexión Gemini con session resumption;
-- compresión de contexto;
-- configuración editable de personalidad;
-- almacenamiento cifrado de API keys;
-- diagnóstico dentro de la app.
-
-Próximos pasos útiles:
-
-- memoria autobiográfica persistente;
-- convertir la muestra de Fish en `reference_id` persistente para reducir latencia;
-- botón **“yo no diría eso”** para corregir personalidad;
-- perfiles de personalidad versionados;
-- modo manos libres con foreground service;
-- tokens efímeros de Gemini para una distribución pública segura.
+GitHub Actions compila automáticamente un APK debug en cada push a ramas `feature/**` y publica un prerelease versionado.
