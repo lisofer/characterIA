@@ -11,11 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.lisofer.characteria"
+        applicationId = "com.lisofer.characteria.sing"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.0-sing"
     }
 
     buildFeatures {
