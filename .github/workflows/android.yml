@@ -39,17 +39,37 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
+      - name: Upload CharacterIA Sing artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CharacterIA-Sing-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
       - name: Publish versioned debug APK
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')
+        if: >-
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/')) ||
+          (github.event_name == 'pull_request' && github.head_ref == 'feature/characteria-sing')
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
-          TAG="android-debug-${GITHUB_RUN_NUMBER}"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            TAG="characteria-sing-${GITHUB_RUN_NUMBER}"
+            TARGET_SHA="$PR_HEAD_SHA"
+            SOURCE_BRANCH="$GITHUB_HEAD_REF"
+            TITLE="CharacterIA Sing ${GITHUB_RUN_NUMBER}"
+          else
+            TAG="android-debug-${GITHUB_RUN_NUMBER}"
+            TARGET_SHA="$GITHUB_SHA"
+            SOURCE_BRANCH="$GITHUB_REF_NAME"
+            TITLE="CharacterIA Android Debug ${GITHUB_RUN_NUMBER}"
+          fi
           APK="app/build/outputs/apk/debug/app-debug.apk"
           gh release create "$TAG" "$APK" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "CharacterIA Android Debug ${GITHUB_RUN_NUMBER}" \
-            --notes "APK de prueba generado automáticamente desde ${GITHUB_REF_NAME}." \
+            --target "$TARGET_SHA" \
+            --title "$TITLE" \
+            --notes "APK de prueba generado automáticamente desde ${SOURCE_BRANCH}." \
             --prerelease
