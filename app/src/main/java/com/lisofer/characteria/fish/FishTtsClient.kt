@@ -108,6 +108,9 @@ class FishTtsClient(
             text.contains('♪') || text.contains('♫') || text.contains('🎵') || text.contains('🎶')
         if (explicitSinging) return VoiceMode.SINGING
 
+        val singingCue = SINGING_CUES.any { lower.contains(it) }
+        if (singingCue) return VoiceMode.SINGING
+
         val lines = text
             .lines()
             .map { stripSingingMarkers(it).trim() }
@@ -118,9 +121,7 @@ class FishTtsClient(
         if (verseLike) return VoiceMode.SINGING
 
         if (force) return VoiceMode.SPEECH
-
-        val hasNormalSentence = text.length >= 48 && text.any { it == '.' || it == '?' || it == '!' }
-        if (hasNormalSentence || text.length >= MODE_PROBE_LIMIT) return VoiceMode.SPEECH
+        if (text.length >= MODE_PROBE_LIMIT) return VoiceMode.SPEECH
         return null
     }
 
@@ -337,7 +338,7 @@ class FishTtsClient(
     }
 
     companion object {
-        private const val MODE_PROBE_LIMIT = 140
+        private const val MODE_PROBE_LIMIT = 90
 
         private val SING_MARKERS = listOf(
             "[[sing]]",
@@ -359,6 +360,25 @@ class FishTtsClient(
             "[/SING]",
             "[SINGS]",
             "[SINGING]",
+        )
+
+        private val SINGING_CUES = listOf(
+            "te canto",
+            "voy a cantar",
+            "voy a entonar",
+            "una copla",
+            "esta copla",
+            "una payada",
+            "esta payada",
+            "una canción",
+            "una cancion",
+            "ahí va la canción",
+            "ahi va la cancion",
+            "ahí va una canción",
+            "ahi va una cancion",
+            "let me sing",
+            "i'll sing",
+            "i will sing",
         )
     }
 }
