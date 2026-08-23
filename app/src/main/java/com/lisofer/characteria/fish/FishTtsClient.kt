@@ -105,7 +105,7 @@ class FishTtsClient(
     private fun detectVoiceMode(text: String, force: Boolean): VoiceMode? {
         val lower = text.lowercase()
         val explicitSinging = SING_MARKERS.any { lower.contains(it) } ||
-            text.contains('♪') || text.contains('♫') || text.contains('🎵') || text.contains('🎶')
+            text.contains('♪') || text.contains('♫') || text.contains("🎵") || text.contains("🎶")
         if (explicitSinging) return VoiceMode.SINGING
 
         val singingCue = SINGING_CUES.any { lower.contains(it) }
