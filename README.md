@@ -1,88 +1,35 @@
-# CharacterIA
+# Persona Studio 3 — Gemini + Fish Audio
 
-App Android nativa para conversar por voz con un personaje de IA usando:
+Aplicación web para un personaje con personalidad configurable, respuestas de Gemini, voz Fish Audio y ocho PNG faciales. Preparada para funcionar desde Chrome en Android después de publicarse con HTTPS.
 
-- **Gemini Live** como cerebro conversacional y VAD.
-- **Fish Audio** (`s2.1-pro-free`) para responder con una voz clonada a partir de una muestra local.
-- **AudioRecord / AudioTrack** para entrada y reproducción PCM en tiempo real.
-- **Jetpack Compose** para la interfaz.
+## Desplegar en Railway desde el teléfono
 
-## Flujo
+1. En Railway, creá un proyecto o servicio nuevo y seleccioná **Deploy from GitHub repo**.
+2. Elegí el repositorio **`lisofer/characterIA`**.
+3. **Muy importante:** en el servicio, abrí **Settings → Source** y seleccioná la rama **`persona-studio-railway`** como rama de despliegue. **No uses `main`**: contiene una aplicación distinta.
+4. Railway detecta el `package.json` en la raíz y ejecuta `npm start`. Usá Node.js 20 o posterior.
+5. En **Settings → Networking**, generá un dominio público (`*.up.railway.app`); debe empezar con `https://` para que Android permita pedir acceso al micrófono.
+6. Entrá a la URL HTTPS desde **Chrome en Android**. En **Cerebro**, pegá tu propia API key de Gemini; en **Voz**, tu API key de Fish Audio.
+7. Podés configurar Voice ID o cargar muestra de 10–30 segundos con su transcripción literal; cargá tus ocho PNG y probá la voz con **Probar Fish**.
+8. Tocá **Activar micrófono** una vez. Después mantené apretado el botón de hablar y soltá para enviar.
 
-```text
-Micrófono (PCM 16 kHz)
-        ↓
-Gemini Live WebSocket
-        ↓
-Transcripción de salida incremental
-        ↓
-Fish Audio WebSocket TTS
-        ↓
-PCM 44.1 kHz
-        ↓
-AudioTrack
-```
+**No hace falta poner API keys en variables de Railway.** Esta versión las solicita dentro de la app en cada sesión y no las guarda en el repositorio ni en el servidor. Si no configurás Fish, podés seleccionar voz del navegador.
 
-La conexión de Gemini permanece abierta entre turnos. La app habilita `sessionResumption` y `contextWindowCompression` para poder recuperar conexiones renovadas por el servidor y sostener conversaciones largas.
+## Diseño técnico
 
-## Configuración en el teléfono
+- `index.html`: interfaz adaptable, perfiles separados, Gemini, PNG, reproducción de voz.
+- `server.js`: servidor HTTP y puente a la API de Fish (MessagePack) con `GET /api/health` y `POST /api/fish/tts`.
+- `package.json`: script `npm start` sin dependencias externas.
+- `tests.test.js`: seis pruebas simuladas del puente Fish (ejecutar `npm test`).
 
-1. Abrí **Configuración**.
-2. Pegá tu API key de Gemini.
-3. Pegá tu API key de Fish Audio.
-4. Cargá una muestra de voz de 10–30 segundos.
-5. Escribí la transcripción exacta de esa muestra.
-6. Ajustá la personalidad si querés.
-7. Guardá y tocá **Conectar**.
-8. Permití el micrófono.
+La animación de boca se calcula a partir del **texto** de Gemini, no de los ruidos del micrófono. La correspondencia fonética es aproximada; Fish entrega el audio y la app estima su temporización.
 
-Las API keys se cifran localmente mediante **Android Keystore**. La muestra de voz se copia al almacenamiento privado de la app y no se incluye en backups.
+## Privacidad y seguridad
 
-> Esta versión es una app personal/prototipo. Para distribuirla a terceros conviene reemplazar la API key directa de Gemini por tokens efímeros emitidos por un backend propio.
+No insertes API keys en código, commits ni capturas. Los secretos se introducen en los campos de la aplicación y duran solamente la sesión de la pestaña. Fish recibe el texto, y si elegiste clonación instantánea también el audio de muestra y su transcripción. Usá voces para las que tengas autorización.
 
-## Conversación continua
+El servidor no incluye cuentas de usuario ni autenticación: el dominio que genere Railway podrá ser visitado por otras personas. Cada usuario tendrá que introducir su propia clave para usar Fish/Gemini. Para un servicio privado, hay que agregar control de acceso y límites de uso antes de distribuirlo.
 
-Gemini recibe PCM mono, 16 bits, 16 kHz en bloques de ~100 ms. Se usa VAD automático para detectar el final del turno. Mientras Fish reproduce la respuesta, el micrófono permanece activo y Android intenta cancelar el eco mediante `VOICE_COMMUNICATION` + `AcousticEchoCanceler`, permitiendo interrumpir la respuesta hablando.
+## Alcance
 
-Fish se abre por WebSocket por cada respuesta. La muestra y su transcripción se envían como referencia zero-shot y el texto de Gemini se entrega incrementalmente. El audio vuelve como PCM y se reproduce a medida que llega.
-
-## Build
-
-El proyecto usa:
-
-- Android Gradle Plugin **9.3.0**
-- Gradle **9.5.0**
-- Kotlin / Compose Compiler **2.3.21**
-- Compose BOM **2026.06.00**
-- `compileSdk = 37`
-- `targetSdk = 36`
-- JDK 17
-
-El repositorio incluye un workflow de GitHub Actions que compila automáticamente el APK debug y lo publica como artifact `CharacterIA-debug`.
-
-Si abrís el proyecto localmente, usá una versión reciente de Android Studio con SDK 37 instalado y Gradle 9.5.0.
-
-## Estado v0.1
-
-Incluido:
-
-- conversación de audio continua;
-- Gemini 3.1 Flash Live y fallback 2.5;
-- transcripción de usuario/IA en pantalla;
-- Fish Audio streaming con `s2.1-pro-free`;
-- clonación zero-shot con muestra local;
-- interrupción de audio;
-- reconexión Gemini con session resumption;
-- compresión de contexto;
-- configuración editable de personalidad;
-- almacenamiento cifrado de API keys;
-- diagnóstico dentro de la app.
-
-Próximos pasos útiles:
-
-- memoria autobiográfica persistente;
-- convertir la muestra de Fish en `reference_id` persistente para reducir latencia;
-- botón **“yo no diría eso”** para corregir personalidad;
-- perfiles de personalidad versionados;
-- modo manos libres con foreground service;
-- tokens efímeros de Gemini para una distribución pública segura.
+Un personaje por conversación. La función de dos personajes simultáneos está pendiente. La app está preparada, pero la generación real con tu cuenta de Fish/Gemini y el permiso del micrófono en tu Android requieren comprobación después del despliegue.
