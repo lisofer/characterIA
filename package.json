@@ -1,13 +1,13 @@
 {
-  "name": "persona-studio-fish",
-  "version": "3.0.1",
-  "description": "Gemini and Fish Audio talking avatar, Railway-ready",
+  "name": "persona-studio-private",
+  "version": "3.1.0",
   "private": true,
+  "description": "Private Gemini/Fish talking avatar ready for Railway",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests.test.js"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }
