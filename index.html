@@ -433,7 +433,7 @@ $('profileNew').onclick=async()=>{
  persist();const id='profile_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
  const title=name.trim().slice(0,60),names=profileIndex();names.push({id,name:title});saveProfileIndex(names);
  stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();S.referenceBlob=null;$('voiceSampleInfo').textContent='Sin muestra cargada';$('voiceSampleFile').value='';S.history=[];restore();$('characterName').value=title;updateFields();persist();populateProfiles();renderHistory();
+ clearCurrentSprites();S.referenceBlob=null;$('voiceSampleInfo').textContent='Sin muestra cargada';$('voiceSampleFile').value='';S.history=[];restore();$('characterName').value=title;updateFields();persist();populateProfiles();renderHistory();applyIndividualBackground();
  toast('Personaje creado.');
 };
 $('profileDuplicate').onclick=async()=>{
@@ -445,7 +445,7 @@ $('profileDuplicate').onclick=async()=>{
  const list=profileIndex();list.push({id,name});saveProfileIndex(list);
  if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key);if(S.referenceBlob)tx.objectStore('sprites').put(S.referenceBlob,id+':voiceSample')}catch{}
  stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();toast('Personaje duplicado.');
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();applyIndividualBackground();toast('Personaje duplicado.');
 };
 $('profileDelete').onclick=async()=>{
  if(S.profiles.length<=1)return toast('Debe quedar al menos un personaje.',true);
@@ -454,7 +454,7 @@ $('profileDelete').onclick=async()=>{
  const data=allProfileData();delete data[id];storeProfileData(data);
  if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key] of slotList)tx.objectStore('sprites').delete(id+':'+key);tx.objectStore('sprites').delete(id+':voiceSample')}catch{}
  S.activeProfile=list[0].id;localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();toast('Personaje eliminado.');
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();applyIndividualBackground();toast('Personaje eliminado.');
 };
 $('characterName').addEventListener('change',()=>{
  const list=profileIndex(),p=list.find(x=>x.id===S.activeProfile);
@@ -554,7 +554,7 @@ function appendDuelMessage(message){
 function refreshDuelDisplay(){
  const topic=duelActive();if(!topic)return;
  renderDuelSelects();renderDuelTranscript();
- $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);
+ $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);applyDuelBackgrounds();
  duelStatus(D.running?'Debate en curso…':duelCount(topic)+' intervenciones · Esperando tu señal');
  if($('appShell').dataset.duelMode==='true'){
   loadDuelSprites('left',topic.left);loadDuelSprites('right',topic.right);
@@ -657,23 +657,24 @@ async function duelGenerateBatch(t,participants,count){
  const result=await duelRequest(model,payload);
  return duelParseBatch(result,count);
 }
+
 async function summarizeDuel(t){
  const count=duelCount(t);
- if(count<30||count%30!==0||t.summaryAt>=count)return;
- const previous=t.summary?'Resumen acumulado anterior:\n'+t.summary.slice(0,1400)+'\n':'';
- const recent=[];let counted=0;
- for(let i=t.messages.length-1;i>=0&&counted<30;i--){
-  const msg=t.messages[i];recent.unshift(msg);
-  if(msg.side==='left'||msg.side==='right')counted++;
+ while(count-(t.summaryAt||0)>=30){
+  const target=(t.summaryAt||0)+30,segment=[];let spoken=0;
+  for(const m of t.messages){
+   if(spoken>=target)break;
+   if(m.side==='left'||m.side==='right')spoken++;
+   if(spoken>=(t.summaryAt||0)&&spoken<=target)segment.push(m);
+  }
+  const previous=t.summary?'Resumen previo:\n'+t.summary.slice(0,1500)+'\n':'';
+  const lines=segment.map(m=>(m.side==='human'?'Humano':duelName(m.profileId))+': '+m.text.slice(0,250)).join('\n');
+  const payload={contents:[{role:'user',parts:[{text:'Actualizá el resumen de este diálogo ficticio. Conservá hechos, conflictos, decisiones, relaciones y detalles relevantes; no inventes. Máximo 190 palabras.\n'+previous+'Últimas 30 intervenciones con contexto humano:\n'+lines}]}],generationConfig:{temperature:.2,maxOutputTokens:320}};
+  try{
+   t.summary=(await duelRequest(DUEL_MODEL,payload)).slice(0,1800);
+   t.summaryAt=target;saveDuel();$('duelSummary').textContent=t.summary;
+  }catch(e){if(D.running)duelStatus('No se pudo actualizar el resumen: '+e.message);break}
  }
- const newMessages=recent.map(m=>(m.side==='human'?'Humano':duelName(m.profileId))+': '+m.text.slice(0,250)).join('\n');
- const payload={contents:[{role:'user',parts:[{text:
-  'Actualizá el resumen de esta conversación ficticia. Conservá hechos, relaciones, posturas, conflictos y promesas importantes, sin inventar. Máximo 190 palabras.\n'+previous+'Últimos 30 mensajes:\n'+newMessages
- }]}],generationConfig:{temperature:0.2,maxOutputTokens:320}};
- try{
-  t.summary=(await duelRequest(DUEL_MODEL,payload)).slice(0,1800);
-  t.summaryAt=count;saveDuel();$('duelSummary').textContent=t.summary;
- }catch(e){if(D.running)duelStatus('No se pudo actualizar el resumen: '+e.message)}
 }
 async function duelSample(id){
  if(!S.db)S.db=await openDB();if(!S.db)return null;
