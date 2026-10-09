@@ -628,7 +628,12 @@ async function summarizeDuel(t){
  const count=duelCount(t);
  if(count<30||count%30!==0||t.summaryAt>=count)return;
  const previous=t.summary?'Resumen acumulado anterior:\n'+t.summary.slice(0,1400)+'\n':'';
- const newMessages=t.messages.filter(m=>m.side!=='human').slice(-30).map(m=>duelName(m.profileId)+': '+m.text.slice(0,250)).join('\n');
+ const recent=[];let counted=0;
+ for(let i=t.messages.length-1;i>=0&&counted<30;i--){
+  const msg=t.messages[i];recent.unshift(msg);
+  if(msg.side==='left'||msg.side==='right')counted++;
+ }
+ const newMessages=recent.map(m=>(m.side==='human'?'Humano':duelName(m.profileId))+': '+m.text.slice(0,250)).join('\n');
  const payload={contents:[{role:'user',parts:[{text:
   'Actualizá el resumen de esta conversación ficticia. Conservá hechos, relaciones, posturas, conflictos y promesas importantes, sin inventar. Máximo 190 palabras.\n'+previous+'Últimos 30 mensajes:\n'+newMessages
  }]}],generationConfig:{temperature:0.2,maxOutputTokens:320}};
