@@ -221,6 +221,11 @@ function persist(){
  const all=allProfileData(),previous=all[S.activeProfile]||{};
  all[S.activeProfile]={...previous,settings:{...previous.settings,...saved()},history:S.history.slice(-100)};
  storeProfileData(all);
+ try{
+  const global=JSON.parse(localStorage.getItem('persona-studio-global-v3')||'{}');
+  global.model=$('model').value;global.customModel=$('customModel').value;
+  localStorage.setItem('persona-studio-global-v3',JSON.stringify(global));
+ }catch{}
 }
 // Older Studio versions saved Gemini 2.5 models. Google may reject these for new API users.
 const MODEL_MIGRATIONS={'gemini-2.5-flash-lite':'gemini-3.5-flash-lite','gemini-2.5-flash':'gemini-3.8-flash','gemini-3-flash-preview':'gemini-3.8-flash'};
