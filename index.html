@@ -840,6 +840,8 @@ async function runDuelBatch(){
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
    $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
+   if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
+
   }
  }
 }
@@ -954,6 +956,9 @@ function openSceneChooser(kind){
  $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';$('sceneNotice').textContent='';
  $('sceneModal').hidden=false;
 }
+$('sceneCharacter').addEventListener('change',()=>{
+ if(BG.scene?.kind==='individual')fillSceneBackgrounds(backgroundIdForProfile($('sceneCharacter').value));
+});
 function closeSceneChooser(){BG.scene=null;$('sceneModal').hidden=true}
 $('sceneClose').onclick=closeSceneChooser;$('sceneCancel').onclick=closeSceneChooser;
 $('sceneModal').addEventListener('click',e=>{if(e.target===$('sceneModal'))closeSceneChooser()});
@@ -999,8 +1004,8 @@ $('sceneApply').onclick=async()=>{
  }else{
   const t=duelActive();if(!t)return;
   t[kind]=id;t[kind+'BackgroundId']=bg;saveDuel();
-  if(!D.running)loadDuelSprites(kind,id);
-  $('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id);applyDuelBackgrounds();
+  if(!D.running){loadDuelSprites(kind,id);$('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id)}
+  applyDuelBackgrounds();
  }
  closeSceneChooser();
 };
