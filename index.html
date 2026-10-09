@@ -367,15 +367,12 @@ function getTranscriptionModel(){return $('transcriptionModel').value==='same'?g
 function updateFields(){$('customModel').style.display=$('model').value==='custom'?'block':'none';$('stageName').textContent=$('characterName').value.trim()||'Mi personaje';$('creativityValue').textContent=Number($('creativity').value).toFixed(2);$('mouthIntensityValue').textContent=$('mouthIntensity').value+'%';$('voiceDelayValue').textContent=$('voiceDelay').value+' ms';$('fishTemperatureValue').textContent=Number($('fishTemperature').value).toFixed(2);$('rateValue').textContent=Number($('rate').value).toFixed(2)+'×';$('pitchValue').textContent=Number($('pitch').value).toFixed(2);$('voiceSelect').disabled=$('voiceProvider').value==='fish'}
 for(const id of settingsIds){$(id).addEventListener('input',()=>{updateFields();persist()});$(id).addEventListener('change',()=>{updateFields();persist()})}
 function openTab(tab){
- if((tab==='duel')!==($('appShell').dataset.duelMode==='true')){
-  if(tab==='duel')stopAll();else stopDuel();
-  $('appShell').dataset.duelMode=String(tab==='duel');
-  $('mobileChat').textContent=tab==='duel'?'📜 Historial':'💬 Chat';
- }
+ const show=tab==='duel'||D.running;
+ $('appShell').dataset.duelMode=String(show);
+ $('mobileChat').textContent=show?'📜 Historial':'💬 Chat';
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
  document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
- $('settingsPanel').scrollTop=0;
- if(tab==='duel')refreshDuelDisplay();
+ $('settingsPanel').scrollTop=0;if(tab==='duel')refreshDuelDisplay();
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
@@ -427,7 +424,7 @@ function clearCurrentSprites(){for(const u of S.urls.values())URL.revokeObjectUR
 async function switchProfile(id){
  if(id===S.activeProfile||!S.profiles.some(p=>p.id===id))return;
  stopAll();persist();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();applyIndividualBackground();
  toast('Personaje seleccionado: '+$('characterName').value);
 }
 $('profileSelect').addEventListener('change',e=>switchProfile(e.target.value));
@@ -531,19 +528,11 @@ function initDuel(){
 }
 function renderDuelSelects(){
  const topic=duelActive();if(!topic)return;
- const topicSelect=$('duelTopicSelect');topicSelect.replaceChildren();
- for(const t of D.topics){const o=document.createElement('option');o.value=t.id;o.textContent=t.title||'Sin título';topicSelect.append(o)}
- topicSelect.value=topic.id;
- for(const [id,side] of [['duelLeftSelect','left'],['duelRightSelect','right']]){
-  const select=$(id);select.replaceChildren();
-  const empty=document.createElement('option');empty.value='';empty.textContent='Seleccionar personaje';select.append(empty);
-  for(const p of profileIndex()){const o=document.createElement('option');o.value=p.id;o.textContent=p.name;select.append(o)}
-  select.value=topic[side]||'';
- }
- $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;
- $('duelLimit').value=topic.limit||6;
- $('duelTopicHeading').textContent=topic.title;
- $('duelSummary').textContent=topic.summary||'Todavía no hay resumen.';
+ const select=$('duelTopicSelect');select.replaceChildren();
+ for(const t of D.topics){const o=document.createElement('option');o.value=t.id;o.textContent=t.title||'Sin título';select.append(o)}
+ select.value=topic.id;
+ $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;$('duelLimit').value=topic.limit||6;
+ $('duelTopicHeading').textContent=topic.title;$('duelSummary').textContent=topic.summary||'Todavía no hay resumen.';
 }
 function renderDuelTranscript(){
  const topic=duelActive(),container=$('duelMessages');container.replaceChildren();
@@ -573,22 +562,16 @@ function refreshDuelDisplay(){
 }
 function duelSyncInputs(){
  if(D.running)return;const t=duelActive();if(!t)return;
- t.title=$('duelTitle').value.slice(0,100);
- t.theme=$('duelTheme').value.slice(0,2500);
- t.left=$('duelLeftSelect').value;t.right=$('duelRightSelect').value;
+ t.title=$('duelTitle').value.slice(0,100);t.theme=$('duelTheme').value.slice(0,2500);
  t.limit=Math.max(1,Math.min(30,Number($('duelLimit').value)||6));
  $('duelTopicHeading').textContent=t.title||'Sin título';
- const opt=$('duelTopicSelect').selectedOptions[0];if(opt)opt.textContent=t.title||'Sin título';
+ const o=$('duelTopicSelect').selectedOptions[0];if(o)o.textContent=t.title||'Sin título';
  saveDuel();
- if(D.profiles.left!==t.left)loadDuelSprites('left',t.left);
- if(D.profiles.right!==t.right)loadDuelSprites('right',t.right);
- $('duelLeftName').textContent=duelName(t.left);$('duelRightName').textContent=duelName(t.right);
 }
-for(const id of ['duelTitle','duelTheme','duelLeftSelect','duelRightSelect','duelLimit']){
- $(id).addEventListener('input',duelSyncInputs);$(id).addEventListener('change',duelSyncInputs);
-}
+for(const id of ['duelTitle','duelTheme','duelLimit']){$(id).addEventListener('input',duelSyncInputs);$(id).addEventListener('change',duelSyncInputs)}
 $('duelTopicSelect').onchange=()=>{
- stopDuel();D.activeId=$('duelTopicSelect').value;saveDuel();refreshDuelDisplay();
+ if(D.running){$('duelTopicSelect').value=D.activeId;return toast('Detené la tanda antes de cambiar la temática.',true)}
+ D.activeId=$('duelTopicSelect').value;saveDuel();refreshDuelDisplay();
 };
 $('duelNew').onclick=()=>{
  if(D.running)return toast('Detené el debate antes de cambiar de tema.',true);
@@ -611,7 +594,7 @@ function stopDuel(){
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
- D.speech=null;
+ D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
  $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
@@ -737,7 +720,7 @@ async function duelVoice(t,side,text,token){
   else throw error;
  }finally{
   if(D.generation===token){
-   D.resolveAudio=null;D.speech=null;caption.textContent='';box.classList.remove('is-speaking');
+   D.resolveAudio=null;D.speech=null;caption.textContent='';$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';box.classList.remove('is-speaking');
   }
  }
 }
@@ -841,9 +824,10 @@ function frameDuel(now){
     if(age>=attack&&age<attack+hold)mouth=wordGestures(word.text)[0]||'A';
    }
    const sentence=index>=0?plan.sentences.find(q=>index>=q.first&&index<=q.last):plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
-   const caption=$('duel'+name+'Caption');
+   const caption=$('duelGlobalText');
    const wanted=sentence&&!(index<0&&completed===sentence.last)?sentence.text:'';
-   if(caption.textContent!==wanted){caption.textContent=wanted;caption.classList.remove('enter');if(wanted){void caption.offsetWidth;caption.classList.add('enter')}}
+   if(caption.textContent!==wanted)caption.textContent=wanted;
+   if(wanted)$('duelGlobalSpeaker').textContent=duelName(D.batchCharacters?.[side]||duelActive()?.[side]);
   }
   const preferred=keyMap[mouth]?.[closed?'closed':'open'];
   const key=(preferred&&images.has(preferred)?preferred:null)||(images.has(keyMap[mouth]?.[closed?'open':'closed'])?keyMap[mouth][closed?'open':'closed']:null)||(['idleOpen','idleClosed',...slotList.map(x=>x[0])].find(k=>images.has(k))||null);
@@ -854,6 +838,90 @@ function frameDuel(now){
   ctx.clearRect(0,0,w,h);ctx.drawImage(image,(w-dw)/2,(h-dh)/2,dw,dh);D.pose[side]=key;
  }
 }
+
+
+const BG_KEY='persona-studio-backgrounds-v1',BG={items:[],urls:new Map(),scene:null};
+function backgroundItems(){try{const a=JSON.parse(localStorage.getItem(BG_KEY)||'[]');return Array.isArray(a)?a:[]}catch{return []}}
+function saveBackgroundItems(){try{localStorage.setItem(BG_KEY,JSON.stringify(BG.items))}catch{toast('No se pudo guardar la lista de fondos.',true)}}
+async function loadBackgroundLibrary(){
+ BG.items=backgroundItems();S.db=S.db||await openDB();if(!S.db)return;
+ for(const item of BG.items){
+  if(BG.urls.has(item.id))continue;
+  const blob=await new Promise(resolve=>{try{const q=S.db.transaction('sprites','readonly').objectStore('sprites').get('bg:'+item.id);q.onsuccess=()=>resolve(q.result);q.onerror=()=>resolve(null)}catch{resolve(null)}});
+  if(blob instanceof Blob)BG.urls.set(item.id,URL.createObjectURL(blob));
+ }
+ applyIndividualBackground();applyDuelBackgrounds();
+}
+function backgroundIdForProfile(id){return allProfileData()[id]?.settings?.backgroundId||''}
+function setBackgroundStyle(el,id){const u=BG.urls.get(id);el.style.backgroundImage=u?'linear-gradient(#07132120,#07132120),url("'+u+'")':'';el.style.backgroundSize='cover';el.style.backgroundPosition='center'}
+function applyIndividualBackground(){setBackgroundStyle($('stageSurface'),backgroundIdForProfile(S.activeProfile))}
+function applyDuelBackgrounds(){const t=duelActive();if(!t)return;setBackgroundStyle($('duelLeftBackground'),t.leftBackgroundId);setBackgroundStyle($('duelRightBackground'),t.rightBackgroundId)}
+function fillSceneBackgrounds(selected){
+ const el=$('sceneBackground');el.replaceChildren();
+ const first=document.createElement('option');first.value='';first.textContent='Sin fondo';el.append(first);
+ for(const x of BG.items){const option=document.createElement('option');option.value=x.id;option.textContent=x.name;el.append(option)}
+ el.value=BG.items.some(x=>x.id===selected)?selected:'';
+}
+function openSceneChooser(kind){
+ BG.scene={kind};const t=duelActive(),single=kind==='individual';
+ const select=$('sceneCharacter');select.replaceChildren();
+ for(const x of profileIndex()){const opt=document.createElement('option');opt.value=x.id;opt.textContent=x.name;select.append(opt)}
+ select.value=single?S.activeProfile:(t?.[kind]||'');
+ fillSceneBackgrounds(single?backgroundIdForProfile(S.activeProfile):(t?.[kind+'BackgroundId']||''));
+ $('sceneModalTitle').textContent=single?'Escenario individual':kind==='left'?'Cuadro izquierdo':'Cuadro derecho';
+ $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';$('sceneNotice').textContent='';
+ $('sceneModal').hidden=false;
+}
+function closeSceneChooser(){BG.scene=null;$('sceneModal').hidden=true}
+$('sceneClose').onclick=closeSceneChooser;$('sceneCancel').onclick=closeSceneChooser;
+$('sceneModal').addEventListener('click',e=>{if(e.target===$('sceneModal'))closeSceneChooser()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sceneModal').hidden){e.stopPropagation();closeSceneChooser()}});
+$('stageSurface').addEventListener('click',()=>openSceneChooser('individual'));
+$('stageSurface').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSceneChooser('individual')}});
+for(const [id,kind] of [['duelLeftBox','left'],['duelRightBox','right']]){
+ $(id).addEventListener('click',()=>openSceneChooser(kind));
+ $(id).addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSceneChooser(kind)}});
+}
+$('sceneSaveBackground').onclick=async()=>{
+ const name=$('sceneBackgroundName').value.trim().slice(0,70),file=$('sceneBackgroundFile').files?.[0];
+ if(!name||!file)return $('sceneNotice').textContent='Poné un nombre y elegí una imagen.';
+ if(!file.type.startsWith('image/')||file.size>12*1024*1024)return $('sceneNotice').textContent='Usá una imagen de hasta 12 MB.';
+ S.db=S.db||await openDB();if(!S.db)return $('sceneNotice').textContent='No está disponible el almacenamiento del navegador.';
+ const id='bg_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+ try{
+  await new Promise((res,rej)=>{const q=S.db.transaction('sprites','readwrite').objectStore('sprites').put(file,'bg:'+id);q.onsuccess=res;q.onerror=()=>rej(Error('No se pudo guardar la imagen'))});
+  BG.items.push({id,name});saveBackgroundItems();BG.urls.set(id,URL.createObjectURL(file));
+  fillSceneBackgrounds(id);$('sceneNotice').textContent='Fondo guardado: '+name;
+  $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';
+ }catch(e){$('sceneNotice').textContent=e.message}
+};
+$('sceneDeleteBackground').onclick=()=>{
+ const id=$('sceneBackground').value;if(!id||!confirm('¿Eliminar este fondo de la biblioteca?'))return;
+ BG.items=BG.items.filter(x=>x.id!==id);saveBackgroundItems();
+ const u=BG.urls.get(id);BG.urls.delete(id);
+ const all=allProfileData();for(const x of Object.values(all))if(x.settings?.backgroundId===id)x.settings.backgroundId='';
+ storeProfileData(all);
+ for(const t of D.topics)for(const k of ['leftBackgroundId','rightBackgroundId'])if(t[k]===id)t[k]='';
+ saveDuel();fillSceneBackgrounds('');applyIndividualBackground();applyDuelBackgrounds();
+ if(u)URL.revokeObjectURL(u);if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete('bg:'+id)}catch{}
+ $('sceneNotice').textContent='Fondo eliminado.';
+};
+$('sceneApply').onclick=async()=>{
+ if(!BG.scene)return;
+ const kind=BG.scene.kind,id=$('sceneCharacter').value,bg=$('sceneBackground').value;
+ if(!id||!profileIndex().some(p=>p.id===id))return $('sceneNotice').textContent='El personaje es obligatorio.';
+ if(kind==='individual'){
+  if(id!==S.activeProfile)await switchProfile(id);
+  const all=allProfileData(),profile=all[id]||(all[id]={settings:{},history:[]});
+  profile.settings=profile.settings||{};profile.settings.backgroundId=bg;storeProfileData(all);applyIndividualBackground();
+ }else{
+  const t=duelActive();if(!t)return;
+  t[kind]=id;t[kind+'BackgroundId']=bg;saveDuel();
+  if(!D.running)loadDuelSprites(kind,id);
+  $('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id);applyDuelBackgrounds();
+ }
+ closeSceneChooser();
+};
 
 function getVoice(){const voices=('speechSynthesis'in window?speechSynthesis.getVoices():[]);return voices.find(v=>v.voiceURI===$('voiceSelect').value)||voices.find(v=>v.lang==='es-AR')||voices.find(v=>v.lang.startsWith('es'))||null}
 $('voiceSelect').addEventListener('change',persist);
@@ -1376,7 +1444,7 @@ function updateSpriteDiagnostic(){
 }
 
 function frame(now){
- if($('appShell').dataset.duelMode==='true')frameDuel(now);
+ if(D.running||$('appShell').dataset.duelMode==='true')frameDuel(now);
  if($('autoBlink').checked&&now>=S.nextBlink&&!S.blink){S.blink=true;S.blinkUntil=now+105+Math.random()*50;S.nextBlink=now+2850+Math.random()*4400}
  if(S.blink&&now>=S.blinkUntil)S.blink=false;
  let blink=S.blink,mouth='closed',word=-1;
@@ -1400,7 +1468,7 @@ if(!microphoneEnvironment().holdToTalk){
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
 migrateWorkspaceOnce();populateProfiles();
 try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
-populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();requestAnimationFrame(frame);status('Listo para conversar');
+populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();loadBackgroundLibrary();requestAnimationFrame(frame);status('Listo para conversar');
 window.PERSONA_STUDIO_TEST={getConversationModel,getTranscriptionModel,microphoneEnvironment,ensureMicrophone,paintSprite,wordsOf,vowelsOf,wordGestures,buildSpeechPlan,speechPose,parseSSE,enqueueSpeak,stopAll,beginPTT,endPTT,getState:()=>({speaking:S.speaking,word:S.activeSpeech?S.activeSpeech.plan.words[speechPose(performance.now()).word]?.text:null,viseme:S.currentViseme,visibleSprite:currentVisibleSprite,queue:S.speechQueue.length,loaded:S.files.size,listening:S.listening,held:S.pttHeld,transcribing:S.transcribing,history:S.history.length,pose:S.lastPose,currentSprite:currentVisibleSprite,visible:spriteLayer.style.display==='grid'||$('demoFace').style.display!=='none',canvas:!!spriteCanvas.width,environment:microphoneEnvironment()}),addSprite,manual,previewTextSilently:(text)=>{stopAll();S.previewSilentOnce=true;enqueueSpeak(text)}};
 })();
 </script>
