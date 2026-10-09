@@ -132,6 +132,22 @@
  .shell[data-duel-mode="true"] #mobileTalk{display:none}
 }
 @media(prefers-reduced-motion:reduce){.duel-caption.enter{animation:none}}
+
+.duel-caption{display:none!important}
+.duel-global-caption{display:none;min-height:58px;max-height:106px;flex:0 0 auto;padding:9px 15px;margin:0 10px 8px;border-radius:12px;border:1px solid #435b76;background:#111d2de8;align-items:center;justify-content:center;gap:9px;text-align:center;overflow:hidden;overflow-wrap:anywhere}
+.duel-global-caption strong{font-size:11px;color:#8aebca;flex:0 0 auto}
+.duel-global-caption span{font-size:clamp(12px,1.7vw,19px);font-weight:700;line-height:1.35}
+.shell[data-duel-mode="true"] .duel-global-caption{display:flex}
+.duel-character,.stage-surface{cursor:pointer}
+.duel-character:focus-visible,.stage-surface:focus-visible{outline:2px solid #81edd0;outline-offset:-3px}
+.duel-avatar{border-radius:10px;overflow:hidden;background-size:cover;background-position:center;background-repeat:no-repeat}
+.stage-surface{background-size:cover;background-position:center;background-repeat:no-repeat;border-radius:10px}
+.scene-modal[hidden]{display:none!important}
+.scene-modal{position:fixed;inset:0;z-index:100;background:#02070dc9;display:grid;place-items:center;padding:16px}
+.scene-dialog{width:min(480px,100%);max-height:90dvh;overflow:auto;background:#132132;border:1px solid #527183;border-radius:16px;padding:18px;box-shadow:0 25px 70px #000c}
+.scene-dialog-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:19px;font-size:17px}
+.scene-dialog .field select,.scene-dialog .field input{font-size:15px}
+@media(max-width:960px){.duel-global-caption{margin:0 6px 6px;padding:5px 8px;min-height:49px;max-height:80px;flex-direction:column;gap:1px}.duel-global-caption span{font-size:12px}.duel-global-caption strong{font-size:10px}}
 </style>
 </head>
 <body>
@@ -161,8 +177,7 @@
         <div class="field"><label for="duelTitle">Título</label><input id="duelTitle" maxlength="100" placeholder="Ej.: Una discusión inesperada"></div>
         <div class="field"><label for="duelTheme">Temática de la conversación</label><textarea id="duelTheme" rows="5" maxlength="2500" placeholder="Situación, conflicto, lugar y asunto que van a discutir..."></textarea></div>
         <div class="section-heading">Participantes</div>
-        <div class="field"><label for="duelLeftSelect">Personaje de la izquierda</label><select id="duelLeftSelect"></select></div>
-        <div class="field"><label for="duelRightSelect">Personaje de la derecha</label><select id="duelRightSelect"></select></div>
+        <div class="hint">Tocá cada cuadro del escenario para elegir su personaje y su fondo.</div>
         <div class="field"><label for="duelLimit">Intervenciones por tanda (ambos sumados)</label><input type="number" id="duelLimit" min="1" max="30" step="1" value="6"></div>
         <div class="hint">Al completar la tanda, esperan tu siguiente intervención. Cada 30 mensajes de los personajes se actualiza un resumen.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
@@ -222,7 +237,7 @@
   <main class="middle">
     <div class="stage-header"><div><h1 id="stageName">Mi personaje</h1><small>Escenario · Avatar conversacional en vivo</small></div><div class="stage-header-actions"><button type="button" class="btn small ghost" id="previewMouth" title="Comprobar las bocas sin audio ni Gemini">▶ Boca</button><div id="statusBadge" class="pill"><span class="orb"></span><span id="statusText">Listo para conversar</span></div></div></div>
     <div class="stage-body">
-      <div class="stage-surface" id="stageSurface">
+      <div class="stage-surface" id="stageSurface" title="Tocá para elegir personaje y fondo" tabindex="0" role="button" aria-label="Elegir personaje y fondo del escenario individual">
         <div class="stage-glow"></div>
         <div id="spriteFrame" class="sprite-frame">
           <img id="avatarImg" alt="Avatar animado" draggable="false">
@@ -249,17 +264,18 @@
       <div class="caption-area"><div class="subtitle" id="liveSubtitle">Un personaje esperando su primera conversación.</div><div class="caption-note" id="captionNote">Configurá Gemini o probá el modo demo sin API.</div></div>
     </div>
     <div class="duel-stage" id="duelStage">
-      <div class="duel-character" id="duelLeftBox">
+      <div class="duel-character" id="duelLeftBox" role="button" tabindex="0" aria-label="Elegir personaje y fondo izquierdos">
         <div class="duel-character-name" id="duelLeftName">Izquierda</div>
-        <div class="duel-avatar"><canvas id="duelLeftCanvas" aria-label="Avatar izquierdo"></canvas><div class="duel-placeholder" id="duelLeftPlaceholder">◉</div></div>
+        <div class="duel-avatar" id="duelLeftBackground"><canvas id="duelLeftCanvas" aria-label="Avatar izquierdo"></canvas><div class="duel-placeholder" id="duelLeftPlaceholder">◉</div></div>
         <div class="duel-caption" id="duelLeftCaption"></div>
       </div>
-      <div class="duel-character" id="duelRightBox">
+      <div class="duel-character" id="duelRightBox" role="button" tabindex="0" aria-label="Elegir personaje y fondo derechos">
         <div class="duel-character-name" id="duelRightName">Derecha</div>
-        <div class="duel-avatar"><canvas id="duelRightCanvas" aria-label="Avatar derecho"></canvas><div class="duel-placeholder" id="duelRightPlaceholder">◉</div></div>
+        <div class="duel-avatar" id="duelRightBackground"><canvas id="duelRightCanvas" aria-label="Avatar derecho"></canvas><div class="duel-placeholder" id="duelRightPlaceholder">◉</div></div>
         <div class="duel-caption" id="duelRightCaption"></div>
       </div>
     </div>
+    <div id="duelGlobalCaption" class="duel-global-caption" aria-live="polite"><strong id="duelGlobalSpeaker"></strong><span id="duelGlobalText"></span></div>
     <div class="stage-foot"><button id="talkButton" class="btn primary space-button" type="button">🎙 Mantené para hablar</button><div class="foot-hint">Mantené <b>ESPACIO</b> mientras hablás.<br><b>Soltá</b> y Gemini recibe tu mensaje. <b>Esc</b> cancela.</div></div>
     <div id="toast" class="toast" role="status"></div>
   </main>
@@ -283,6 +299,19 @@
     <button type="button" id="mobileSettings" class="mobile-tab" aria-pressed="false">⚙ Ajustes</button>
     <button type="button" id="mobileTalk" class="btn primary mobile-talk">🎙 Mantener</button>
   </nav>
+</div>
+<div id="sceneModal" class="scene-modal" hidden role="dialog" aria-modal="true" aria-labelledby="sceneModalTitle">
+  <div class="scene-dialog">
+    <div class="scene-dialog-top"><strong id="sceneModalTitle">Elegir personaje y fondo</strong><button id="sceneClose" type="button" class="btn small ghost" aria-label="Cerrar">✕</button></div>
+    <div class="field"><label for="sceneCharacter">Personaje (obligatorio)</label><select id="sceneCharacter"></select></div>
+    <div class="field"><label for="sceneBackground">Fondo (opcional)</label><select id="sceneBackground"></select></div>
+    <div class="section-heading">Guardar un fondo nuevo</div>
+    <div class="field"><label for="sceneBackgroundName">Nombre del fondo</label><input id="sceneBackgroundName" maxlength="70" placeholder="Ej.: Oficina, playa, living…"></div>
+    <div class="field"><label for="sceneBackgroundFile">Imagen de fondo</label><input id="sceneBackgroundFile" type="file" accept="image/*" style="display:block;width:100%"></div>
+    <div class="button-row"><button type="button" id="sceneSaveBackground" class="btn small">+ Guardar fondo</button><button type="button" id="sceneDeleteBackground" class="btn small danger">Eliminar fondo elegido</button></div>
+    <div class="button-row" style="margin-top:17px;justify-content:flex-end"><button type="button" id="sceneCancel" class="btn small ghost">Cancelar</button><button type="button" id="sceneApply" class="btn primary">Aplicar</button></div>
+    <div id="sceneNotice" class="hint" role="status" style="margin-top:10px"></div>
+  </div>
 </div>
 <script>
 (()=>{'use strict';
