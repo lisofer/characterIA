@@ -76,13 +76,49 @@
 }
 
 @media(max-width:680px){.settings .field input,.settings .field textarea,.settings .field select{font-size:16px}.settings{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px)}#fishStatus{overflow-wrap:anywhere}.sample-actions{grid-template-columns:1fr 1fr}}
+
+.tabs{display:flex;gap:5px;padding:0 14px 12px;flex-shrink:0}
+.tab{flex:1;min-width:0;padding:9px 2px;border:1px solid transparent;border-radius:9px;background:#172231;color:#a6b9ca;font-size:11px;font-weight:700;cursor:pointer}
+.tab.active{color:#b9ffe6;border-color:#3b6d63;background:#1d3b3a}
+.tab:hover:not(.active){color:#f1fff8;background:#233445}
+.stage-divider{display:none}
+@media(max-width:960px){
+ .middle{flex:0 0 var(--stage-height,42dvh);height:var(--stage-height,42dvh);min-height:160px;order:0}
+ .stage-divider{order:1;display:flex;align-items:center;justify-content:center;height:16px;flex:0 0 16px;cursor:row-resize;touch-action:none;user-select:none;background:#152233;border-top:1px solid #35495d;border-bottom:1px solid #35495d;position:relative;z-index:5}
+ .stage-divider-grip{width:58px;height:5px;background:#79cdb9;border-radius:20px;box-shadow:0 0 0 4px #6bdec614}
+ .stage-divider:focus-visible{outline:2px solid var(--mint);outline-offset:-2px}
+ .stage-divider.dragging{background:#224238}
+ .sprite-frame{width:min(94vw,calc(var(--stage-height,42dvh) - 96px),520px);height:min(94vw,calc(var(--stage-height,42dvh) - 96px),520px);max-height:100%;max-width:100%}
+ .chat,.rail{order:2}
+ .tabs{padding:4px 10px 10px;gap:4px}
+ .tab{font-size:12px;padding:10px 1px}
+}
+@media(max-width:380px){.tab{font-size:11px}}
+@media(max-width:960px) and (orientation:landscape){
+ .middle{flex:0 0 var(--stage-height,56dvh);height:var(--stage-height,56dvh)}
+ .sprite-frame{width:min(50vw,calc(var(--stage-height,56dvh) - 96px),520px);height:min(50vw,calc(var(--stage-height,56dvh) - 96px),520px)}
+}
 </style>
 </head>
 <body>
 <div class="shell" id="appShell" data-mobile-pane="chat">
   <aside class="rail">
-    <div class="brand"><div class="mark">◉</div><div><strong>Persona Studio <span style="color:var(--mint);font-size:10px">3.1 · Privado</span></strong><small>Gemini · Personaje animado</small></div></div>
-    <div class="settings">
+    <div class="brand"><div class="mark">◉</div><div><strong>Persona Studio <span style="color:var(--mint);font-size:10px">3.1 · Privado</span></strong><small>Personajes · Gemini · Avatar</small></div></div>
+    <nav class="tabs" aria-label="Configuración del personaje">
+      <button type="button" class="tab" data-tab="profiles">Perfiles</button>
+      <button type="button" class="tab active" data-tab="brain">Cerebro</button>
+      <button type="button" class="tab" data-tab="sprites">Avatar</button>
+      <button type="button" class="tab" data-tab="speech">Voz</button>
+    </nav>
+    <div class="settings" id="settingsPanel">
+      <section id="tab-profiles" class="setting-tab">
+        <div class="field"><label for="profileSelect">Personaje</label><select id="profileSelect"></select></div>
+        <div class="button-row">
+          <button id="profileNew" class="btn primary small" type="button">+ Nuevo personaje</button>
+          <button id="profileDuplicate" class="btn small" type="button">Duplicar</button>
+          <button id="profileDelete" class="btn small danger" type="button">Eliminar</button>
+        </div>
+      </section>
       <section id="tab-brain" class="setting-tab active">
         <div class="section-heading">Conexión a Gemini</div>
         <div class="field"><label for="model">Modelo</label><select id="model"><option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite · rápido / económico</option><option value="gemini-3.8-flash">Gemini 3.8 Flash · respuestas más elaboradas</option><option value="gemini-3.5-flash">Gemini 3.5 Flash</option><option value="custom">Otro modelo…</option></select><input id="customModel" placeholder="Identificador del modelo" style="display:none" /></div>
@@ -93,7 +129,7 @@
         <div class="button-row"><button id="demoButton" class="btn primary" type="button">▶ Probar sin API</button><button id="clearChat" class="btn ghost" type="button">↺ Reiniciar charla</button></div>
         <div class="section-heading">Cómo funciona</div><div class="callout"><strong>La respuesta de Gemini controla el avatar.</strong><br>El texto determina las vocales y los movimientos de boca. El micrófono solamente sirve para transformar lo que decís en texto; no gobierna ninguna animación.</div>
       </section>
-      <section id="tab-sprites" class="setting-tab active">
+      <section id="tab-sprites" class="setting-tab">
         <div class="section-heading set-divider"><span>Ocho estados PNG</span><small id="spriteCount">0 / 8</small></div>
         <p class="hint" style="margin:3px 0 13px">Cargá cada imagen desde la <strong>misma pose y encuadre</strong>. Tocá una casilla o arrastrá un PNG encima.</p>
         <div class="sprite-grid" id="spriteGrid"></div>
@@ -102,7 +138,7 @@
         <input type="file" id="packInput" accept="application/json,.json"><input type="file" id="spriteInput" accept="image/png,image/webp,image/gif,image/jpeg">
         <p class="hint" style="margin-top:13px">Los sprites se guardan localmente en tu navegador (si permite almacenamiento), sin subir las imágenes a Gemini.</p>
       </section>
-      <section id="tab-speech" class="setting-tab active">
+      <section id="tab-speech" class="setting-tab">
         <div class="section-heading">Sincronización desde texto</div>
         <div class="field"><div class="field-line"><label for="mouthIntensity">Actividad labial (menos = más natural)</label><output id="mouthIntensityValue" class="param-value">45%</output></div><input id="mouthIntensity" type="range" min="20" max="85" step="5" value="45"></div>
         <div class="field"><div class="field-line"><label for="voiceDelay">Adelanto visual</label><output id="voiceDelayValue" class="param-value">0 ms</output></div><input id="voiceDelay" type="range" min="-100" max="160" step="10" value="0"></div>
@@ -147,6 +183,7 @@
     <div class="stage-foot"><button id="talkButton" class="btn primary space-button" type="button">🎙 Mantené para hablar</button><div class="foot-hint">Mantené <b>ESPACIO</b> mientras hablás.<br><b>Soltá</b> y Gemini recibe tu mensaje. <b>Esc</b> cancela.</div></div>
     <div id="toast" class="toast" role="status"></div>
   </main>
+  <div id="stageDivider" class="stage-divider" role="separator" aria-label="Ajustar tamaño del personaje" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="75" aria-valuenow="42" tabindex="0" title="Arrastrá para cambiar el tamaño del personaje"><span class="stage-divider-grip"></span></div>
   <aside class="chat">
     <div class="chat-head"><div><strong>Conversación</strong><small>Contexto de la charla · Respuestas en vivo</small></div><div class="chat-actions"><button id="stopButton" class="btn small ghost" title="Detener voz y respuesta">■ Detener</button></div></div>
     <div class="messages" id="messages" aria-live="polite"><div class="empty-chat" id="emptyChat"><strong>Tu personaje está listo para actuar.</strong><br><br>1. Escribí un prompt que defina su personalidad.<br>2. Conectá Gemini desde Railway Variables (o usá «Probar sin API»).<br>3. Mantené Espacio para hablar y soltá para enviar (o escribile).<br><br>La boca seguirá <strong>el texto que pronuncia</strong>, no el sonido que capta tu micrófono.</div></div>
@@ -161,7 +198,7 @@
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
-const S={files:new Map(),urls:new Map(),db:null,history:[],currentViseme:'REPOSO',previewSilentOnce:false,narrationBusy:false,fishAbort:null,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
+const S={files:new Map(),urls:new Map(),db:null,history:[],activeProfile:'default',profiles:[],currentViseme:'REPOSO',previewSilentOnce:false,narrationBusy:false,fishAbort:null,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
 const settingsIds=['model','customModel','characterName','persona','creativity','mouthIntensity','voiceDelay'];
 const slotList=[['aClosed','Ojos cerrados','Boca A'],['aOpen','Ojos abiertos','Boca A'],['idleClosed','Ojos cerrados','Boca cerrada'],['idleOpen','Ojos abiertos','Boca cerrada'],['oClosed','Ojos cerrados','Boca O'],['oOpen','Ojos abiertos','Boca O'],['eClosed','Ojos cerrados','Boca E'],['eOpen','Ojos abiertos','Boca E']];
 const keyMap={closed:{open:'idleOpen',closed:'idleClosed'},A:{open:'aOpen',closed:'aClosed'},O:{open:'oOpen',closed:'oClosed'},E:{open:'eOpen',closed:'eClosed'}};
@@ -170,14 +207,27 @@ const escapeName=s=>String(s||'').trim().slice(0,80);
 function toast(msg,error=false){const e=$('toast');e.textContent=msg;e.className='toast show'+(error?' error':'');clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>e.className='toast',5200)}
 function status(msg,kind=''){const b=$('statusBadge');b.className='pill '+kind;$('statusText').textContent=msg}
 function saved(){const o={};for(const id of settingsIds){const el=$(id);if(el)o[id]=el.value}return o}
-function workspace(){try{const current=JSON.parse(localStorage.getItem('persona-studio-workspace-v1')||'null');if(current)return current;const old=JSON.parse(localStorage.getItem('persona-studio-profiles-v3')||'{}');return old.default||{}}catch{return {}}}
-function persist(){try{localStorage.setItem('persona-studio-workspace-v1',JSON.stringify({settings:saved(),history:S.history.slice(-100)}))}catch{toast('No se pudo guardar la configuración.',true)}}
+function allProfileData(){try{return JSON.parse(localStorage.getItem('persona-studio-profiles-v3')||'{}')||{}}catch{return {}}}
+function storeProfileData(d){try{localStorage.setItem('persona-studio-profiles-v3',JSON.stringify(d))}catch{toast('No se pudieron guardar los personajes.',true)}}
+function migrateWorkspaceOnce(){
+ try{
+  if(localStorage.getItem('persona-studio-workspace-migrated-v1'))return;
+  const recent=JSON.parse(localStorage.getItem('persona-studio-workspace-v1')||'null');
+  if(recent){const all=allProfileData(),prev=all.default||{};all.default={...prev,settings:{...prev.settings,...recent.settings},history:Array.isArray(recent.history)?recent.history:(prev.history||[])};storeProfileData(all)}
+  localStorage.setItem('persona-studio-workspace-migrated-v1','1');
+ }catch{}
+}
+function persist(){
+ const all=allProfileData(),previous=all[S.activeProfile]||{};
+ all[S.activeProfile]={...previous,settings:{...previous.settings,...saved()},history:S.history.slice(-100)};
+ storeProfileData(all);
+}
 // Older Studio versions saved Gemini 2.5 models. Google may reject these for new API users.
 const MODEL_MIGRATIONS={'gemini-2.5-flash-lite':'gemini-3.5-flash-lite','gemini-2.5-flash':'gemini-3.8-flash','gemini-3-flash-preview':'gemini-3.8-flash'};
 function restore(){
- const old=workspace(),values=old.settings||{};let globals={};
+ const old=allProfileData()[S.activeProfile]||{},values=old.settings||{};let globals={};
  try{globals=JSON.parse(localStorage.getItem('persona-studio-global-v3')||'{}')}catch{}
- for(const id of settingsIds){const el=$(id);if(!el)continue;const val=(id==='model'||id==='customModel')?(globals[id]??values[id]):values[id];if(val!==undefined)el.value=val}
+ for(const id of settingsIds){const el=$(id);if(!el)continue;const val=(id==='model'||id==='customModel')?(globals[id]??values[id]):values[id];if(val!==undefined)el.value=val;else if(id==='characterName')el.value='Mi personaje';else if(id==='persona')el.value='Sos un personaje con una voz y una personalidad propias. Hablá de forma natural.';else if(id==='creativity')el.value='0.85';else if(id==='mouthIntensity')el.value='45';else if(id==='voiceDelay')el.value='0'}
  const m=$('model');if(MODEL_MIGRATIONS[m.value])m.value=MODEL_MIGRATIONS[m.value];
  if(!m.value)m.value='gemini-3.5-flash-lite';
  if(m.value==='custom'&&MODEL_MIGRATIONS[$('customModel').value.trim()])$('customModel').value=MODEL_MIGRATIONS[$('customModel').value.trim()];
@@ -188,10 +238,32 @@ function getTranscriptionModel(){return 'gemini-3.5-flash-lite'}
 
 function updateFields(){$('customModel').style.display=$('model').value==='custom'?'block':'none';$('stageName').textContent=$('characterName').value.trim()||'Mi personaje';$('creativityValue').textContent=Number($('creativity').value).toFixed(2);$('mouthIntensityValue').textContent=$('mouthIntensity').value+'%';$('voiceDelayValue').textContent=$('voiceDelay').value+' ms'}
 for(const id of settingsIds){$(id).addEventListener('input',()=>{updateFields();persist()});$(id).addEventListener('change',()=>{updateFields();persist()})}
+function openTab(tab){
+ document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
+ document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
+ $('settingsPanel').scrollTop=0;
+}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
-async function loadSavedSprites(){S.db=await openDB();if(!S.db)return;try{const store=S.db.transaction('sprites','readonly').objectStore('sprites');for(const [key] of slotList){const req=store.get('default:'+key);req.onsuccess=()=>{if(req.result instanceof Blob)addSprite(key,req.result,false);else{const old=store.get(key);old.onsuccess=()=>{if(old.result instanceof Blob)addSprite(key,old.result,true)}}}}}catch{}}
-function saveSprite(key,blob){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(blob,'default:'+key)}catch{toast('No se pudieron guardar las imágenes. Revisá el espacio disponible.',true)}}
-function removeSavedSprite(key){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete('default:'+key)}catch{}}
+async function loadSavedSprites(){
+ S.db=S.db||await openDB();if(!S.db)return;
+ const profile=S.activeProfile;
+ try{
+  const store=S.db.transaction('sprites','readonly').objectStore('sprites');
+  for(const [key] of slotList){
+   const request=store.get(profile+':'+key);
+   request.onsuccess=()=>{
+    if(S.activeProfile!==profile)return;
+    if(request.result instanceof Blob)addSprite(key,request.result,false);
+    else if(profile==='default'){
+     try{const oldStore=S.db.transaction('sprites','readonly').objectStore('sprites');const prior=oldStore.get(key);prior.onsuccess=()=>{if(S.activeProfile===profile&&prior.result instanceof Blob)addSprite(key,prior.result,false)}}catch{}
+    }
+   };
+  }
+ }catch{}
+}
+function saveSprite(key,blob){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(blob,S.activeProfile+':'+key)}catch{toast('No se pudieron guardar las imágenes. Revisá el espacio disponible.',true)}}
+function removeSavedSprite(key){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':'+key)}catch{}}
 function updateSpriteCards(){for(const [key] of slotList){const card=document.querySelector(`[data-sprite="${key}"]`);const preview=card.querySelector('.slot-preview');const src=S.urls.get(key);const img=preview.querySelector('img');if(src){if(!img){const newImg=document.createElement('img');newImg.alt='Estado del avatar';preview.appendChild(newImg);preview.querySelector('.empty-icon').style.display='none'}preview.querySelector('img').src=src}else{img?.remove();preview.querySelector('.empty-icon').style.display='block'}}$('spriteCount').textContent=`${S.files.size} / 8`}
 function addSprite(key,blob,persistBlob=true){if(!keyMap.A.open||!slotList.some(x=>x[0]===key))return;if(!blob.type.startsWith('image/'))return toast('Usá un PNG, WebP, GIF o JPG válido.',true);if(blob.size>14*1024*1024)return toast('Cada imagen debe pesar menos de 14 MB.',true);const old=S.urls.get(key);if(old)URL.revokeObjectURL(old);S.files.set(key,blob);S.urls.set(key,URL.createObjectURL(blob));const preload=new Image();preload.src=S.urls.get(key);preload.decode?.().catch(()=>{});if(persistBlob)saveSprite(key,blob);updateSpriteCards();syncStageSprites();updateSpriteDiagnostic();S.lastPose='';toast('Imagen cargada. El motor la usará en su estado correspondiente.')}
 function deleteSprite(key){const old=S.urls.get(key);if(old)URL.revokeObjectURL(old);S.urls.delete(key);S.files.delete(key);removeSavedSprite(key);updateSpriteCards();syncStageSprites();updateSpriteDiagnostic();S.lastPose=''}
@@ -208,6 +280,55 @@ function renderHistory(){
  $('messages').replaceChildren(); if(!S.history.length){const e=document.createElement('div');e.className='empty-chat';e.id='emptyChat';e.textContent='Escribí un mensaje o mantené pulsado para hablar.';$('messages').append(e);return}
  for(const item of S.history){if(!item?.parts)continue;const txt=item.parts.map(x=>x.text||'').join('');if(txt)appendMessage(item.role==='user'?'user':'assistant',txt)}
 }
+function profileIndex(){try{const p=JSON.parse(localStorage.getItem('persona-studio-profile-index-v3')||'[]');return Array.isArray(p)?p:[]}catch{return []}}
+function saveProfileIndex(list){try{localStorage.setItem('persona-studio-profile-index-v3',JSON.stringify(list))}catch{toast('No se pudieron guardar los personajes.',true)}}
+function populateProfiles(){
+ let names=profileIndex();if(!names.length){names=[{id:'default',name:'Mi personaje'}];saveProfileIndex(names)}
+ S.profiles=names;if(!names.some(p=>p.id===S.activeProfile))S.activeProfile=names[0].id;
+ const select=$('profileSelect');select.replaceChildren();
+ for(const p of names){const option=document.createElement('option');option.value=p.id;option.textContent=p.name;select.append(option)}
+ select.value=S.activeProfile;
+}
+function clearCurrentSprites(){for(const u of S.urls.values())URL.revokeObjectURL(u);S.urls.clear();S.files.clear();updateSpriteCards();syncStageSprites();updateSpriteDiagnostic();S.lastPose=''}
+async function switchProfile(id){
+ if(id===S.activeProfile||!S.profiles.some(p=>p.id===id))return;
+ stopAll();persist();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();
+ toast('Personaje seleccionado: '+$('characterName').value);
+}
+$('profileSelect').addEventListener('change',e=>switchProfile(e.target.value));
+$('profileNew').onclick=async()=>{
+ const name=prompt('Nombre del nuevo personaje:','Nuevo personaje');if(!name?.trim())return;
+ persist();const id='profile_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+ const title=name.trim().slice(0,60),names=profileIndex();names.push({id,name:title});saveProfileIndex(names);
+ stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
+ clearCurrentSprites();S.history=[];restore();$('characterName').value=title;updateFields();persist();populateProfiles();renderHistory();
+ toast('Personaje creado.');
+};
+$('profileDuplicate').onclick=async()=>{
+ const title=prompt('Nombre de la copia:',$('characterName').value+' (copia)');if(!title?.trim())return;
+ persist();const id='profile_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+ const name=title.trim().slice(0,60),data=allProfileData();
+ data[id]=JSON.parse(JSON.stringify(data[S.activeProfile]||{settings:saved(),history:[]}));
+ data[id].settings={...(data[id].settings||{}),characterName:name};storeProfileData(data);
+ const list=profileIndex();list.push({id,name});saveProfileIndex(list);
+ if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key)}catch{}
+ stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();toast('Personaje duplicado.');
+};
+$('profileDelete').onclick=async()=>{
+ if(S.profiles.length<=1)return toast('Debe quedar al menos un personaje.',true);
+ if(!confirm('¿Eliminar este personaje, sus imágenes PNG y su conversación?'))return;
+ const id=S.activeProfile;stopAll();const list=profileIndex().filter(p=>p.id!==id);saveProfileIndex(list);
+ const data=allProfileData();delete data[id];storeProfileData(data);
+ if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key] of slotList)tx.objectStore('sprites').delete(id+':'+key);tx.objectStore('sprites').delete(id+':voiceSample')}catch{}
+ S.activeProfile=list[0].id;localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();toast('Personaje eliminado.');
+};
+$('characterName').addEventListener('change',()=>{
+ const list=profileIndex(),p=list.find(x=>x.id===S.activeProfile);
+ if(!p)return;p.name=$('characterName').value.trim()||'Mi personaje';saveProfileIndex(list);populateProfiles();
+});
 function getVoice(){const voices=('speechSynthesis'in window?speechSynthesis.getVoices():[]);return voices.find(v=>v.lang==='es-AR')||voices.find(v=>v.lang.startsWith('es'))||null}
 function wordsOf(text){return [...text.matchAll(/[\p{L}\p{N}]+(?:[-’'][\p{L}\p{N}]+)*/gu)].map(m=>({text:m[0],index:m.index}))}
 function normalized(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ü/g,'u')}
@@ -468,11 +589,49 @@ function switchMobilePane(pane){
 }
 $('mobileChat').onclick=()=>switchMobilePane('chat');
 $('mobileSettings').onclick=()=>switchMobilePane('settings');
+const divider=$('stageDivider'),shell=$('appShell'),stage=shell.querySelector('.middle');
+let stageDrag=null;
+function setStageShare(fraction,save=true){
+ const h=shell.clientHeight,dock=document.querySelector('.mobile-dock').offsetHeight||70;
+ const available=Math.max(280,h-dock-16),minHeight=Math.min(210,Math.max(150,available*.26));
+ const maxHeight=Math.max(minHeight,available-Math.max(175,available*.23));
+ const target=Math.round(Math.min(maxHeight,Math.max(minHeight,h*fraction)));
+ shell.style.setProperty('--stage-height',target+'px');
+ divider.setAttribute('aria-valuenow',String(Math.round(100*target/Math.max(1,h))));
+ if(save)try{localStorage.setItem('persona-studio-stage-share-v1',String(target/Math.max(1,h)))}catch{}
+}
+if(window.matchMedia('(max-width:960px)').matches){
+ let fraction=.42;try{fraction=Number(localStorage.getItem('persona-studio-stage-share-v1'))||.42}catch{}
+ setStageShare(fraction,false);
+}
+divider.addEventListener('pointerdown',e=>{
+ if(e.pointerType==='mouse'&&e.button!==0)return;
+ stageDrag={id:e.pointerId,y:e.clientY,top:stage.getBoundingClientRect().height};
+ divider.setPointerCapture?.(e.pointerId);divider.classList.add('dragging');e.preventDefault();
+});
+divider.addEventListener('pointermove',e=>{
+ if(!stageDrag||e.pointerId!==stageDrag.id)return;
+ setStageShare((stageDrag.top+e.clientY-stageDrag.y)/Math.max(1,shell.clientHeight));e.preventDefault();
+});
+function endStageDrag(){stageDrag=null;divider.classList.remove('dragging')}
+divider.addEventListener('pointerup',endStageDrag);divider.addEventListener('pointercancel',endStageDrag);
+divider.addEventListener('lostpointercapture',endStageDrag);
+divider.addEventListener('keydown',e=>{
+ if(!['ArrowUp','ArrowDown','Home','End'].includes(e.key))return;
+ e.preventDefault();let next=stage.getBoundingClientRect().height/shell.clientHeight;
+ if(e.key==='Home')next=.2;else if(e.key==='End')next=.78;else next+=(e.key==='ArrowDown'?.04:-.04);
+ setStageShare(next);
+});
+window.addEventListener('resize',()=>{
+ if(!window.matchMedia('(max-width:960px)').matches)return;
+ let fraction=.42;try{fraction=Number(localStorage.getItem('persona-studio-stage-share-v1'))||.42}catch{}
+ setStageShare(fraction,false);
+});
 
 $('stopButton').onclick=()=>{stopAll();toast('Reproducción detenida.')};$('sendButton').onclick=()=>sendMessage($('chatInput').value);$('demoButton').onclick=playDemo;
 $('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage($('chatInput').value)}});
 $('clearChat').onclick=()=>{if(S.history.length&&!confirm('¿Empezar otra conversación sin contexto anterior?'))return;stopAll();S.history=[];persist();$('messages').replaceChildren();$('liveSubtitle').textContent='Listo para una nueva historia.';toast('Conversación reiniciada.')};
-$('stageSurface').addEventListener('dragover',e=>e.preventDefault());$('stageSurface').addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer?.files?.[0];if(f?.type.startsWith('image/')){addSprite('idleOpen',f);if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('settings');$('tab-sprites').scrollIntoView({block:'start',behavior:'smooth'});toast('Imagen cargada en reposo. Completá las siete expresiones restantes.')}});
+$('stageSurface').addEventListener('dragover',e=>e.preventDefault());$('stageSurface').addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer?.files?.[0];if(f?.type.startsWith('image/')){addSprite('idleOpen',f);if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('settings');openTab('sprites');toast('Imagen cargada en reposo. Completá las siete expresiones restantes.')}});
 const spriteLayer=document.createElement('div');
 spriteLayer.id='spriteLayer';spriteLayer.className='sprite-layer';
 $('spriteFrame').insertBefore(spriteLayer,$('demoFace'));
@@ -579,7 +738,9 @@ if(!microphoneEnvironment().holdToTalk){
  $('micPermissionButton').textContent='⚠ Revisar micrófono';
 } 
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
-restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites();requestAnimationFrame(frame);status('Listo para conversar');
+migrateWorkspaceOnce();populateProfiles();
+try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
+populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites();requestAnimationFrame(frame);status('Listo para conversar');
 window.PERSONA_STUDIO_TEST={getConversationModel,getTranscriptionModel,microphoneEnvironment,ensureMicrophone,paintSprite,wordsOf,vowelsOf,wordGestures,buildSpeechPlan,speechPose,parseSSE,enqueueSpeak,stopAll,beginPTT,endPTT,getState:()=>({speaking:S.speaking,word:S.activeSpeech?S.activeSpeech.plan.words[speechPose(performance.now()).word]?.text:null,viseme:S.currentViseme,visibleSprite:currentVisibleSprite,queue:S.speechQueue.length,loaded:S.files.size,listening:S.listening,held:S.pttHeld,transcribing:S.transcribing,history:S.history.length,pose:S.lastPose,currentSprite:currentVisibleSprite,visible:spriteLayer.style.display==='grid'||$('demoFace').style.display!=='none',canvas:!!spriteCanvas.width,environment:microphoneEnvironment()}),addSprite,manual,previewTextSilently:(text)=>{stopAll();S.previewSilentOnce=true;enqueueSpeak(text)}};
 })();
 </script>
