@@ -471,7 +471,7 @@ $('mobileSettings').onclick=()=>switchMobilePane('settings');
 $('stopButton').onclick=()=>{stopAll();toast('Reproducción detenida.')};$('sendButton').onclick=()=>sendMessage($('chatInput').value);$('demoButton').onclick=playDemo;
 $('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage($('chatInput').value)}});
 $('clearChat').onclick=()=>{if(S.history.length&&!confirm('¿Empezar otra conversación sin contexto anterior?'))return;stopAll();S.history=[];persist();$('messages').replaceChildren();$('liveSubtitle').textContent='Listo para una nueva historia.';toast('Conversación reiniciada.')};
-$('stageSurface').addEventListener('dragover',e=>e.preventDefault());$('stageSurface').addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer?.files?.[0];if(f?.type.startsWith('image/')){addSprite('idleOpen',f);document.querySelector('[data-tab="sprites"]').click();toast('Imagen cargada en reposo. Completá las siete expresiones restantes.')}});
+$('stageSurface').addEventListener('dragover',e=>e.preventDefault());$('stageSurface').addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer?.files?.[0];if(f?.type.startsWith('image/')){addSprite('idleOpen',f);if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('settings');$('tab-sprites').scrollIntoView({block:'start',behavior:'smooth'});toast('Imagen cargada en reposo. Completá las siete expresiones restantes.')}});
 const spriteLayer=document.createElement('div');
 spriteLayer.id='spriteLayer';spriteLayer.className='sprite-layer';
 $('spriteFrame').insertBefore(spriteLayer,$('demoFace'));
