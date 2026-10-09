@@ -591,6 +591,7 @@ $('duelExport').onclick=()=>{
 };
 function stopDuel(){
  D.generation++;D.running=false;D.abort?.abort();D.abort=null;
+ for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
@@ -683,68 +684,90 @@ async function duelSample(id){
   }catch{resolve(null)}
  });
 }
-async function duelVoice(t,side,text,token){
- const pref=duelProfile(t[side]),provider=pref.voiceProvider||'fish';
- const rate=Number(pref.rate)||1;
- const speech={side,text,plan:duelSpeechPlan(text,rate),ready:false,started:0,audio:null,visibleSentence:-1,rate,delay:Number(pref.voiceDelay)||0,intensity:Number(pref.mouthIntensity||45)};
+
+function primeDuelAudio(t,token){
+ if(!D.running||D.generation!==token)return;
+ // Precalentar como máximo los siguientes cuatro turnos; solo dos peticiones Fish simultáneas.
+ for(const entry of (t.pending||[]).slice(0,4)){
+  if(D.audioInFlight>=2)break;
+  if(D.audioJobs.has(entry.id))continue;
+  const cfg=D.batchProfiles?.[entry.side]||duelProfile(entry.profileId);
+  if(cfg.voiceProvider==='browser'){D.audioJobs.set(entry.id,{promise:Promise.resolve({browser:true})});continue}
+  const ctrl=new AbortController();D.audioControllers.add(ctrl);D.audioInFlight++;
+  const task=(async()=>{
+   const body={text:entry.text,format:'mp3',speed:Number(cfg.rate)||1,latency:cfg.fishLatency||'balanced',temperature:Number(cfg.fishTemperature)||.7};
+   const sample=D.batchSamples?.[entry.side]??await duelSample(entry.profileId);
+   if(sample){
+    const words=String(cfg.fishTranscript||'').trim();
+    if(!words)throw Error('Falta la transcripción de la muestra de '+duelName(entry.profileId));
+    const encoded=await readBlob(sample);body.reference_audio=encoded.split(',')[1];body.reference_mime=sample.type||'audio/mpeg';body.reference_text=words;
+   }
+   if(ctrl.signal.aborted)throw Error('Síntesis cancelada');
+   const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+   if(!res.ok){const error=await res.json().catch(()=>({}));throw Error('Fish: '+(error.error||res.statusText))}
+   const blob=await res.blob();if(!blob.size)throw Error('Fish devolvió audio vacío');
+   return {blob};
+  })().catch(error=>({error})).finally(()=>{
+   D.audioControllers.delete(ctrl);D.audioInFlight=Math.max(0,D.audioInFlight-1);
+   if(D.generation===token&&D.running)primeDuelAudio(t,token);
+  });
+  D.audioJobs.set(entry.id,{promise:task,controller:ctrl});
+ }
+}
+async function duelVoice(t,side,text,token,entry){
+ const cfg=D.batchProfiles?.[side]||duelProfile(entry.profileId),rate=Number(cfg.rate)||1;
+ const speech={side,text,plan:duelSpeechPlan(text,rate),ready:false,started:0,audio:null,rate,delay:Number(cfg.voiceDelay)||0,intensity:Number(cfg.mouthIntensity||45)};
  D.speech=speech;
- const name=side==='left'?'Left':'Right';
- const box=$('duel'+name+'Box'),caption=$('duel'+name+'Caption');
- for(const s of ['Left','Right']){$('duel'+s+'Box').classList.toggle('is-speaking',s===name);$('duel'+s+'Caption').textContent=''}
- const useBrowser=async()=>{
-  if(!('speechSynthesis'in window))return;
-  const utterance=new SpeechSynthesisUtterance(text);utterance.lang='es-AR';utterance.rate=rate;
-  utterance.pitch=Number(pref.pitch)||1;
+ const label=side==='left'?'Left':'Right',box=$('duel'+label+'Box');
+ for(const n of ['Left','Right']){$('duel'+n+'Box').classList.toggle('is-speaking',n===label);$('duel'+n+'Caption').textContent=''}
+ $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+ const browser=async()=>{
+  if(!('speechSynthesis'in window))throw Error('No se puede reproducir la voz en este navegador.');
+  const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=rate;u.pitch=Number(cfg.pitch)||1;
   await new Promise((resolve,reject)=>{
-   D.resolveAudio=resolve;
-   utterance.onstart=()=>{speech.started=performance.now();speech.ready=true};
-   utterance.onend=resolve;utterance.onerror=e=>reject(Error('Voz del navegador: '+e.error));
-   try{speechSynthesis.speak(utterance)}catch(e){reject(e)}
+   let finished=false;const done=()=>{if(finished)return;finished=true;resolve()};
+   D.resolveAudio=done;
+   u.onstart=()=>{if(D.generation===token){speech.started=performance.now();speech.ready=true}};
+   u.onend=done;u.onerror=e=>reject(Error('Voz local: '+e.error));
+   try{speechSynthesis.speak(u)}catch(error){reject(error)}
   });
  };
+ let url=null;
  try{
-  if(provider==='browser'){await useBrowser();return}
-  const body={text,format:'mp3',speed:rate,latency:pref.fishLatency||'balanced',temperature:Number(pref.fishTemperature)||.7};
-  const blob=await duelSample(t[side]);if(D.generation!==token)return;
-  if(blob){
-   if(!String(pref.fishTranscript||'').trim())throw Error('Falta transcribir la muestra de voz de '+duelName(t[side]));
-   const data=await readBlob(blob);body.reference_audio=data.split(',')[1];body.reference_mime=blob.type||'audio/mpeg';body.reference_text=pref.fishTranscript;
-  }
-  const controller=new AbortController();D.abort=controller;
-  let sound;
-  try{
-   const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
-   if(!res.ok){const detail=await res.json().catch(()=>({}));throw Error('Fish: '+(detail.error||res.statusText))}
-   sound=await res.blob();if(!sound.size)throw Error('Audio Fish vacío');
-  }finally{if(D.abort===controller)D.abort=null}
-  if(D.generation!==token)return;
-  const uri=URL.createObjectURL(sound),audio=new Audio(uri);speech.audio=audio;D.audio=audio;
+  const job=D.audioJobs.get(entry.id),out=job?await job.promise:{browser:true};
+  if(D.generation!==token||!D.running)return;
+  if(out.browser||cfg.voiceProvider==='browser'){await browser();return}
+  if(out.error)throw out.error;
+  if(!out.blob)throw Error('Fish todavía no preparó esta frase.');
+  url=URL.createObjectURL(out.blob);const audio=new Audio(url);D.audio=audio;speech.audio=audio;
   await new Promise((resolve,reject)=>{
-   D.resolveAudio=resolve;
+   let finished=false;const done=()=>{if(finished)return;finished=true;resolve()};
+   D.resolveAudio=done;
    audio.onloadedmetadata=()=>{
     if(Number.isFinite(audio.duration)&&audio.duration>0){
      const factor=audio.duration*1000/Math.max(1,speech.plan.total);
-     speech.plan.offsets=speech.plan.offsets.map(n=>n*factor);
-     speech.plan.lengths=speech.plan.lengths.map(n=>n*factor);
+     speech.plan.offsets=speech.plan.offsets.map(x=>x*factor);
+     speech.plan.lengths=speech.plan.lengths.map(x=>x*factor);
      speech.plan.total=audio.duration*1000;
     }
    };
-   audio.onplay=()=>{speech.started=performance.now();speech.ready=true};
-   audio.onended=resolve;audio.onerror=()=>reject(Error('No se pudo reproducir la voz de Fish'));
+   audio.onplay=()=>{if(D.generation===token){speech.started=performance.now();speech.ready=true}};
+   audio.onended=done;audio.onerror=()=>reject(Error('Error al reproducir audio Fish'));
    audio.play().catch(reject);
   });
-  URL.revokeObjectURL(uri);D.audio=null;
  }catch(error){
-  if(D.generation!==token)return;
-  if(pref.fishFallback!==false){await useBrowser()}
+  if(D.generation!==token||!D.running)return;
+  if(cfg.fishFallback!==false&&cfg.voiceProvider!=='browser')await browser();
   else throw error;
  }finally{
+  if(url)URL.revokeObjectURL(url);
   if(D.generation===token){
-   D.resolveAudio=null;D.speech=null;caption.textContent='';$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';box.classList.remove('is-speaking');
+   D.audio=null;D.resolveAudio=null;D.speech=null;
+   $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+   box.classList.remove('is-speaking');
   }
  }
 }
-
 async function runDuelBatch(){
  if(D.running)return;
  duelSyncInputs();
@@ -788,6 +811,11 @@ async function runDuelBatch(){
    D.batchProfiles=t.pendingConfig||{left:duelProfile(D.batchCharacters.left),right:duelProfile(D.batchCharacters.right)};
    duelStatus('Retomando '+t.pending.length+' intervenciones ya generadas…');
   }
+  D.batchSamples={
+   left:await duelSample(D.batchCharacters.left),
+   right:await duelSample(D.batchCharacters.right)
+  };
+  if(token!==D.generation||!D.running)return;
   primeDuelAudio(t,token);
   while(t.pending?.length&&D.running&&token===D.generation){
    const entry=t.pending[0];
@@ -808,7 +836,7 @@ async function runDuelBatch(){
   if(token===D.generation){
    D.running=false;D.abort=null;D.audio=null;D.speech=null;
    for(const controller of D.audioControllers)controller.abort();
-   D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
+   D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
    $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
   }
  }
