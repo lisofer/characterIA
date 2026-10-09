@@ -448,10 +448,21 @@ function highlightWord(i){
  $('liveSubtitle').querySelector(`.word[data-index="${i}"]`)?.classList.add('current');S.lastHighlighted=i;
 }
 function syncSpeechSubtitle(speech,index){
- const sentence=index<0?null:speech.plan.sentences.find(x=>index>=x.first&&index<=x.last);
- if(!sentence){clearSpeechSubtitle();return}
+ // Las pausas entre palabras y las comas conservan el subtítulo de la oración.
+ // Solo desaparece al completar la última palabra de esa oración.
+ if(!speech.ready||(speech.audio&&speech.audio.paused)){clearSpeechSubtitle();return}
+ const plan=speech.plan;let lastWord=index;
+ if(index<0){
+  const currentMs=Math.max(0,(speech.audio?speech.audio.currentTime*1000:performance.now()-speech.started)+Number($('voiceDelay').value));
+  for(let i=0;i<plan.words.length;i++){
+   if(currentMs>=plan.offsets[i]+plan.lengths[i])lastWord=i;
+   else break;
+  }
+ }
+ const sentence=lastWord<0?null:plan.sentences.find(x=>lastWord>=x.first&&lastWord<=x.last);
+ if(!sentence||(index<0&&lastWord===sentence.last)){clearSpeechSubtitle();return}
  if(speech.visibleSentence!==sentence.first){renderSubtitle(sentence.text,sentence.first);speech.visibleSentence=sentence.first}
- highlightWord(index);
+ if(index>=0)highlightWord(index);
 }
 function wordGestures(word){
  const spelling=typeof word==='string'?word:word?.text||'';const chunks=vowelsOf(spelling), clean=normalized(spelling);
