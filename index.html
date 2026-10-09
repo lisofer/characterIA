@@ -779,6 +779,7 @@ async function runDuelBatch(){
   if(!t.title.trim()||!t.theme.trim())return toast('Completá el título y la temática.',true);
   if(!profileIndex().some(p=>p.id===t.left)||!profileIndex().some(p=>p.id===t.right))return toast('Seleccioná perfiles existentes.',true);
  }
+ stopAll(); // Detener solo una voz individual anterior, nunca un debate en curso.
  D.running=true;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
@@ -1130,7 +1131,7 @@ async function checkFishServer(){
  }catch(err){$('fishStatus').textContent='⚠ No se pudo comprobar Fish: '+err.message;return false}
 }
 $('checkFishServer').onclick=checkFishServer;
-$('testFish').onclick=()=>{stopAll();enqueueSpeak('Hola, soy '+($('characterName').value||'tu personaje')+'. Esta es mi voz con Fish Audio.')};
+$('testFish').onclick=()=>{if(D.running)return toast('Probá la voz al terminar la tanda.',true);stopAll();enqueueSpeak('Hola, soy '+($('characterName').value||'tu personaje')+'. Esta es mi voz con Fish Audio.')};
 
 function primeFishQueue(){
  if($('voiceProvider').value!=='fish'||!$('enableSpeech').checked)return;
@@ -1218,7 +1219,7 @@ function playBrowser(job){if(!('speechSynthesis'in window))return animateSilentl
 }
 function animateSilently(job){const speech={text:job.text,plan:buildSpeechPlan(job.text),started:performance.now(),ready:true,visibleSentence:null,token:job.token};S.activeSpeech=speech;clearSpeechSubtitle();markSpeaking(true);$('captionNote').textContent='Animación por texto (voz desactivada)';setTimeout(()=>{if(job.token!==S.voiceToken)return;S.activeSpeech=null;clearSpeechSubtitle();markSpeaking(false);nextNarration()},speech.plan.total+300)}
 function enqueueSpeak(text){text=stripSpeech(text);if(!text)return;S.speechQueue.push({text,token:S.voiceToken});primeFishQueue();nextNarration()}
-function stopPlayback(){S.fishAbort?.abort();for(const ctrl of S.fishControllers)ctrl.abort();S.fishControllers.clear();S.fishAbort=null;S.fishAudio?.pause();S.fishAudio=null;if(S.fishAudioURL){URL.revokeObjectURL(S.fishAudioURL);S.fishAudioURL=null}S.narrationBusy=false;S.voiceToken++;S.speechQueue.length=0;S.activeSpeech=null;S.utterance=null;if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{};clearSpeechSubtitle();markSpeaking(false);S.lastPose=''}
+function stopPlayback(){S.fishAbort?.abort();for(const ctrl of S.fishControllers)ctrl.abort();S.fishControllers.clear();S.fishAbort=null;S.fishAudio?.pause();S.fishAudio=null;if(S.fishAudioURL){URL.revokeObjectURL(S.fishAudioURL);S.fishAudioURL=null}S.narrationBusy=false;S.voiceToken++;S.speechQueue.length=0;S.activeSpeech=null;S.utterance=null;if(!D.running&&'speechSynthesis'in window)try{speechSynthesis.cancel()}catch{};clearSpeechSubtitle();markSpeaking(false);S.lastPose=''}
 function stopAll(){S.requestId++;S.abort?.abort();S.abort=null;S.streaming=false;S.sttCtrl?.abort();S.sttCtrl=null;S.captureSeq++;S.pttSeq++;S.pttHeld=false;S.transcribing=false;
  if(S.mediaRecorder&&S.mediaRecorder.state!=='inactive'){try{S.mediaRecorder.onstop=null;S.mediaRecorder.stop()}catch{}}
  S.mediaRecorder=null;S.listening=false;S.micStream?.getAudioTracks().forEach(track=>track.enabled=false);updateTalkButton();stopPlayback();status('Interrumpido');$('interimTranscript').style.display='none'}
@@ -1235,7 +1236,7 @@ async function streamGemini(input,id){const model=getConversationModel();if(!/^[
  const reader=res.body.getReader();const decoder=new TextDecoder();let buf='',full='';const speakBuffer={value:''};const bubble=S.currentBubble;S.streaming=true;status('Gemini está respondiendo','think');
  while(true){const {done,value}=await reader.read();if(id!==S.requestId){try{reader.cancel()}catch{}break}buf+=decoder.decode(value||new Uint8Array(),{stream:!done}).replace(/\r\n/g,'\n');let end;while((end=buf.indexOf('\n\n'))>=0){const evt=buf.slice(0,end);buf=buf.slice(end+2);const piece=parseSSE(evt);if(piece){full+=piece;bubble.textContent=full;addChunk(piece,speakBuffer);$('messages').scrollTop=$('messages').scrollHeight}}if(done)break}
  if(buf.trim()){const piece=parseSSE(buf);if(piece){full+=piece;bubble.textContent=full;addChunk(piece,speakBuffer)}}addChunk('',speakBuffer,true);return full}
-async function sendMessage(text){text=String(text||'').trim();if(!text)return;stopAll();const id=S.requestId;appendMessage('user',text);$('chatInput').value='';const entry=appendMessage('assistant','',true);S.currentBubble=entry.bubble;status('Pensando…','think');S.streaming=true;S.abort=null;
+async function sendMessage(text){if(D.running)return toast('El debate sigue hablando. Escribí en la intervención de la próxima tanda.',true);text=String(text||'').trim();if(!text)return;stopAll();const id=S.requestId;appendMessage('user',text);$('chatInput').value='';const entry=appendMessage('assistant','',true);S.currentBubble=entry.bubble;status('Pensando…','think');S.streaming=true;S.abort=null;
  try{const reply=await streamGemini(text,id);if(id!==S.requestId)return;if(!reply.trim())throw Error('Gemini no devolvió texto. Probá otra vez.');S.history.push({role:'user',parts:[{text}]},{role:'model',parts:[{text:reply}]});S.history=S.history.slice(-100);persist();entry.el.classList.remove('pending');S.streaming=false;if(!S.speaking&&!S.speechQueue.length){status('Respuesta recibida')}}
  catch(e){if(id!==S.requestId)return;S.streaming=false;entry.el.classList.remove('pending');entry.bubble.textContent=`No se pudo responder. ${e.message}`;status('Error de conexión','err');toast(e.message,true)}finally{if(id===S.requestId){S.abort=null;if(S.speaking)status('Hablando','speak')}}}
 const demos=[
@@ -1243,7 +1244,7 @@ const demos=[
 'Bueno, a ver… yo diría que podemos montar una escena bastante divertida. Vos preguntás, yo respondo, y el personaje cobra vida.',
 'Imaginate una pareja discutiendo en un directo. Cada comentario del público cambia la historia, y nadie sabe cómo termina.'
 ];
-function playDemo(){stopAll();const text=demos[S.demoIndex++%demos.length];appendMessage('user','[Prueba local sin Gemini]');appendMessage('assistant',text);for(const s of text.match(/[^.!?]+[.!?]*/g)||[text])enqueueSpeak(s);status('Demo: hablando','speak');toast('Modo de demostración: no se está llamando a Gemini.')}
+function playDemo(){if(D.running)return toast('El debate sigue en curso.',true);stopAll();const text=demos[S.demoIndex++%demos.length];appendMessage('user','[Prueba local sin Gemini]');appendMessage('assistant',text);for(const s of text.match(/[^.!?]+[.!?]*/g)||[text])enqueueSpeak(s);status('Demo: hablando','speak');toast('Modo de demostración: no se está llamando a Gemini.')}
 function microphoneEnvironment(){
  const proto=location.protocol;
  const hasMedia=!!navigator.mediaDevices?.getUserMedia;
@@ -1320,6 +1321,7 @@ function updateTalkButton(){
  mb.textContent=S.listening?'● SOLTÁ PARA ENVIAR':S.pttHeld?'◌ Preparando…':S.transcribing?'◌ Transcribiendo…':'🎙 MANTENER';
 }
 async function beginPTT(){
+ if(D.running)return toast('El debate continúa; escribí para la próxima tanda.',true);
  if(S.pttHeld)return;
  if(!microphoneEnvironment().holdToTalk){
    micMessage(explainMicFailure(),true);
@@ -1540,8 +1542,8 @@ function frame(now){
 }
 function manual(mouth,blink=false){S.manual={mouth,blink,until:performance.now()+1050};S.lastPose=''};
 $('testA').onclick=()=>manual('A');$('testO').onclick=()=>manual('O');$('testE').onclick=()=>manual('E');$('testIdle').onclick=()=>manual('closed');$('testBlink').onclick=()=>manual('closed',true);
-$('testSpeak').onclick=()=>{stopAll();enqueueSpeak($('testText').value);toast('Frase de prueba: animación generada a partir del texto.')};
-$('previewMouth').onclick=()=>{stopAll();animateSilently({text:'Hola, ¿cómo estás? Ahora mis bocas A, O y E deberían moverse mientras hablo.',token:S.voiceToken});$('captionNote').textContent='Prueba visual · Sin voz ni Gemini';};
+$('testSpeak').onclick=()=>{if(D.running)return toast('Probá la voz al terminar la tanda.',true);stopAll();enqueueSpeak($('testText').value);toast('Frase de prueba: animación generada a partir del texto.')};
+$('previewMouth').onclick=()=>{if(D.running)return toast('El debate sigue en curso.',true);stopAll();animateSilently({text:'Hola, ¿cómo estás? Ahora mis bocas A, O y E deberían moverse mientras hablo.',token:S.voiceToken});$('captionNote').textContent='Prueba visual · Sin voz ni Gemini';};
 if(!microphoneEnvironment().holdToTalk){
  micMessage('El micrófono de pulsar y mantener no está disponible en esta ubicación. Abrí Persona Studio desde una página HTTPS en Chrome Android, o tocá «Grabar con el teléfono» para seleccionar una grabación.');
  $('micPermissionButton').textContent='⚠ Revisar micrófono';
