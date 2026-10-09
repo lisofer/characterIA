@@ -138,6 +138,24 @@
         <p class="hint" style="margin-top:13px">Los sprites se guardan localmente en tu navegador (si permite almacenamiento), sin subir las imágenes a Gemini.</p>
       </section>
       <section id="tab-speech" class="setting-tab">
+        <div class="section-heading">Fish Audio</div>
+        <div class="field"><label for="voiceProvider">Motor de voz</label><select id="voiceProvider"><option value="fish">Fish Audio · S2.1 Pro Free</option><option value="browser">Voz del navegador</option></select></div>
+        <div class="section-heading">Muestra de voz</div>
+        <div class="field"><label for="voiceSampleFile">Audio de referencia</label><input id="voiceSampleFile" type="file" accept="audio/*" style="display:block;width:100%"><div class="hint" id="voiceSampleInfo">Sin muestra cargada</div><div class="button-row"><button id="listenSample" type="button" class="btn small">▶ Escuchar muestra</button><button id="removeSample" type="button" class="btn small danger">Quitar muestra</button></div></div>
+        <div class="field"><label for="fishTranscript">Transcripción del audio</label><textarea id="fishTranscript" rows="4" placeholder="Escribí exactamente lo que se escucha en la muestra"></textarea></div>
+        <div class="field"><label for="fishLatency">Latencia</label><select id="fishLatency"><option value="balanced">Equilibrada</option><option value="low">Baja</option><option value="normal">Normal</option></select></div>
+        <div class="field"><div class="field-line"><label for="fishTemperature">Expresividad</label><output id="fishTemperatureValue" class="param-value">0.70</output></div><input id="fishTemperature" type="range" min="0.2" max="1" step="0.05" value="0.7"></div>
+        <div class="field"><label class="minitoggle"><input id="fishFallback" type="checkbox" checked> Usar voz del navegador si falla Fish</label></div>
+        <div class="button-row"><button id="testFish" type="button" class="btn primary small">▶ Probar voz</button><button id="checkFishServer" type="button" class="btn small">Comprobar conexión</button></div>
+        <div id="fishStatus" class="hint" style="margin:8px 0 14px" role="status" aria-live="polite"></div>
+        <div class="section-heading">Voz del navegador</div>
+        <div class="field"><label for="voiceSelect">Voz</label><select id="voiceSelect"><option value="">Voz automática en español</option></select></div>
+        <div class="field"><div class="field-line"><label for="rate">Velocidad de habla</label><output id="rateValue" class="param-value">1.00×</output></div><input id="rate" type="range" min="0.65" max="1.5" step="0.05" value="1"></div>
+        <div class="field"><div class="field-line"><label for="pitch">Tono</label><output id="pitchValue" class="param-value">1.00</output></div><input id="pitch" type="range" min="0.6" max="1.7" step="0.05" value="1"></div>
+        <div class="section-heading">Transcripción del micrófono</div>
+        <div class="field"><label for="transcriptionModel">Modelo</label><select id="transcriptionModel"><option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option><option value="gemini-3.8-flash">Gemini 3.8 Flash</option><option value="gemini-3.5-flash">Gemini 3.5 Flash</option><option value="same">Mismo modelo de conversación</option></select></div>
+        <div class="field"><label for="recognitionLang">Idioma</label><select id="recognitionLang"><option value="es-AR">Español (Argentina)</option><option value="es-ES">Español (España)</option><option value="en-US">Inglés (Estados Unidos)</option></select></div>
+        <div class="field"><label class="minitoggle"><input id="enableSpeech" type="checkbox" checked> Pronunciar las respuestas</label><label class="minitoggle"><input id="autoBlink" type="checkbox" checked> Parpadeo espontáneo</label></div>
         <div class="section-heading">Sincronización desde texto</div>
         <div class="field"><div class="field-line"><label for="mouthIntensity">Actividad labial (menos = más natural)</label><output id="mouthIntensityValue" class="param-value">45%</output></div><input id="mouthIntensity" type="range" min="20" max="85" step="5" value="45"></div>
         <div class="field"><div class="field-line"><label for="voiceDelay">Adelanto visual</label><output id="voiceDelayValue" class="param-value">0 ms</output></div><input id="voiceDelay" type="range" min="-100" max="160" step="10" value="0"></div>
@@ -197,15 +215,15 @@
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
-const S={files:new Map(),urls:new Map(),db:null,history:[],activeProfile:'default',profiles:[],currentViseme:'REPOSO',previewSilentOnce:false,narrationBusy:false,fishAbort:null,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
-const settingsIds=['model','customModel','characterName','persona','creativity','mouthIntensity','voiceDelay'];
+const S={files:new Map(),urls:new Map(),db:null,history:[],activeProfile:'default',profiles:[],currentViseme:'REPOSO',previewSilentOnce:false,referenceBlob:null,sampleAudio:null,narrationBusy:false,fishAbort:null,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
+const settingsIds=['model','customModel','characterName','persona','creativity','mouthIntensity','voiceDelay','voiceProvider','fishTranscript','fishLatency','fishTemperature','fishFallback','rate','pitch','transcriptionModel','recognitionLang','enableSpeech','autoBlink'];
 const slotList=[['aClosed','Ojos cerrados','Boca A'],['aOpen','Ojos abiertos','Boca A'],['idleClosed','Ojos cerrados','Boca cerrada'],['idleOpen','Ojos abiertos','Boca cerrada'],['oClosed','Ojos cerrados','Boca O'],['oOpen','Ojos abiertos','Boca O'],['eClosed','Ojos cerrados','Boca E'],['eOpen','Ojos abiertos','Boca E']];
 const keyMap={closed:{open:'idleOpen',closed:'idleClosed'},A:{open:'aOpen',closed:'aClosed'},O:{open:'oOpen',closed:'oClosed'},E:{open:'eOpen',closed:'eClosed'}};
 const stripSpeech=t=>String(t||'').replace(/```[\s\S]*?```/g,' ').replace(/\*\*|\*|[_#`~]/g,'').replace(/\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/\bhttps?:\/\/\S+/g,'').replace(/\s+/g,' ').trim();
 const escapeName=s=>String(s||'').trim().slice(0,80);
 function toast(msg,error=false){const e=$('toast');e.textContent=msg;e.className='toast show'+(error?' error':'');clearTimeout(S.toastTimer);S.toastTimer=setTimeout(()=>e.className='toast',5200)}
 function status(msg,kind=''){const b=$('statusBadge');b.className='pill '+kind;$('statusText').textContent=msg}
-function saved(){const o={};for(const id of settingsIds){const el=$(id);if(el)o[id]=el.value}return o}
+function saved(){const o={};for(const id of settingsIds){const el=$(id);if(el)o[id]=el.type==='checkbox'?el.checked:el.value}return o}
 function allProfileData(){try{return JSON.parse(localStorage.getItem('persona-studio-profiles-v3')||'{}')||{}}catch{return {}}}
 function storeProfileData(d){try{localStorage.setItem('persona-studio-profiles-v3',JSON.stringify(d))}catch{toast('No se pudieron guardar los personajes.',true)}}
 function migrateWorkspaceOnce(){
@@ -231,16 +249,21 @@ const MODEL_MIGRATIONS={'gemini-2.5-flash-lite':'gemini-3.5-flash-lite','gemini-
 function restore(){
  const old=allProfileData()[S.activeProfile]||{},values=old.settings||{};let globals={};
  try{globals=JSON.parse(localStorage.getItem('persona-studio-global-v3')||'{}')}catch{}
- for(const id of settingsIds){const el=$(id);if(!el)continue;const val=(id==='model'||id==='customModel')?(globals[id]??values[id]):values[id];if(val!==undefined)el.value=val;else if(id==='characterName')el.value='Mi personaje';else if(id==='persona')el.value='Sos un personaje con una voz y una personalidad propias. Hablá de forma natural.';else if(id==='creativity')el.value='0.85';else if(id==='mouthIntensity')el.value='45';else if(id==='voiceDelay')el.value='0'}
+ const defaults={characterName:'Mi personaje',persona:'Sos un personaje con una voz y una personalidad propias. Hablá de forma natural.',creativity:'0.85',mouthIntensity:'45',voiceDelay:'0',voiceProvider:'fish',fishTranscript:'',fishLatency:'balanced',fishTemperature:'0.7',fishFallback:true,rate:'1',pitch:'1',transcriptionModel:'gemini-3.5-flash-lite',recognitionLang:'es-AR',enableSpeech:true,autoBlink:true};
+  for(const id of settingsIds){
+   const el=$(id);if(!el)continue;
+   const val=(id==='model'||id==='customModel')?(globals[id]??values[id]):(values[id]??defaults[id]);
+   if(val!==undefined){if(el.type==='checkbox')el.checked=val===true||val==='true';else el.value=String(val)}
+  }
  const m=$('model');if(MODEL_MIGRATIONS[m.value])m.value=MODEL_MIGRATIONS[m.value];
  if(!m.value)m.value='gemini-3.5-flash-lite';
  if(m.value==='custom'&&MODEL_MIGRATIONS[$('customModel').value.trim()])$('customModel').value=MODEL_MIGRATIONS[$('customModel').value.trim()];
  S.history=Array.isArray(old.history)?old.history:[];renderHistory();updateFields();
 }
 function getConversationModel(){return $('model').value==='custom'?$('customModel').value.trim():$('model').value}
-function getTranscriptionModel(){return 'gemini-3.5-flash-lite'}
+function getTranscriptionModel(){return $('transcriptionModel').value==='same'?getConversationModel():$('transcriptionModel').value}
 
-function updateFields(){$('customModel').style.display=$('model').value==='custom'?'block':'none';$('stageName').textContent=$('characterName').value.trim()||'Mi personaje';$('creativityValue').textContent=Number($('creativity').value).toFixed(2);$('mouthIntensityValue').textContent=$('mouthIntensity').value+'%';$('voiceDelayValue').textContent=$('voiceDelay').value+' ms'}
+function updateFields(){$('customModel').style.display=$('model').value==='custom'?'block':'none';$('stageName').textContent=$('characterName').value.trim()||'Mi personaje';$('creativityValue').textContent=Number($('creativity').value).toFixed(2);$('mouthIntensityValue').textContent=$('mouthIntensity').value+'%';$('voiceDelayValue').textContent=$('voiceDelay').value+' ms';$('fishTemperatureValue').textContent=Number($('fishTemperature').value).toFixed(2);$('rateValue').textContent=Number($('rate').value).toFixed(2)+'×';$('pitchValue').textContent=Number($('pitch').value).toFixed(2);$('voiceSelect').disabled=$('voiceProvider').value==='fish'}
 for(const id of settingsIds){$(id).addEventListener('input',()=>{updateFields();persist()});$(id).addEventListener('change',()=>{updateFields();persist()})}
 function openTab(tab){
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
@@ -297,7 +320,7 @@ function clearCurrentSprites(){for(const u of S.urls.values())URL.revokeObjectUR
 async function switchProfile(id){
  if(id===S.activeProfile||!S.profiles.some(p=>p.id===id))return;
  stopAll();persist();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();
  toast('Personaje seleccionado: '+$('characterName').value);
 }
 $('profileSelect').addEventListener('change',e=>switchProfile(e.target.value));
@@ -306,7 +329,7 @@ $('profileNew').onclick=async()=>{
  persist();const id='profile_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
  const title=name.trim().slice(0,60),names=profileIndex();names.push({id,name:title});saveProfileIndex(names);
  stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();S.history=[];restore();$('characterName').value=title;updateFields();persist();populateProfiles();renderHistory();
+ clearCurrentSprites();S.referenceBlob=null;$('voiceSampleInfo').textContent='Sin muestra cargada';$('voiceSampleFile').value='';S.history=[];restore();$('characterName').value=title;updateFields();persist();populateProfiles();renderHistory();
  toast('Personaje creado.');
 };
 $('profileDuplicate').onclick=async()=>{
@@ -316,9 +339,9 @@ $('profileDuplicate').onclick=async()=>{
  data[id]=JSON.parse(JSON.stringify(data[S.activeProfile]||{settings:saved(),history:[]}));
  data[id].settings={...(data[id].settings||{}),characterName:name};storeProfileData(data);
  const list=profileIndex();list.push({id,name});saveProfileIndex(list);
- if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key)}catch{}
+ if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key);if(S.referenceBlob)tx.objectStore('sprites').put(S.referenceBlob,id+':voiceSample')}catch{}
  stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();toast('Personaje duplicado.');
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();toast('Personaje duplicado.');
 };
 $('profileDelete').onclick=async()=>{
  if(S.profiles.length<=1)return toast('Debe quedar al menos un personaje.',true);
@@ -327,18 +350,60 @@ $('profileDelete').onclick=async()=>{
  const data=allProfileData();delete data[id];storeProfileData(data);
  if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key] of slotList)tx.objectStore('sprites').delete(id+':'+key);tx.objectStore('sprites').delete(id+':voiceSample')}catch{}
  S.activeProfile=list[0].id;localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
- clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();toast('Personaje eliminado.');
+ clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();toast('Personaje eliminado.');
 };
 $('characterName').addEventListener('change',()=>{
  const list=profileIndex(),p=list.find(x=>x.id===S.activeProfile);
  if(!p)return;p.name=$('characterName').value.trim()||'Mi personaje';saveProfileIndex(list);populateProfiles();
 });
-function getVoice(){const voices=('speechSynthesis'in window?speechSynthesis.getVoices():[]);return voices.find(v=>v.lang==='es-AR')||voices.find(v=>v.lang.startsWith('es'))||null}
+async function loadReferenceSample(){
+ const profile=S.activeProfile;S.referenceBlob=null;$('voiceSampleInfo').textContent='Sin muestra cargada';
+ if(!S.db)return;
+ try{
+  const blob=await new Promise(resolve=>{
+   const req=S.db.transaction('sprites','readonly').objectStore('sprites').get(profile+':voiceSample');
+   req.onsuccess=()=>resolve(req.result);req.onerror=()=>resolve(null);
+  });
+  if(S.activeProfile!==profile)return;
+  if(blob instanceof Blob){S.referenceBlob=blob;$('voiceSampleInfo').textContent='✓ Muestra guardada · '+Math.round(blob.size/1024)+' KB'}
+ }catch{}
+}
+$('voiceSampleFile').onchange=async e=>{
+ const file=e.target.files?.[0];if(!file)return;
+ if(file.size>12*1024*1024)return toast('La muestra debe pesar menos de 12 MB.',true);
+ S.referenceBlob=file;if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(file,S.activeProfile+':voiceSample')}catch{toast('No se pudo guardar el audio.',true)}
+ $('voiceSampleInfo').textContent='✓ '+file.name+' · '+Math.round(file.size/1024)+' KB';
+ toast('Muestra guardada en este personaje.');
+};
+$('removeSample').onclick=()=>{
+ S.referenceBlob=null;S.sampleAudio?.pause();S.sampleAudio=null;
+ if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':voiceSample')}catch{}
+ $('voiceSampleInfo').textContent='Sin muestra cargada';$('voiceSampleFile').value='';
+};
+$('listenSample').onclick=()=>{
+ if(!S.referenceBlob)return toast('Cargá una muestra primero.',true);
+ S.sampleAudio?.pause();
+ const url=URL.createObjectURL(S.referenceBlob),audio=new Audio(url);S.sampleAudio=audio;
+ audio.onended=()=>URL.revokeObjectURL(url);audio.onerror=()=>URL.revokeObjectURL(url);
+ audio.play().catch(e=>{URL.revokeObjectURL(url);toast('No se pudo reproducir la muestra: '+e.message,true)});
+};
+function initVoices(){
+ if(!('speechSynthesis'in window))return;
+ const previous=$('voiceSelect').value;
+ const list=[...speechSynthesis.getVoices()].sort((a,b)=>Number(b.lang.startsWith('es'))-Number(a.lang.startsWith('es'))||a.name.localeCompare(b.name));
+ const select=$('voiceSelect');select.replaceChildren();
+ const def=document.createElement('option');def.value='';def.textContent='Voz automática en español';select.append(def);
+ for(const v of list){const option=document.createElement('option');option.value=v.voiceURI;option.textContent=v.name+' · '+v.lang;select.append(option)}
+ select.value=list.some(v=>v.voiceURI===previous)?previous:'';
+}
+if('speechSynthesis'in window){initVoices();speechSynthesis.addEventListener?.('voiceschanged',initVoices)}
+function getVoice(){const voices=('speechSynthesis'in window?speechSynthesis.getVoices():[]);return voices.find(v=>v.voiceURI===$('voiceSelect').value)||voices.find(v=>v.lang==='es-AR')||voices.find(v=>v.lang.startsWith('es'))||null}
+$('voiceSelect').addEventListener('change',persist);
 function wordsOf(text){return [...text.matchAll(/[\p{L}\p{N}]+(?:[-’'][\p{L}\p{N}]+)*/gu)].map(m=>({text:m[0],index:m.index}))}
 function normalized(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ü/g,'u')}
 function vowelsOf(word){const clean=normalized(word);const matches=[];const re=/[aeiou]+/g;let m;while((m=re.exec(clean))!==null){const str=m[0];let dominant='A';if(/[a]/.test(str))dominant='A';else if(/[ou]/.test(str))dominant='O';else dominant='E';matches.push({v:dominant,pos:m.index})}return matches}
 function wordDuration(word,rate){return Math.min(800,Math.max(150,(115+word.text.length*47)/Number(rate||1)))}
-function buildSpeechPlan(text){const words=wordsOf(text);const lengths=words.map(w=>wordDuration(w,1));const offsets=[];let total=0;for(let i=0;i<words.length;i++){offsets.push(total);total+=lengths[i];const next=words[i+1];if(next){const between=text.slice(words[i].index+words[i].text.length,next.index);if(/[.!?]/.test(between))total+=260;else if(/[,;:]/.test(between))total+=100}}return {words,lengths,offsets,total}}
+function buildSpeechPlan(text){const words=wordsOf(text);const lengths=words.map(w=>wordDuration(w,Number($('rate').value)));const offsets=[];let total=0;for(let i=0;i<words.length;i++){offsets.push(total);total+=lengths[i];const next=words[i+1];if(next){const between=text.slice(words[i].index+words[i].text.length,next.index);if(/[.!?]/.test(between))total+=260;else if(/[,;:]/.test(between))total+=100}}return {words,lengths,offsets,total}}
 function renderSubtitle(text){const area=$('liveSubtitle');area.replaceChildren();const words=wordsOf(text);if(words.length){let cursor=0;for(let i=0;i<words.length;i++){const w=words[i];if(w.index>cursor)area.append(document.createTextNode(text.slice(cursor,w.index)));const span=document.createElement('span');span.className='word';span.textContent=w.text;span.dataset.index=String(i);area.append(span);cursor=w.index+w.text.length}if(cursor<text.length)area.append(document.createTextNode(text.slice(cursor)))}else area.textContent=text||'';S.lastHighlighted=-1}
 function highlightWord(i){if(S.lastHighlighted===i)return;const prev=$('liveSubtitle').querySelector(`.word.current`);prev?.classList.remove('current');$('liveSubtitle').querySelector(`.word[data-index="${i}"]`)?.classList.add('current');S.lastHighlighted=i}
 function wordGestures(word){
@@ -389,7 +454,27 @@ function speechPose(now){
  return {open,v:v==='closed'?'A':v,word:idx};
 }
 function markSpeaking(speaking){S.speaking=speaking;$('spriteFrame').classList.toggle('is-speaking',speaking);if(!S.listening)status(speaking?'Hablando':'Listo para conversar',speaking?'speak':'')}
-function fishVoicePayload(text){return {text,format:'mp3',speed:1,latency:'balanced',temperature:0.7}}
+async function fishVoicePayload(text){
+ const payload={text,format:'mp3',speed:Number($('rate').value),latency:$('fishLatency').value,temperature:Number($('fishTemperature').value)};
+ if(S.referenceBlob){
+  const transcript=$('fishTranscript').value.trim();
+  if(!transcript)throw Error('Ingresá la transcripción exacta de la muestra de voz.');
+  const base64=await readBlob(S.referenceBlob);
+  payload.reference_audio=base64.split(',')[1];payload.reference_mime=S.referenceBlob.type||'audio/mpeg';payload.reference_text=transcript;
+ }
+ return payload;
+}
+async function checkFishServer(){
+ try{
+  const response=await fetch('/api/health',{cache:'no-store'});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const info=await response.json();
+  $('fishStatus').textContent=info.fishKeyConfigured?'✓ Fish conectado · '+info.model:'⚠ Falta configurar Fish Audio en el servidor.';
+  return !!info.fishKeyConfigured;
+ }catch(err){$('fishStatus').textContent='⚠ No se pudo comprobar Fish: '+err.message;return false}
+}
+$('checkFishServer').onclick=checkFishServer;
+$('testFish').onclick=()=>{stopAll();enqueueSpeak('Hola, soy '+($('characterName').value||'tu personaje')+'. Esta es mi voz con Fish Audio.')};
 async function playFish(job){
  const token=job.token;S.narrationBusy=true;status('Generando voz Fish…','think');$('captionNote').textContent='Fish Audio está generando la voz del personaje…';const ctrl=new AbortController();S.fishAbort=ctrl;
  try{
@@ -400,12 +485,13 @@ async function playFish(job){
   const url=URL.createObjectURL(audioBlob),audio=new Audio(url);audio.preload='auto';S.fishAudio=audio;S.fishAudioURL=url;
   const speech={text:job.text,plan:buildSpeechPlan(job.text),started:0,hasBoundaries:false,wordAt:-1,token};S.activeSpeech=speech;renderSubtitle(job.text);
   await new Promise((resolve,reject)=>{const done=()=>{audio.onended=audio.onerror=null;resolve()};audio.onended=done;audio.onerror=()=>reject(Error('No se pudo reproducir el MP3 de Fish.'));audio.onloadedmetadata=()=>{if(Number.isFinite(audio.duration)&&audio.duration>0){const plan=speech.plan,factor=audio.duration*1000/Math.max(1,plan.total);plan.offsets=plan.offsets.map(x=>x*factor);plan.lengths=plan.lengths.map(x=>x*factor);plan.total=audio.duration*1000}};audio.onplay=()=>{speech.started=performance.now()-audio.currentTime*1000;markSpeaking(true);$('captionNote').textContent='Fish Audio · Boca sincronizada al texto';};audio.onpause=()=>{if(audio.ended)return;markSpeaking(false)};audio.play().catch(reject)});
- }catch(e){if(!ctrl.signal.aborted&&token===S.voiceToken){toast('Fish no pudo generar audio; usando voz local. '+e.message,true);S.narrationBusy=false;S.activeSpeech=null;S.fishFallbackInProgress=true;playBrowser(job);return }}
+ }catch(e){if(!ctrl.signal.aborted&&token===S.voiceToken){$('fishStatus').textContent='⚠ '+e.message;toast(e.message,true);
+  if($('fishFallback').checked){S.narrationBusy=false;S.activeSpeech=null;S.fishFallbackInProgress=true;playBrowser(job);return} }}
  finally{S.narrationBusy=false;S.fishAbort=null;if(S.fishFallbackInProgress){S.fishFallbackInProgress=false;return}S.activeSpeech=null;S.fishAudio?.pause();S.fishAudio=null;if(S.fishAudioURL){URL.revokeObjectURL(S.fishAudioURL);S.fishAudioURL=null}markSpeaking(false);if(token===S.voiceToken)nextNarration()}
 }
-function nextNarration(){if(S.narrationBusy)return;if(S.speaking||!S.speechQueue.length)return;const job=S.speechQueue.shift();if(job.token!==S.voiceToken)return nextNarration();if(S.previewSilentOnce){S.previewSilentOnce=false;return animateSilently(job)}return playFish(job)}
+function nextNarration(){if(S.narrationBusy)return;if(S.speaking||!S.speechQueue.length)return;const job=S.speechQueue.shift();if(job.token!==S.voiceToken)return nextNarration();if(S.previewSilentOnce){S.previewSilentOnce=false;return animateSilently(job)}if(!$('enableSpeech').checked)return animateSilently(job);if($('voiceProvider').value==='fish')return playFish(job);return playBrowser(job)}
 function playBrowser(job){if(!('speechSynthesis'in window))return animateSilently(job);
- const u=new SpeechSynthesisUtterance(job.text);const voice=getVoice();if(voice){u.voice=voice;u.lang=voice.lang}else u.lang='es-AR';u.rate=1;u.pitch=1;u.volume=1;
+ const u=new SpeechSynthesisUtterance(job.text);const voice=getVoice();if(voice){u.voice=voice;u.lang=voice.lang}else u.lang='es-AR';u.rate=Number($('rate').value);u.pitch=Number($('pitch').value);u.volume=1;
  const speech={text:job.text,plan:buildSpeechPlan(job.text),started:performance.now(),boundaryAt:0,wordAt:-1,hasBoundaries:false,token:job.token,realStart:false};S.utterance=u;S.activeSpeech=speech;markSpeaking(true);renderSubtitle(job.text);$('captionNote').textContent='Animación desde texto · Boca A / O / E';
  const finish=()=>{if(job.token!==S.voiceToken)return;S.utterance=null;S.activeSpeech=null;markSpeaking(false);if(!S.speechQueue.length&&!S.streaming){$('captionNote').textContent='Esperando tu siguiente pregunta.'}nextNarration()};
  u.onstart=()=>{if(job.token!==S.voiceToken)return;if(!speech.realStart){speech.started=performance.now();speech.realStart=true}markSpeaking(true);$('captionNote').textContent='Gemini → texto → voz → movimiento facial'};
@@ -556,7 +642,7 @@ async function transcribeAndSend(blob,seq){
   if(blob.size>15*1024*1024)throw Error('Audio demasiado largo; hablá en fragmentos más cortos.');
   if(!/^[a-z0-9_.-]+$/i.test(model))throw Error('Identificador de modelo inválido');
   const base64=await readAudio64(blob);if(seq!==S.pttSeq)return;
-  const lang='es-AR';
+  const lang=$('recognitionLang').value;
   const prompt=`Transcribí literalmente el audio en ${lang}. Devolvé solamente lo que escuchás, sin introducción, sin interpretación, sin comillas y sin comentarios. Si no hay habla reconocible, devolvé una cadena vacía.`;
   const response=await fetch('/api/gemini/transcribe',{
    method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,
@@ -722,7 +808,7 @@ function updateSpriteDiagnostic(){
 }
 
 function frame(now){
- if(now>=S.nextBlink&&!S.blink){S.blink=true;S.blinkUntil=now+105+Math.random()*50;S.nextBlink=now+2850+Math.random()*4400}
+ if($('autoBlink').checked&&now>=S.nextBlink&&!S.blink){S.blink=true;S.blinkUntil=now+105+Math.random()*50;S.nextBlink=now+2850+Math.random()*4400}
  if(S.blink&&now>=S.blinkUntil)S.blink=false;
  let blink=S.blink,mouth='closed',word=-1;
  if(S.manual&&now<S.manual.until){mouth=S.manual.mouth;blink=S.manual.blink}
@@ -745,7 +831,7 @@ if(!microphoneEnvironment().holdToTalk){
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
 migrateWorkspaceOnce();populateProfiles();
 try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
-populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites();requestAnimationFrame(frame);status('Listo para conversar');
+populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);requestAnimationFrame(frame);status('Listo para conversar');
 window.PERSONA_STUDIO_TEST={getConversationModel,getTranscriptionModel,microphoneEnvironment,ensureMicrophone,paintSprite,wordsOf,vowelsOf,wordGestures,buildSpeechPlan,speechPose,parseSSE,enqueueSpeak,stopAll,beginPTT,endPTT,getState:()=>({speaking:S.speaking,word:S.activeSpeech?S.activeSpeech.plan.words[speechPose(performance.now()).word]?.text:null,viseme:S.currentViseme,visibleSprite:currentVisibleSprite,queue:S.speechQueue.length,loaded:S.files.size,listening:S.listening,held:S.pttHeld,transcribing:S.transcribing,history:S.history.length,pose:S.lastPose,currentSprite:currentVisibleSprite,visible:spriteLayer.style.display==='grid'||$('demoFace').style.display!=='none',canvas:!!spriteCanvas.width,environment:microphoneEnvironment()}),addSprite,manual,previewTextSilently:(text)=>{stopAll();S.previewSilentOnce=true;enqueueSpeak(text)}};
 })();
 </script>
