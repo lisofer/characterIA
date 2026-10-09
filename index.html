@@ -97,6 +97,41 @@
  .middle{flex:0 0 var(--stage-height,56dvh);height:var(--stage-height,56dvh)}
  .sprite-frame{width:min(50vw,calc(var(--stage-height,56dvh) - 96px),520px);height:min(50vw,calc(var(--stage-height,56dvh) - 96px),520px)}
 }
+
+/* Debate: escenario doble de áreas idénticas y controles separados del modo individual. */
+.duel-stage{display:none;flex:1;min-height:0;min-width:0;gap:8px;padding:10px}
+.duel-character{flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;align-items:center;overflow:hidden;border:1px solid #41526a;background:radial-gradient(ellipse at 50% 25%,#223b4e,#0c1726 80%);border-radius:15px;padding:8px}
+.duel-character.is-speaking{border-color:#8feacb;box-shadow:inset 0 0 0 1px #4cab9a,0 0 18px #62caa424}
+.duel-character-name{font-size:13px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;flex:0 0 auto}
+.duel-avatar{position:relative;flex:1;min-height:0;width:100%;display:grid;place-items:center}
+.duel-avatar canvas{width:100%;height:100%;position:absolute;inset:0;object-fit:contain}
+.duel-placeholder{font-size:clamp(40px,6vw,90px);color:#7189a1;pointer-events:none}
+.duel-caption{width:100%;min-height:45px;max-height:35%;overflow:hidden;text-align:center;font-weight:720;font-size:clamp(11px,1.15vw,16px);line-height:1.35;overflow-wrap:anywhere;display:grid;place-items:center;flex:0 0 auto}
+.duel-caption.enter{animation:duel-caption-in .16s ease-out}
+@keyframes duel-caption-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.duel-lower{display:none;min-height:0;flex:1;flex-direction:column}
+.duel-messages{flex:1;overflow:auto;min-height:0;padding:12px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin}
+.duel-line{border:1px solid #32425a;border-radius:12px;background:#182332;padding:9px 10px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.duel-line.left{border-left:3px solid #7be0bc}.duel-line.right{border-left:3px solid #94baff}
+.duel-line.human{border-left:3px solid #f1c387;background:#293126}
+.duel-line strong{display:block;margin-bottom:3px;color:#d4f4e9}
+.duel-summary{border:1px solid #304459;border-radius:12px;background:#132232;padding:11px;font-size:12px;white-space:pre-wrap;min-height:42px;overflow-wrap:anywhere}
+.shell[data-duel-mode="true"] .middle .stage-body,.shell[data-duel-mode="true"] .middle .stage-foot{display:none}
+.shell[data-duel-mode="true"] .middle .duel-stage{display:flex}
+.shell[data-duel-mode="true"] .middle .stage-header{display:none}
+.shell[data-duel-mode="true"] .chat>.chat-head,.shell[data-duel-mode="true"] .chat>.messages,.shell[data-duel-mode="true"] .chat>.composer{display:none}
+.shell[data-duel-mode="true"] .chat>.duel-lower{display:flex}
+@media(max-width:960px){
+ .tabs{padding:4px 7px 8px;gap:2px}
+ .tab{font-size:10px;padding:9px 0}
+ .duel-stage{padding:6px;gap:6px}
+ .duel-character{padding:5px;border-radius:10px}
+ .duel-character-name{font-size:11px}
+ .duel-caption{font-size:clamp(10px,2.4vw,13px);min-height:38px;max-height:37%}
+ .shell[data-duel-mode="true"] .mobile-dock{grid-template-columns:1fr 1fr}
+ .shell[data-duel-mode="true"] #mobileTalk{display:none}
+}
+@media(prefers-reduced-motion:reduce){.duel-caption.enter{animation:none}}
 </style>
 </head>
 <body>
@@ -108,6 +143,7 @@
       <button type="button" class="tab active" data-tab="brain">Cerebro</button>
       <button type="button" class="tab" data-tab="sprites">Avatar</button>
       <button type="button" class="tab" data-tab="speech">Voz</button>
+      <button type="button" class="tab" data-tab="duel">Debate</button>
     </nav>
     <div class="settings" id="settingsPanel">
       <section id="tab-profiles" class="setting-tab">
@@ -117,6 +153,21 @@
           <button id="profileDuplicate" class="btn small" type="button">Duplicar</button>
           <button id="profileDelete" class="btn small danger" type="button">Eliminar</button>
         </div>
+      </section>
+      <section id="tab-duel" class="setting-tab">
+        <div class="section-heading">Temáticas guardadas</div>
+        <div class="field"><label for="duelTopicSelect">Elegir temática</label><select id="duelTopicSelect"></select></div>
+        <div class="button-row" style="margin-bottom:14px"><button type="button" id="duelNew" class="btn primary small">+ Nuevo tema</button><button type="button" id="duelDelete" class="btn danger small">Eliminar tema</button><button type="button" id="duelExport" class="btn small">↓ Exportar historial</button></div>
+        <div class="field"><label for="duelTitle">Título</label><input id="duelTitle" maxlength="100" placeholder="Ej.: Una discusión inesperada"></div>
+        <div class="field"><label for="duelTheme">Temática de la conversación</label><textarea id="duelTheme" rows="5" maxlength="2500" placeholder="Situación, conflicto, lugar y asunto que van a discutir..."></textarea></div>
+        <div class="section-heading">Participantes</div>
+        <div class="field"><label for="duelLeftSelect">Personaje de la izquierda</label><select id="duelLeftSelect"></select></div>
+        <div class="field"><label for="duelRightSelect">Personaje de la derecha</label><select id="duelRightSelect"></select></div>
+        <div class="field"><label for="duelLimit">Intervenciones por tanda (ambos sumados)</label><input type="number" id="duelLimit" min="1" max="30" step="1" value="6"></div>
+        <div class="hint">Al completar la tanda, esperan tu siguiente intervención. Cada 30 mensajes de los personajes se actualiza un resumen.</div>
+        <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
+        <div class="section-heading">Resumen acumulado</div>
+        <div id="duelSummary" class="duel-summary">Todavía no hay resumen.</div>
       </section>
       <section id="tab-brain" class="setting-tab active">
         <div class="section-heading">Conexión a Gemini</div>
@@ -197,11 +248,32 @@
       </div>
       <div class="caption-area"><div class="subtitle" id="liveSubtitle">Un personaje esperando su primera conversación.</div><div class="caption-note" id="captionNote">Configurá Gemini o probá el modo demo sin API.</div></div>
     </div>
+    <div class="duel-stage" id="duelStage">
+      <div class="duel-character" id="duelLeftBox">
+        <div class="duel-character-name" id="duelLeftName">Izquierda</div>
+        <div class="duel-avatar"><canvas id="duelLeftCanvas" aria-label="Avatar izquierdo"></canvas><div class="duel-placeholder" id="duelLeftPlaceholder">◉</div></div>
+        <div class="duel-caption" id="duelLeftCaption"></div>
+      </div>
+      <div class="duel-character" id="duelRightBox">
+        <div class="duel-character-name" id="duelRightName">Derecha</div>
+        <div class="duel-avatar"><canvas id="duelRightCanvas" aria-label="Avatar derecho"></canvas><div class="duel-placeholder" id="duelRightPlaceholder">◉</div></div>
+        <div class="duel-caption" id="duelRightCaption"></div>
+      </div>
+    </div>
     <div class="stage-foot"><button id="talkButton" class="btn primary space-button" type="button">🎙 Mantené para hablar</button><div class="foot-hint">Mantené <b>ESPACIO</b> mientras hablás.<br><b>Soltá</b> y Gemini recibe tu mensaje. <b>Esc</b> cancela.</div></div>
     <div id="toast" class="toast" role="status"></div>
   </main>
   <div id="stageDivider" class="stage-divider" role="separator" aria-label="Ajustar tamaño del personaje" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="75" aria-valuenow="42" tabindex="0" title="Arrastrá para cambiar el tamaño del personaje"><span class="stage-divider-grip"></span></div>
   <aside class="chat">
+    <div class="duel-lower" id="duelLower">
+      <div class="chat-head"><div><strong id="duelTopicHeading">Debate</strong><small id="duelCounter">Esperando para empezar</small></div></div>
+      <div class="duel-messages" id="duelMessages" aria-live="polite"></div>
+      <div class="composer">
+        <textarea id="duelHuman" rows="2" maxlength="1000" placeholder="Tu intervención para la próxima tanda (opcional)…"></textarea>
+        <div class="button-row" style="margin-top:8px"><button type="button" id="duelNext" class="btn primary small">▶ Continuar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
+        <div id="duelStatus" class="hint" style="margin-top:8px" aria-live="polite">Elegí dos personajes y una temática.</div>
+      </div>
+    </div>
     <div class="chat-head"><div><strong>Conversación</strong><small>Contexto de la charla · Respuestas en vivo</small></div><div class="chat-actions"><button id="stopButton" class="btn small ghost" title="Detener voz y respuesta">■ Detener</button></div></div>
     <div class="messages" id="messages" aria-live="polite"><div class="empty-chat" id="emptyChat"><strong>Tu personaje está listo para actuar.</strong><br><br>1. Escribí un prompt que defina su personalidad.<br>2. Conectá Gemini desde Railway Variables (o usá «Probar sin API»).<br>3. Mantené Espacio para hablar y soltá para enviar (o escribile).<br><br>La boca seguirá <strong>el texto que pronuncia</strong>, no el sonido que capta tu micrófono.</div></div>
     <div class="composer"><div class="micro-actions"><button id="micPermissionButton" class="btn small" type="button">🎙 Activar micrófono</button><button id="nativeRecordButton" class="btn small ghost" type="button">🎤 Grabar con el teléfono</button></div><div id="micHelp" class="mic-help" role="status" aria-live="polite"></div><input id="nativeAudioInput" type="file" accept="audio/*" capture="microphone" style="display:none"><textarea id="chatInput" rows="2" placeholder="Escribile algo a tu personaje…"></textarea><div id="interimTranscript" class="hint listening-caption" style="display:none;margin-top:7px"></div><div class="composer-bottom"><span class="hint">Enter envía · Shift+Enter nueva línea</span><button id="sendButton" class="btn primary small">Enviar ↗</button></div></div>
@@ -266,9 +338,15 @@ function getTranscriptionModel(){return $('transcriptionModel').value==='same'?g
 function updateFields(){$('customModel').style.display=$('model').value==='custom'?'block':'none';$('stageName').textContent=$('characterName').value.trim()||'Mi personaje';$('creativityValue').textContent=Number($('creativity').value).toFixed(2);$('mouthIntensityValue').textContent=$('mouthIntensity').value+'%';$('voiceDelayValue').textContent=$('voiceDelay').value+' ms';$('fishTemperatureValue').textContent=Number($('fishTemperature').value).toFixed(2);$('rateValue').textContent=Number($('rate').value).toFixed(2)+'×';$('pitchValue').textContent=Number($('pitch').value).toFixed(2);$('voiceSelect').disabled=$('voiceProvider').value==='fish'}
 for(const id of settingsIds){$(id).addEventListener('input',()=>{updateFields();persist()});$(id).addEventListener('change',()=>{updateFields();persist()})}
 function openTab(tab){
+ if((tab==='duel')!==($('appShell').dataset.duelMode==='true')){
+  if(tab==='duel')stopAll();else stopDuel();
+  $('appShell').dataset.duelMode=String(tab==='duel');
+  $('mobileChat').textContent=tab==='duel'?'📜 Historial':'💬 Chat';
+ }
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
  document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
  $('settingsPanel').scrollTop=0;
+ if(tab==='duel')refreshDuelDisplay();
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
@@ -397,6 +475,352 @@ function initVoices(){
  select.value=list.some(v=>v.voiceURI===previous)?previous:'';
 }
 if('speechSynthesis'in window){initVoices();speechSynthesis.addEventListener?.('voiceschanged',initVoices)}
+
+/* Modo debate: almacenamiento independiente, Gemini con contexto acotado y reproducción serial. */
+const DUEL_KEY='persona-studio-duels-v1',DUEL_MODEL='gemini-3.5-flash-lite';
+const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
+const duelActive=()=>D.topics.find(t=>t.id===D.activeId)||null;
+const duelProfile=id=>allProfileData()[id]?.settings||{};
+const duelName=id=>profileIndex().find(p=>p.id===id)?.name||'Personaje';
+function duelCount(topic){return topic.messages.filter(m=>m.side==='left'||m.side==='right').length}
+function duelStatus(message){$('duelStatus').textContent=message;$('duelCounter').textContent=message}
+function saveDuel(){
+ try{localStorage.setItem(DUEL_KEY,JSON.stringify({topics:D.topics,activeId:D.activeId}))}
+ catch{duelStatus('No se pudo guardar el historial. Exportá la temática para conservarlo.')}
+}
+function newDuelTopic(){
+ return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limit:6,messages:[],summary:'',summaryAt:0,createdAt:Date.now()};
+}
+function initDuel(){
+ try{
+  const stored=JSON.parse(localStorage.getItem(DUEL_KEY)||'null');
+  if(stored&&Array.isArray(stored.topics)){D.topics=stored.topics;D.activeId=stored.activeId}
+ }catch{}
+ if(!D.topics.length){const t=newDuelTopic();D.topics=[t];D.activeId=t.id;saveDuel()}
+ if(!duelActive())D.activeId=D.topics[0].id;
+ renderDuelSelects();refreshDuelDisplay();
+}
+function renderDuelSelects(){
+ const topic=duelActive();if(!topic)return;
+ const topicSelect=$('duelTopicSelect');topicSelect.replaceChildren();
+ for(const t of D.topics){const o=document.createElement('option');o.value=t.id;o.textContent=t.title||'Sin título';topicSelect.append(o)}
+ topicSelect.value=topic.id;
+ for(const [id,side] of [['duelLeftSelect','left'],['duelRightSelect','right']]){
+  const select=$(id);select.replaceChildren();
+  const empty=document.createElement('option');empty.value='';empty.textContent='Seleccionar personaje';select.append(empty);
+  for(const p of profileIndex()){const o=document.createElement('option');o.value=p.id;o.textContent=p.name;select.append(o)}
+  select.value=topic[side]||'';
+ }
+ $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;
+ $('duelLimit').value=topic.limit||6;
+ $('duelTopicHeading').textContent=topic.title;
+ $('duelSummary').textContent=topic.summary||'Todavía no hay resumen.';
+}
+function renderDuelTranscript(){
+ const topic=duelActive(),container=$('duelMessages');container.replaceChildren();
+ if(!topic)return;
+ for(const message of topic.messages){
+  const line=document.createElement('div');line.className='duel-line '+(message.side||'human');
+  const who=document.createElement('strong');who.textContent=message.side==='human'?'Tu intervención':duelName(message.profileId);
+  const content=document.createElement('span');content.textContent=message.text;
+  line.append(who,content);container.append(line);
+ }
+ container.scrollTop=container.scrollHeight;
+}
+function appendDuelMessage(message){
+ const line=document.createElement('div');line.className='duel-line '+(message.side||'human');
+ const head=document.createElement('strong');head.textContent=message.side==='human'?'Tu intervención':duelName(message.profileId);
+ const content=document.createElement('span');content.textContent=message.text;
+ line.append(head,content);$('duelMessages').append(line);$('duelMessages').scrollTop=$('duelMessages').scrollHeight;
+}
+function refreshDuelDisplay(){
+ const topic=duelActive();if(!topic)return;
+ renderDuelSelects();renderDuelTranscript();
+ $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);
+ duelStatus(D.running?'Debate en curso…':duelCount(topic)+' intervenciones · Esperando tu señal');
+ if($('appShell').dataset.duelMode==='true'){
+  loadDuelSprites('left',topic.left);loadDuelSprites('right',topic.right);
+ }
+}
+function duelSyncInputs(){
+ if(D.running)return;const t=duelActive();if(!t)return;
+ t.title=$('duelTitle').value.slice(0,100);
+ t.theme=$('duelTheme').value.slice(0,2500);
+ t.left=$('duelLeftSelect').value;t.right=$('duelRightSelect').value;
+ t.limit=Math.max(1,Math.min(30,Number($('duelLimit').value)||6));
+ $('duelTopicHeading').textContent=t.title||'Sin título';
+ const opt=$('duelTopicSelect').selectedOptions[0];if(opt)opt.textContent=t.title||'Sin título';
+ saveDuel();
+ if(D.profiles.left!==t.left)loadDuelSprites('left',t.left);
+ if(D.profiles.right!==t.right)loadDuelSprites('right',t.right);
+ $('duelLeftName').textContent=duelName(t.left);$('duelRightName').textContent=duelName(t.right);
+}
+for(const id of ['duelTitle','duelTheme','duelLeftSelect','duelRightSelect','duelLimit']){
+ $(id).addEventListener('input',duelSyncInputs);$(id).addEventListener('change',duelSyncInputs);
+}
+$('duelTopicSelect').onchange=()=>{
+ stopDuel();D.activeId=$('duelTopicSelect').value;saveDuel();refreshDuelDisplay();
+};
+$('duelNew').onclick=()=>{
+ if(D.running)return toast('Detené el debate antes de cambiar de tema.',true);
+ const t=newDuelTopic();D.topics.push(t);D.activeId=t.id;saveDuel();refreshDuelDisplay();
+};
+$('duelDelete').onclick=()=>{
+ if(D.running)return toast('Detené el debate antes de eliminar una temática.',true);
+ const t=duelActive();if(!t||!confirm('¿Eliminar la temática y todo su historial?'))return;
+ D.topics=D.topics.filter(x=>x.id!==t.id);
+ if(!D.topics.length)D.topics.push(newDuelTopic());
+ D.activeId=D.topics[0].id;saveDuel();refreshDuelDisplay();
+};
+$('duelExport').onclick=()=>{
+ const t=duelActive();if(!t)return;
+ const name=(t.title||'debate').replace(/[^\p{L}\p{N}-]+/gu,'-').slice(0,40);
+ download('debate-'+name+'.json',JSON.stringify(t,null,2));
+};
+function stopDuel(){
+ D.generation++;D.running=false;D.abort?.abort();D.abort=null;
+ D.audio?.pause();D.audio=null;
+ if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
+ if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
+ D.speech=null;
+ for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
+ $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
+ const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
+}
+$('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
+$('duelNext').onclick=runDuelBatch;$('duelStartFromSettings').onclick=runDuelBatch;
+function duelText(t,side){
+ const nextId=t[side],other=side==='left'?'right':'left';
+ const recent=t.messages.slice(-12).map(m=>{
+  const n=m.side==='human'?'HUMANO':duelName(m.profileId);
+  return n+': '+m.text.slice(0,420);
+ }).join('\n');
+ const summary=t.summary?'Resumen anterior: '+t.summary.slice(0,1400)+'\n':'';
+ return 'TEMA: '+t.title.slice(0,100)+'\nSITUACIÓN: '+t.theme.slice(0,1800)+'\n'+summary+
+  'Personaje a la izquierda: '+duelName(t.left)+'\nPersonaje a la derecha: '+duelName(t.right)+
+  '\nINTERCAMBIO RECIENTE:\n'+(recent||'Todavía no hablaron.')+
+  '\nAhora le toca a '+duelName(nextId)+'. Respondé solo con su intervención, nunca con la del otro.';
+}
+async function duelRequest(model,payload){
+ const controller=new AbortController();D.abort=controller;
+ try{
+  const response=await fetch('/api/gemini/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,payload}),signal:controller.signal});
+  if(!response.ok){
+   const details=await response.json().catch(()=>({}));
+   throw Error('Gemini ('+response.status+'): '+(details.error?.message||response.statusText));
+  }
+  const result=parseSSE(await response.text()).trim();
+  if(!result)throw Error('Gemini no generó texto.');
+  return result;
+ }finally{if(D.abort===controller)D.abort=null}
+}
+async function duelGenerate(t,side){
+ const profile=duelProfile(t[side]);
+ const model=$('model').value==='custom'?($('customModel').value.trim()||DUEL_MODEL):($('model').value||DUEL_MODEL);
+ const instruction='Interpretás EXCLUSIVAMENTE a '+duelName(t[side])+'. '+String(profile.persona||'Sos un personaje espontáneo.').slice(0,1800)+
+  '\nTu personalidad determina CÓMO hablás, pero la temática define DE QUÉ se habla. Contestá al otro personaje, seguí el conflicto y avanzá la historia. '+
+  'Una o dos oraciones breves, hasta 35 palabras. Sin narrador, nombres de personaje, guiones, etiquetas, acotaciones ni formato.';
+ const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:duelText(t,side)}]}],generationConfig:{temperature:Math.min(1.2,Number(profile.creativity)||.8),maxOutputTokens:150}};
+ const response=await duelRequest(model,payload);
+ return stripSpeech(response).slice(0,400);
+}
+async function summarizeDuel(t){
+ const count=duelCount(t);
+ if(count<30||count%30!==0||t.summaryAt>=count)return;
+ const previous=t.summary?'Resumen acumulado anterior:\n'+t.summary.slice(0,1400)+'\n':'';
+ const newMessages=t.messages.filter(m=>m.side!=='human').slice(-30).map(m=>duelName(m.profileId)+': '+m.text.slice(0,250)).join('\n');
+ const payload={contents:[{role:'user',parts:[{text:
+  'Actualizá el resumen de esta conversación ficticia. Conservá hechos, relaciones, posturas, conflictos y promesas importantes, sin inventar. Máximo 190 palabras.\n'+previous+'Últimos 30 mensajes:\n'+newMessages
+ }]}],generationConfig:{temperature:0.2,maxOutputTokens:320}};
+ try{
+  t.summary=(await duelRequest(DUEL_MODEL,payload)).slice(0,1800);
+  t.summaryAt=count;saveDuel();$('duelSummary').textContent=t.summary;
+ }catch(e){if(D.running)duelStatus('No se pudo actualizar el resumen: '+e.message)}
+}
+async function duelSample(id){
+ if(!S.db)S.db=await openDB();if(!S.db)return null;
+ return await new Promise(resolve=>{
+  try{
+   const r=S.db.transaction('sprites','readonly').objectStore('sprites').get(id+':voiceSample');
+   r.onsuccess=()=>resolve(r.result instanceof Blob?r.result:null);r.onerror=()=>resolve(null);
+  }catch{resolve(null)}
+ });
+}
+async function duelVoice(t,side,text,token){
+ const pref=duelProfile(t[side]),provider=pref.voiceProvider||'fish';
+ const rate=Number(pref.rate)||1;
+ const speech={side,text,plan:duelSpeechPlan(text,rate),ready:false,started:0,audio:null,visibleSentence:-1,rate,delay:Number(pref.voiceDelay)||0,intensity:Number(pref.mouthIntensity||45)};
+ D.speech=speech;
+ const name=side==='left'?'Left':'Right';
+ const box=$('duel'+name+'Box'),caption=$('duel'+name+'Caption');
+ for(const s of ['Left','Right']){$('duel'+s+'Box').classList.toggle('is-speaking',s===name);$('duel'+s+'Caption').textContent=''}
+ const useBrowser=async()=>{
+  if(!('speechSynthesis'in window))return;
+  const utterance=new SpeechSynthesisUtterance(text);utterance.lang='es-AR';utterance.rate=rate;
+  utterance.pitch=Number(pref.pitch)||1;
+  await new Promise((resolve,reject)=>{
+   D.resolveAudio=resolve;
+   utterance.onstart=()=>{speech.started=performance.now();speech.ready=true};
+   utterance.onend=resolve;utterance.onerror=e=>reject(Error('Voz del navegador: '+e.error));
+   try{speechSynthesis.speak(utterance)}catch(e){reject(e)}
+  });
+ };
+ try{
+  if(provider==='browser'){await useBrowser();return}
+  const body={text,format:'mp3',speed:rate,latency:pref.fishLatency||'balanced',temperature:Number(pref.fishTemperature)||.7};
+  const blob=await duelSample(t[side]);if(D.generation!==token)return;
+  if(blob){
+   if(!String(pref.fishTranscript||'').trim())throw Error('Falta transcribir la muestra de voz de '+duelName(t[side]));
+   const data=await readBlob(blob);body.reference_audio=data.split(',')[1];body.reference_mime=blob.type||'audio/mpeg';body.reference_text=pref.fishTranscript;
+  }
+  const controller=new AbortController();D.abort=controller;
+  let sound;
+  try{
+   const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+   if(!res.ok){const detail=await res.json().catch(()=>({}));throw Error('Fish: '+(detail.error||res.statusText))}
+   sound=await res.blob();if(!sound.size)throw Error('Audio Fish vacío');
+  }finally{if(D.abort===controller)D.abort=null}
+  if(D.generation!==token)return;
+  const uri=URL.createObjectURL(sound),audio=new Audio(uri);speech.audio=audio;D.audio=audio;
+  await new Promise((resolve,reject)=>{
+   D.resolveAudio=resolve;
+   audio.onloadedmetadata=()=>{
+    if(Number.isFinite(audio.duration)&&audio.duration>0){
+     const factor=audio.duration*1000/Math.max(1,speech.plan.total);
+     speech.plan.offsets=speech.plan.offsets.map(n=>n*factor);
+     speech.plan.lengths=speech.plan.lengths.map(n=>n*factor);
+     speech.plan.total=audio.duration*1000;
+    }
+   };
+   audio.onplay=()=>{speech.started=performance.now();speech.ready=true};
+   audio.onended=resolve;audio.onerror=()=>reject(Error('No se pudo reproducir la voz de Fish'));
+   audio.play().catch(reject);
+  });
+  URL.revokeObjectURL(uri);D.audio=null;
+ }catch(error){
+  if(D.generation!==token)return;
+  if(pref.fishFallback!==false){await useBrowser()}
+  else throw error;
+ }finally{
+  if(D.generation===token){
+   D.resolveAudio=null;D.speech=null;caption.textContent='';box.classList.remove('is-speaking');
+  }
+ }
+}
+async function runDuelBatch(){
+ if(D.running)return;
+ duelSyncInputs();
+ const t=duelActive();if(!t)return;
+ if(!t.left||!t.right||t.left===t.right)return toast('Elegí dos personajes diferentes.',true);
+ if(!t.title.trim()||!t.theme.trim())return toast('Completá el título y la temática.',true);
+ if(!profileIndex().some(p=>p.id===t.left)||!profileIndex().some(p=>p.id===t.right))return toast('Seleccioná perfiles existentes.',true);
+ D.running=true;const token=++D.generation;
+ $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
+ if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('chat');
+ const human=$('duelHuman').value.trim();
+ $('duelHuman').value='';
+ if(human){const entry={side:'human',text:human.slice(0,1000)};t.messages.push(entry);appendDuelMessage(entry);saveDuel()}
+ const limit=t.limit;
+ try{
+  for(let i=0;i<limit&&D.running&&D.generation===token;i++){
+   const side=duelCount(t)%2===0?'left':'right';
+   duelStatus('Turno '+(i+1)+' de '+limit+' · '+duelName(t[side]));
+   const response=await duelGenerate(t,side);
+   if(!D.running||D.generation!==token)break;
+   if(!response)throw Error('El personaje no generó una respuesta.');
+   await duelVoice(t,side,response,token);
+   if(!D.running||D.generation!==token)break;
+   const entry={side,profileId:t[side],text:response,at:Date.now()};
+   t.messages.push(entry);saveDuel();appendDuelMessage(entry);
+   await summarizeDuel(t);
+  }
+  if(D.generation===token)duelStatus(duelCount(t)+' intervenciones · Tu turno');
+ }catch(error){
+  if(D.generation===token){duelStatus('Debate detenido: '+error.message);toast(error.message,true)}
+ }finally{
+  if(D.generation===token){
+   D.running=false;D.abort=null;D.audio=null;D.speech=null;
+   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
+  }
+ }
+}
+function duelSpeechPlan(text,rate){
+ const words=wordsOf(text),lengths=words.map(w=>wordDuration(w,rate));
+ const offsets=[],sentences=[];let total=0,start=0;
+ for(let i=0;i<words.length;i++){
+  offsets.push(total);total+=lengths[i];
+  const next=words[i+1],between=text.slice(words[i].index+words[i].text.length,next?next.index:text.length);
+  if(!next||/[.!?…]/.test(between)){
+   sentences.push({first:start,last:i,text:text.slice(start===0?0:words[start].index,next?next.index:text.length).trim()});start=i+1;
+  }
+  if(next)total+=/[.!?…]/.test(between)?260:/[,;:]/.test(between)?100:0;
+ }
+ return {words,offsets,lengths,sentences,total};
+}
+async function loadDuelSprites(side,id){
+ if(D.profiles[side]===id)return;
+ D.profiles[side]=id;
+ for(const url of D.urls[side])URL.revokeObjectURL(url);
+ D.urls[side]=[];D.images[side].clear();D.pose[side]='';
+ const label=side==='left'?'Left':'Right';
+ $('duel'+label+'Placeholder').style.display='block';
+ if(!id)return;
+ if(!S.db)S.db=await openDB();if(!S.db||D.profiles[side]!==id)return;
+ for(const [key] of slotList){
+  const blob=await new Promise(resolve=>{
+   try{
+    const req=S.db.transaction('sprites','readonly').objectStore('sprites').get(id+':'+key);
+    req.onsuccess=()=>resolve(req.result instanceof Blob?req.result:null);req.onerror=()=>resolve(null);
+   }catch{resolve(null)}
+  });
+  if(D.profiles[side]!==id)return;
+  if(!blob)continue;
+  const url=URL.createObjectURL(blob);D.urls[side].push(url);
+  const image=new Image();image.src=url;
+  await new Promise(resolve=>{image.onload=resolve;image.onerror=resolve;if(image.complete)resolve()});
+  if(D.profiles[side]!==id)return;
+  if(image.naturalWidth)D.images[side].set(key,image);
+ }
+ $('duel'+label+'Placeholder').style.display=D.images[side].size?'none':'block';
+}
+function frameDuel(now){
+ for(const side of ['left','right']){
+  const images=D.images[side],name=side==='left'?'Left':'Right',canvas=$('duel'+name+'Canvas');
+  const ctx=canvas.getContext('2d');if(!ctx)continue;
+  const rect=canvas.getBoundingClientRect();if(rect.width<2||rect.height<2)continue;
+  const ratio=Math.min(window.devicePixelRatio||1,2),w=Math.round(rect.width*ratio),h=Math.round(rect.height*ratio);
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;D.pose[side]=''}
+  const p=D.speech?.side===side?D.speech:null;
+  if(!D.blink[side])D.blink[side]=now+2800+Math.random()*3500;
+  let closed=now<D.blinkUntil[side];
+  if(now>=D.blink[side]){D.blinkUntil[side]=now+115;D.blink[side]=now+2800+Math.random()*3500;closed=true}
+  let mouth='closed';
+  if(p?.ready){
+   const t=Math.max(0,(p.audio?p.audio.currentTime*1000:now-p.started)+p.delay);
+   const plan=p.plan;let index=-1,completed=-1;
+   for(let i=0;i<plan.words.length;i++){
+    if(t>=plan.offsets[i]+plan.lengths[i])completed=i;
+    if(t>=plan.offsets[i]&&t<plan.offsets[i]+plan.lengths[i]){index=i;break}
+   }
+   if(index>=0){
+    const word=plan.words[index],age=t-plan.offsets[index],dur=plan.lengths[index],attack=Math.min(62,Math.max(20,dur*.11)),hold=Math.min(dur-attack-18,Math.max(95,Math.min(240,dur*(.32+p.intensity/100*.2))));
+    if(age>=attack&&age<attack+hold)mouth=wordGestures(word.text)[0]||'A';
+   }
+   const sentence=index>=0?plan.sentences.find(q=>index>=q.first&&index<=q.last):plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
+   const caption=$('duel'+name+'Caption');
+   const wanted=sentence&&!(index<0&&completed===sentence.last)?sentence.text:'';
+   if(caption.textContent!==wanted){caption.textContent=wanted;caption.classList.remove('enter');if(wanted){void caption.offsetWidth;caption.classList.add('enter')}}
+  }
+  const preferred=keyMap[mouth]?.[closed?'closed':'open'];
+  const key=(preferred&&images.has(preferred)?preferred:null)||(images.has(keyMap[mouth]?.[closed?'open':'closed'])?keyMap[mouth][closed?'open':'closed']:null)||(['idleOpen','idleClosed',...slotList.map(x=>x[0])].find(k=>images.has(k))||null);
+  if(!key){if(D.pose[side]!=='empty'){ctx.clearRect(0,0,w,h);D.pose[side]='empty'}continue}
+  if(D.pose[side]===key)continue;
+  const image=images.get(key),factor=Math.min(w/image.naturalWidth,h/image.naturalHeight);
+  const dw=image.naturalWidth*factor,dh=image.naturalHeight*factor;
+  ctx.clearRect(0,0,w,h);ctx.drawImage(image,(w-dw)/2,(h-dh)/2,dw,dh);D.pose[side]=key;
+ }
+}
+
 function getVoice(){const voices=('speechSynthesis'in window?speechSynthesis.getVoices():[]);return voices.find(v=>v.voiceURI===$('voiceSelect').value)||voices.find(v=>v.lang==='es-AR')||voices.find(v=>v.lang.startsWith('es'))||null}
 $('voiceSelect').addEventListener('change',persist);
 function wordsOf(text){return [...text.matchAll(/[\p{L}\p{N}]+(?:[-’'][\p{L}\p{N}]+)*/gu)].map(m=>({text:m[0],index:m.index}))}
@@ -918,6 +1342,7 @@ function updateSpriteDiagnostic(){
 }
 
 function frame(now){
+ if($('appShell').dataset.duelMode==='true')frameDuel(now);
  if($('autoBlink').checked&&now>=S.nextBlink&&!S.blink){S.blink=true;S.blinkUntil=now+105+Math.random()*50;S.nextBlink=now+2850+Math.random()*4400}
  if(S.blink&&now>=S.blinkUntil)S.blink=false;
  let blink=S.blink,mouth='closed',word=-1;
@@ -941,7 +1366,7 @@ if(!microphoneEnvironment().holdToTalk){
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
 migrateWorkspaceOnce();populateProfiles();
 try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
-populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);requestAnimationFrame(frame);status('Listo para conversar');
+populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();requestAnimationFrame(frame);status('Listo para conversar');
 window.PERSONA_STUDIO_TEST={getConversationModel,getTranscriptionModel,microphoneEnvironment,ensureMicrophone,paintSprite,wordsOf,vowelsOf,wordGestures,buildSpeechPlan,speechPose,parseSSE,enqueueSpeak,stopAll,beginPTT,endPTT,getState:()=>({speaking:S.speaking,word:S.activeSpeech?S.activeSpeech.plan.words[speechPose(performance.now()).word]?.text:null,viseme:S.currentViseme,visibleSprite:currentVisibleSprite,queue:S.speechQueue.length,loaded:S.files.size,listening:S.listening,held:S.pttHeld,transcribing:S.transcribing,history:S.history.length,pose:S.lastPose,currentSprite:currentVisibleSprite,visible:spriteLayer.style.display==='grid'||$('demoFace').style.display!=='none',canvas:!!spriteCanvas.width,environment:microphoneEnvironment()}),addSprite,manual,previewTextSilently:(text)=>{stopAll();S.previewSilentOnce=true;enqueueSpeak(text)}};
 })();
 </script>
