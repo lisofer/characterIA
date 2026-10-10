@@ -1,4 +1,5 @@
 'use strict';
+const MAX_MUSIC_BYTES=100*1024*1024;
 // Persistencia de Persona Studio sobre un VOLUMEN montado por Railway.
 // No escribe en el filesystem efímero de cada deploy.
 const fs=require('node:fs');
@@ -53,7 +54,7 @@ function validateState(st){
  if(Object.keys(st.assets).length>750)throw Object.assign(Error('Demasiados archivos'),{status:413});
  for(const [k,v] of Object.entries(st.assets)){
   if(k.length>220||!v||typeof v!=='object'||!/^([a-f0-9]{64})$/.test(v.hash)||
-     !Number.isInteger(v.size)||v.size<0||v.size>20000000||
+     !Number.isInteger(v.size)||v.size<0||v.size>(k==='music:background'?MAX_MUSIC_BYTES:20000000)||
      typeof v.type!=='string'||v.type.length>100)throw Object.assign(Error('Manifiesto de archivo inválido'),{status:400});
   if(!fs.existsSync(assetPath(v.hash)))throw Object.assign(Error('Falta subir un archivo antes del manifiesto'),{status:409});
  }
@@ -76,7 +77,7 @@ function updateState(body){
 function putAsset(hash,buffer){
  requireStorage();
  if(!/^[a-f0-9]{64}$/.test(hash))throw Object.assign(Error('Identificador de archivo inválido'),{status:400});
- if(!Buffer.isBuffer(buffer)||!buffer.length||buffer.length>20000000)throw Object.assign(Error('Archivo inválido o demasiado grande'),{status:413});
+ if(!Buffer.isBuffer(buffer)||!buffer.length||buffer.length>MAX_MUSIC_BYTES)throw Object.assign(Error('Archivo inválido o demasiado grande'),{status:413});
  if(crypto.createHash('sha256').update(buffer).digest('hex')!==hash)throw Object.assign(Error('El archivo no coincide con su firma'),{status:400});
  const dest=assetPath(hash);
  if(!fs.existsSync(dest)){

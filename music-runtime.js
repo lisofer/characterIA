@@ -1,7 +1,7 @@
 /* Música de fondo de Persona Studio. Archivo único, loop y ducking automático. */
 (function(){
 'use strict';
-const KEY='music:background',GLOBAL='persona-studio-global-v3',MAX_BYTES=19000000;
+const KEY='music:background',GLOBAL='persona-studio-global-v3',MAX_BYTES=100*1024*1024;
 const defaults={name:'',size:0,updatedAt:0,volume:18,duck:22};
 const clamp=(n,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(n))?Number(n):min));
 function targetVolume(volume,duck,speaking){
@@ -75,7 +75,7 @@ async function choose(e){
  const file=e.target.files?.[0];e.target.value='';
  if(!file)return;
  if(!(/^audio\//i.test(file.type)||/\.(mp3|m4a|wav|ogg|webm|aac)$/i.test(file.name))){message('Elegí un audio, preferentemente MP3.',true);return}
- if(file.size<1||file.size>MAX_BYTES){message('El archivo debe pesar menos de 19 MB.',true);return}
+ if(file.size<1||file.size>MAX_BYTES){message('El archivo no puede superar los 100 MB.',true);return}
  try{
   await writeAudio(file);
   storeSettings({name:file.name,size:file.size,updatedAt:Date.now()});

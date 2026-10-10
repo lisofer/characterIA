@@ -47,3 +47,14 @@ test('rechaza claves inesperadas y rutas maliciosas',()=>{
  assert.throws(()=>cloud.getAsset('../state.json'),e=>e.status===400);
  assert.throws(()=>cloud.getAsset('f'.repeat(64)),e=>e.status===404);
 });
+
+test('admite música de más de 20 MB sin ampliar el límite de los demás archivos',()=>{
+ const bytes=Buffer.alloc(20000001,0x41);
+ const hash=crypto.createHash('sha256').update(bytes).digest('hex');
+ assert.equal(cloud.putAsset(hash,bytes).size,bytes.length);
+ const before=cloud.readState().revision;
+ const music={schema:1,kv:{},assets:{'music:background':{hash,type:'audio/mpeg',size:100*1024*1024}}};
+ assert.equal(cloud.updateState({baseRevision:before,state:music}).revision,before+1);
+ assert.throws(()=>cloud.updateState({baseRevision:before+1,state:{schema:1,kv:{},assets:{'music:background':{hash,type:'audio/mpeg',size:100*1024*1024+1}}}}),/Manifiesto/);
+ assert.throws(()=>cloud.updateState({baseRevision:before+1,state:{schema:1,kv:{},assets:{'p1:idleOpen':{hash,type:'image/png',size:20000001}}}}),/Manifiesto/);
+});

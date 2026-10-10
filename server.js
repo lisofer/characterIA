@@ -152,7 +152,7 @@ const server=http.createServer(async(req,res)=>{
  }
  if(route.startsWith('/api/cloud/assets/')){
   const hash=route.slice('/api/cloud/assets/'.length);
-  if(req.method==='PUT')try{return respond(res,200,cloud.putAsset(hash,await binaryBody(req)))}
+  if(req.method==='PUT')try{return respond(res,200,cloud.putAsset(hash,await binaryBody(req,100*1024*1024)))}
     catch(e){return cloudError(res,e)}
   if(req.method==='GET')try{
    const data=cloud.getAsset(hash);

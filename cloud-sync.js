@@ -58,7 +58,7 @@
  async function manifestFromFiles(files){
   const manifest={},buffers=new Map();
   for(const [key,blob] of files){
-   if(blob.size>20000000)throw Error('El archivo '+key+' excede 20 MB.');
+   if(blob.size>(key==='music:background'?100*1024*1024:20000000))throw Error('El archivo '+key+' excede el límite de '+(key==='music:background'?'100 MB':'20 MB')+'.');
    const bytes=await blob.arrayBuffer(),sha=await hash(bytes);
    manifest[key]={hash:sha,type:blob.type||'application/octet-stream',size:blob.size};
    buffers.set(sha,bytes);
@@ -283,7 +283,7 @@
    const files=new Map();
    for(const item of data.assets){
     if(typeof item.key!=='string'||item.key.length>220||typeof item.data!=='string'||
-     item.data.length>28000000)throw Error('Archivo inválido en el respaldo');
+     item.data.length>(item.key==='music:background'?145000000:28000000))throw Error('Archivo inválido en el respaldo');
     const bin=atob(item.data),bytes=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
     files.set(item.key,new Blob([bytes],{type:item.type||'application/octet-stream'}));

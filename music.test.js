@@ -6,7 +6,7 @@ test('Volumen y reducción automática',()=>{
  assert.ok(Math.abs(targetVolume(20,22,true)-.044)<1e-9);
  assert.equal(targetVolume(110,0,true),0);
  assert.equal(targetVolume(-10,0,false),0);
- assert.equal(MAX_BYTES,19000000);
+ assert.equal(MAX_BYTES,100*1024*1024);
 });
 test('Subir y bajar volumen progresivamente',()=>{
  const down=fadedVolume(.2,.04,100,true),up=fadedVolume(.04,.2,100,false);
