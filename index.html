@@ -226,6 +226,30 @@
  .shell[data-duel-mode="true"] .duel-global-caption span{font-size:2.7cqw}
 }
 @media(prefers-reduced-motion:reduce){.duel-live-heart{animation:none;opacity:0}}
+
+/* Salida de producción: solo escena real, sin chats/votos/regalos inventados. */
+.duel-broadcast{grid-template-rows:11% 56% 10% 23%;background-size:cover;background-position:center;background-repeat:no-repeat}
+.duel-live-head{justify-content:center;background:linear-gradient(#05070c9c,transparent);z-index:1}
+.duel-live-title strong{font-size:4.2cqw}
+.duel-live-title small{font-size:1.65cqw}
+.duel-live-safe{min-height:0;pointer-events:none;background:linear-gradient(transparent,#05071050)}
+.duel-broadcast .duel-global-caption{margin:1.7cqw 5.5cqw;padding:1.4cqw 2.5cqw}
+.duel-broadcast .duel-global-caption span{font-size:3.35cqw;line-height:1.28;-webkit-line-clamp:3}
+.duel-broadcast .duel-global-caption span:empty:after{content:''}
+.duel-broadcast .duel-character{cursor:pointer}
+body.live-output{width:100vw;height:100dvh;overflow:hidden;background:#05070c}
+body.live-output #appShell{display:block;position:fixed;inset:0;width:100vw;height:100dvh;overflow:hidden}
+body.live-output #appShell .rail,body.live-output #appShell .chat,body.live-output #appShell .mobile-dock,body.live-output #appShell .stage-divider{display:none!important}
+body.live-output #appShell .middle{position:absolute;inset:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#05070c}
+body.live-output #appShell .duel-broadcast{display:grid!important;width:auto;height:100dvh;max-width:100vw}
+body.live-output #appShell .duel-character{cursor:default}
+body.live-output #appShell .middle .toast{display:none!important}
+body.live-output .scene-modal{display:none!important}
+body.live-output #appShell .middle .stage-body,body.live-output #appShell .middle .stage-header,body.live-output #appShell .middle .stage-foot{display:none!important}
+@media(max-width:960px){
+ .shell[data-duel-mode="true"] .duel-broadcast .duel-global-caption{margin:1.7cqw 5.5cqw;padding:1.4cqw 2.5cqw;max-height:none}
+ .shell[data-duel-mode="true"] .duel-broadcast .duel-global-caption span{font-size:3.35cqw}
+}
 </style>
 </head>
 <body>
@@ -255,7 +279,12 @@
         <div class="field"><label for="duelTitle">Título</label><input id="duelTitle" maxlength="100" placeholder="Ej.: Una discusión inesperada"></div>
         <div class="field"><label for="duelTheme">Temática de la conversación</label><textarea id="duelTheme" rows="5" maxlength="2500" placeholder="Situación, conflicto, lugar y asunto que van a discutir..."></textarea></div>
         <div class="section-heading">Participantes</div>
-        <div class="hint">Tocá cada cuadro del escenario para elegir su personaje y su fondo.</div>
+        <div class="hint">Tocá cada cuadro para elegir personaje y fondo. El fondo general del LIVE es independiente.</div>
+        <div class="section-heading">Fondo de la transmisión</div>
+        <div class="field"><label>Imagen detrás de ambos personajes</label><div class="button-row"><button id="duelSceneBackground" type="button" class="btn small">▧ Elegir fondo general</button><span id="duelStageBackgroundLabel" class="hint">Predeterminado</span></div></div>
+        <div class="section-heading">Salida para TikTok LIVE Studio</div>
+        <div class="button-row"><button id="duelOpenOutput" type="button" class="btn primary">↗ Abrir ventana de transmisión 9:16</button></div>
+        <p class="hint">Capturá esa ventana en LIVE Studio. No se muestran configuraciones, historial ni controles. Dejá abierta esta ventana para manejar los diálogos y el audio.</p>
         <div class="field"><label for="duelLimit">Intervenciones por tanda (ambos sumados)</label><input type="number" id="duelLimit" min="1" max="30" step="1" value="6"></div>
         <div class="hint">Al completar la tanda, esperan tu siguiente intervención. Cada 30 mensajes de los personajes se actualiza un resumen.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
@@ -342,7 +371,7 @@
       <div class="caption-area"><div class="subtitle" id="liveSubtitle">Un personaje esperando su primera conversación.</div><div class="caption-note" id="captionNote">Configurá Gemini o probá el modo demo sin API.</div></div>
     </div>
     <section class="duel-broadcast" id="duelBroadcast" aria-label="Pantalla de transmisión vertical">
-      <header class="duel-live-head"><span class="duel-live-badge">LIVE</span><span class="duel-live-preview" title="Los eventos reales de TikTok todavía no están conectados">PREVIA</span><div class="duel-live-title"><strong id="duelLiveTitle">EP. 01 · DEBATE</strong><small>DOS VERSIONES · UNA VERDAD</small></div><button class="duel-live-expand" id="duelLiveExpand" title="Ampliar transmisión" aria-label="Ampliar transmisión" type="button">⛶</button></header>
+      <header class="duel-live-head"><div class="duel-live-title"><strong id="duelLiveTitle">EP. 01 · DEBATE</strong><small>DOS VERSIONES · UNA VERDAD</small></div></header>
       <div class="duel-stage" id="duelStage">
       <div class="duel-character" id="duelLeftBox" role="button" tabindex="0" aria-label="Elegir personaje y fondo izquierdos">
         <div class="duel-character-name" id="duelLeftName">Izquierda</div>
@@ -356,15 +385,7 @@
       </div>
     </div>
     <div id="duelGlobalCaption" class="duel-global-caption" aria-live="polite"><strong id="duelGlobalSpeaker"></strong><span id="duelGlobalText"></span></div>
-      <div class="duel-live-bottom">
-        <div class="duel-live-feed" id="duelLiveFeed" aria-label="Intervenciones reproducidas"><div class="duel-live-feed-label">DIÁLOGO · PREVIA</div><div class="duel-live-feed-empty">El intercambio aparecerá cuando hablen los personajes.</div></div>
-        <div class="duel-live-poll" id="duelLivePoll"><strong>¿Quién tiene razón?</strong>
-          <button class="duel-live-vote" id="duelLiveVoteLeft" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteLeftName">Izquierda</span><span id="duelVoteLeftPct">0%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteLeftBar"></span></span></button>
-          <button class="duel-live-vote right" id="duelLiveVoteRight" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteRightName">Derecha</span><span id="duelVoteRightPct">0%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteRightBar"></span></span></button>
-          <small id="duelVoteCount">0 votos · Prueba local</small></div>
-      </div>
-      <footer class="duel-live-foot"><div class="duel-live-input"><input id="duelLiveInput" maxlength="1000" placeholder="Intervenir en el debate…" aria-label="Tu intervención"><button id="duelLiveSend" type="button" title="Enviar intervención">➤</button></div><button class="duel-live-action" id="duelLiveRose" type="button" title="Reacción de prueba"><b>🌹</b>Rosa</button><button class="duel-live-action" id="duelLivePollButton" type="button" title="Votación de prueba"><b>♥</b>Votar</button><button class="duel-live-action" id="duelLiveGift" type="button" title="Regalos reales requieren conexión con TikTok"><b>🎁</b>Regalo</button><button class="duel-live-action" id="duelLiveShare" type="button" title="Compartir enlace de Persona Studio"><b>↗</b>Compartir</button></footer>
-      <div class="duel-live-controls"><button id="duelLiveNext" type="button" title="Comenzar o continuar debate">▶ Continuar</button><button id="duelLiveStop" type="button" title="Detener debate">■</button></div><div class="duel-live-hearts" id="duelLiveHearts" aria-hidden="true"></div>
+      <div class="duel-live-safe" aria-hidden="true"></div>
     </section>
     <div class="stage-foot"><button id="talkButton" class="btn primary space-button" type="button">🎙 Mantené para hablar</button><div class="foot-hint">Mantené <b>ESPACIO</b> mientras hablás.<br><b>Soltá</b> y Gemini recibe tu mensaje. <b>Esc</b> cancela.</div></div>
     <div id="toast" class="toast" role="status"></div>
@@ -394,7 +415,7 @@
 <div id="sceneModal" class="scene-modal" hidden role="dialog" aria-modal="true" aria-labelledby="sceneModalTitle">
   <div class="scene-dialog">
     <div class="scene-dialog-top"><strong id="sceneModalTitle">Elegir personaje y fondo</strong><button id="sceneClose" type="button" class="btn small ghost" aria-label="Cerrar">✕</button></div>
-    <div class="field"><label for="sceneCharacter">Personaje (obligatorio)</label><select id="sceneCharacter"></select></div>
+    <div class="field" id="sceneCharacterField"><label for="sceneCharacter">Personaje (obligatorio)</label><select id="sceneCharacter"></select></div>
     <div class="field"><label for="sceneBackground">Fondo (opcional)</label><select id="sceneBackground"></select></div>
     <div class="section-heading">Guardar un fondo nuevo</div>
     <div class="field"><label for="sceneBackgroundName">Nombre del fondo</label><input id="sceneBackgroundName" maxlength="70" placeholder="Ej.: Oficina, playa, living…"></div>
