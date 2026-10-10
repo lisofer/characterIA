@@ -155,13 +155,9 @@
 .shell[data-duel-mode="true"] .middle{background:#080b12}
 .shell[data-duel-mode="true"] .middle .duel-broadcast{display:grid}
 .duel-live-head{display:flex;align-items:center;gap:1.5cqw;padding:0 3cqw;background:linear-gradient(#080b15dc,#080b1588 80%,transparent)}
-.duel-live-badge{flex:none;background:#f73560;color:white;border-radius:1.1cqw;padding:.8cqw 1.6cqw;font-size:2.5cqw;font-weight:900;box-shadow:0 0 2cqw #ee3d5e4b}
-.duel-live-badge:before{content:'● ';font-size:1.5cqw}
-.duel-live-preview{font-size:1.65cqw;color:#c4b9c3;background:#15111bce;padding:.7cqw 1cqw;border:1px solid #ffffff3a;border-radius:1cqw;white-space:nowrap}
 .duel-live-title{min-width:0;flex:1;text-align:center;display:flex;flex-direction:column;gap:.15cqw}
 .duel-live-title strong{font-family:Georgia,serif;font-size:3.1cqw;line-height:1.15;letter-spacing:.065em;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .duel-live-title small{font-size:1.3cqw;letter-spacing:.2em;color:#c8b4bf;white-space:nowrap}
-.duel-live-expand{border:0;background:transparent;color:white;font-size:4cqw;padding:0 1cqw}
 .duel-broadcast .duel-stage{min-height:0;min-width:0;padding:1.2cqw 2cqw .5cqw;gap:1.3cqw}
 .duel-broadcast .duel-character{position:relative;min-height:0;padding:0;overflow:hidden;border:1px solid #8490a7;border-radius:2.4cqw;background:linear-gradient(#303548,#121a29);box-shadow:0 .9cqw 3cqw #0009;transition:box-shadow .16s,border-color .16s}
 .duel-broadcast .duel-character.is-speaking{border-color:#ff5279;box-shadow:0 0 0 .34cqw #ff4368aa,0 0 3cqw #ff3d6d6f}
@@ -176,38 +172,6 @@
 .duel-broadcast .duel-global-caption strong{display:none}
 .duel-broadcast .duel-global-caption span{font-family:Georgia,serif;font-size:2.7cqw;line-height:1.22;font-weight:500;color:#ffebf0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .duel-broadcast .duel-global-caption span:empty:after{content:'El debate está por comenzar…';font-style:italic;color:#cbb8c2}
-.duel-live-bottom{min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:1.9cqw;padding:2.6cqw 3cqw 1cqw;overflow:hidden}
-.duel-live-feed{min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;gap:1.1cqw}
-.duel-live-feed-label{font-size:1.7cqw;letter-spacing:.09em;color:#d9abbc;font-weight:800}
-.duel-live-feed-line{display:flex;align-items:flex-start;gap:1cqw}
-.duel-live-avatar{flex:none;width:4.1cqw;height:4.1cqw;border-radius:50%;display:grid;place-items:center;background:linear-gradient(130deg,#815370,#40426a);border:1px solid #ffffff66;color:#fff;font-size:2cqw}
-.duel-live-feed-line.human .duel-live-avatar{background:linear-gradient(120deg,#bd8050,#5e3c36)}
-.duel-live-feed-line .text{min-width:0;color:#f7eff2;font-size:2cqw;line-height:1.3;text-shadow:0 1px 2px #000}
-.duel-live-feed-line strong{display:block;color:#bdb5c6;font-size:1.8cqw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.duel-live-feed-line .text span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
-.duel-live-feed-empty{font-size:2.05cqw;color:#d7c6ce;line-height:1.5;background:#10111aba;border:1px solid #ffffff29;border-radius:1.5cqw;padding:2cqw}
-.duel-live-poll{min-width:0;align-self:center;background:#0c101bdc;border:1px solid #ffffff62;border-radius:2.6cqw;box-shadow:0 1cqw 2cqw #0009;padding:2.5cqw 2.1cqw 1.7cqw}
-.duel-live-poll>strong{display:block;text-align:center;font-family:Georgia,serif;font-size:3.1cqw;line-height:1.15;margin-bottom:1.8cqw}
-.duel-live-vote{display:block;width:100%;text-align:left;border:1px solid #ffffff15;border-radius:1.3cqw;background:#ffffff09;color:white;padding:1.1cqw 1.4cqw;margin:.8cqw 0}
-.duel-live-vote:hover{border-color:#ff6588}
-.duel-live-vote-row{display:flex;justify-content:space-between;font-size:2.2cqw;font-weight:600;gap:1cqw}
-.duel-live-vote-row .vote-name{max-width:75%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.duel-live-track{display:block;height:1.45cqw;background:#353942;border-radius:2cqw;margin-top:1.1cqw;overflow:hidden}
-.duel-live-fill{display:block;width:50%;height:100%;border-radius:2cqw;background:linear-gradient(90deg,#ff416c,#fd6c8b);transition:width .2s}
-.duel-live-vote.right .duel-live-fill{background:linear-gradient(90deg,#a9b0cd,#e4e4ef)}
-.duel-live-poll small{display:block;color:#ada8ba;font-size:1.55cqw;margin-top:1.2cqw}
-.duel-live-foot{display:flex;align-items:center;gap:1cqw;padding:1.5cqw 2.5cqw 2cqw;background:linear-gradient(transparent,#080b13e0);z-index:2}
-.duel-live-input{display:flex;align-items:center;flex:1;min-width:0;border:1px solid #ffffff69;background:#1f202ac5;border-radius:20cqw;padding:.4cqw .6cqw .4cqw 1.3cqw}
-.duel-live-input input{width:100%;flex:1;min-width:0;background:transparent;border:0;box-shadow:none!important;color:#fff;padding:.6cqw 1cqw;font-size:2.1cqw}
-.duel-live-input button{flex:none;border:0;border-radius:50%;background:#db355d;color:white;font-size:2.4cqw;height:4.3cqw;width:4.3cqw}
-.duel-live-action{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.1cqw;min-width:8cqw;border:0;background:transparent;color:white;font-size:1.65cqw;padding:.3cqw}
-.duel-live-action b{font-size:4.1cqw;line-height:1.2;font-weight:500}
-.duel-live-controls{display:flex;gap:.7cqw;position:absolute;top:9.2%;right:3cqw;z-index:6}
-.duel-live-controls button{border:1px solid #ffffff6c;border-radius:.9cqw;background:#080c18d2;color:white;padding:.55cqw 1.2cqw;font-size:1.6cqw}
-.duel-live-controls button:disabled{opacity:.5}
-.duel-live-hearts{pointer-events:none;position:absolute;right:2cqw;bottom:9%;width:8cqw;height:25%;z-index:6;overflow:hidden}
-.duel-live-heart{position:absolute;bottom:0;right:1cqw;font-size:4cqw;animation:duel-live-heart-float 2.2s ease-out both}
-@keyframes duel-live-heart-float{0%{opacity:0;transform:scale(.5)}20%{opacity:1}100%{opacity:0;transform:translate(-3cqw,-22cqw) scale(1.3)}}
 .shell.duel-focused .middle{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;min-height:0;background:#06080d}
 .shell.duel-focused .duel-broadcast{height:100dvh;width:auto;max-width:100vw}
 @media(max-width:960px){
@@ -225,7 +189,7 @@
  .shell[data-duel-mode="true"] .duel-global-caption{margin:0 8.3cqw;padding:.6cqw 2cqw;min-height:0;max-height:none;flex-direction:row}
  .shell[data-duel-mode="true"] .duel-global-caption span{font-size:2.7cqw}
 }
-@media(prefers-reduced-motion:reduce){.duel-live-heart{animation:none;opacity:0}}
+
 
 /* Salida de producción: solo escena real, sin chats/votos/regalos inventados. */
 .duel-broadcast{grid-template-rows:11% 56% 10% 23%;background-size:cover;background-position:center;background-repeat:no-repeat}
