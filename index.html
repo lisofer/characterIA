@@ -315,6 +315,8 @@ body.live-output #appShell .duel-broadcast{
           <button type="button" id="cloudPush" class="btn primary small">☁ Guardar este dispositivo</button>
           <button type="button" id="cloudPull" class="btn small">↓ Recuperar de la nube</button>
           <button type="button" id="cloudBackup" class="btn small ghost">↓ Respaldo local</button>
+          <button type="button" id="cloudRestoreBackup" class="btn small ghost">↑ Importar respaldo</button>
+          <input id="cloudBackupFile" type="file" accept="application/json,.json" hidden>
         </div>
         <p class="hint" style="margin-top:9px">La primera vez, elegí cuál dispositivo tiene los datos correctos. Después se sincronizarán automáticamente. Recuperar reemplaza los datos locales de este navegador.</p>
       </section>
