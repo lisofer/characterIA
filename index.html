@@ -309,6 +309,14 @@ body.live-output #appShell .duel-broadcast{
           <button id="profileDuplicate" class="btn small" type="button">Duplicar</button>
           <button id="profileDelete" class="btn small danger" type="button">Eliminar</button>
         </div>
+        <div class="section-heading">☁ Respaldo en la nube</div>
+        <div id="cloudStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 10px">Comprobando almacenamiento…</div>
+        <div class="button-row">
+          <button type="button" id="cloudPush" class="btn primary small">☁ Guardar este dispositivo</button>
+          <button type="button" id="cloudPull" class="btn small">↓ Recuperar de la nube</button>
+          <button type="button" id="cloudBackup" class="btn small ghost">↓ Respaldo local</button>
+        </div>
+        <p class="hint" style="margin-top:9px">La primera vez, elegí cuál dispositivo tiene los datos correctos. Después se sincronizarán automáticamente. Recuperar reemplaza los datos locales de este navegador.</p>
       </section>
       <section id="tab-duel" class="setting-tab">
         <div class="section-heading">Temáticas guardadas</div>
@@ -466,6 +474,7 @@ body.live-output #appShell .duel-broadcast{
     <div id="sceneNotice" class="hint" role="status" style="margin-top:10px"></div>
   </div>
 </div>
+<script src="/cloud-sync.js" defer></script>
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
@@ -556,8 +565,8 @@ async function loadSavedSprites(){
   }
  }catch{}
 }
-function saveSprite(key,blob){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(blob,S.activeProfile+':'+key)}catch{toast('No se pudieron guardar las imágenes. Revisá el espacio disponible.',true)}}
-function removeSavedSprite(key){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':'+key)}catch{}}
+function saveSprite(key,blob){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(blob,S.activeProfile+':'+key);window.PERSONA_CLOUD?.markAssetsDirty()}catch{toast('No se pudieron guardar las imágenes. Revisá el espacio disponible.',true)}}
+function removeSavedSprite(key){if(!S.db)return;try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':'+key);window.PERSONA_CLOUD?.markAssetsDirty()}catch{}}
 function updateSpriteCards(){for(const [key] of slotList){const card=document.querySelector(`[data-sprite="${key}"]`);const preview=card.querySelector('.slot-preview');const src=S.urls.get(key);const img=preview.querySelector('img');if(src){if(!img){const newImg=document.createElement('img');newImg.alt='Estado del avatar';preview.appendChild(newImg);preview.querySelector('.empty-icon').style.display='none'}preview.querySelector('img').src=src}else{img?.remove();preview.querySelector('.empty-icon').style.display='block'}}$('spriteCount').textContent=`${S.files.size} / 8`}
 function addSprite(key,blob,persistBlob=true){if(!keyMap.A.open||!slotList.some(x=>x[0]===key))return;if(!blob.type.startsWith('image/'))return toast('Usá un PNG, WebP, GIF o JPG válido.',true);if(blob.size>14*1024*1024)return toast('Cada imagen debe pesar menos de 14 MB.',true);const old=S.urls.get(key);if(old)URL.revokeObjectURL(old);S.files.set(key,blob);S.urls.set(key,URL.createObjectURL(blob));const preload=new Image();preload.src=S.urls.get(key);preload.decode?.().catch(()=>{});if(persistBlob)saveSprite(key,blob);updateSpriteCards();syncStageSprites();updateSpriteDiagnostic();S.lastPose='';toast('Imagen cargada. El motor la usará en su estado correspondiente.')}
 function deleteSprite(key){const old=S.urls.get(key);if(old)URL.revokeObjectURL(old);S.urls.delete(key);S.files.delete(key);removeSavedSprite(key);updateSpriteCards();syncStageSprites();updateSpriteDiagnostic();S.lastPose=''}
@@ -606,7 +615,7 @@ $('profileDuplicate').onclick=async()=>{
  data[id]=JSON.parse(JSON.stringify(data[S.activeProfile]||{settings:saved(),history:[]}));
  data[id].settings={...(data[id].settings||{}),characterName:name};storeProfileData(data);
  const list=profileIndex();list.push({id,name});saveProfileIndex(list);
- if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key);if(S.referenceBlob)tx.objectStore('sprites').put(S.referenceBlob,id+':voiceSample')}catch{}
+ if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key,blob] of S.files)tx.objectStore('sprites').put(blob,id+':'+key);if(S.referenceBlob)tx.objectStore('sprites').put(S.referenceBlob,id+':voiceSample');window.PERSONA_CLOUD?.markAssetsDirty()}catch{}
  stopAll();S.activeProfile=id;localStorage.setItem('persona-studio-active-profile-v3',id);
  clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();applyIndividualBackground();toast('Personaje duplicado.');
 };
@@ -615,7 +624,7 @@ $('profileDelete').onclick=async()=>{
  if(!confirm('¿Eliminar este personaje, sus imágenes PNG y su conversación?'))return;
  const id=S.activeProfile;stopAll();const list=profileIndex().filter(p=>p.id!==id);saveProfileIndex(list);
  const data=allProfileData();delete data[id];storeProfileData(data);
- if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key] of slotList)tx.objectStore('sprites').delete(id+':'+key);tx.objectStore('sprites').delete(id+':voiceSample')}catch{}
+ if(S.db)try{const tx=S.db.transaction('sprites','readwrite');for(const [key] of slotList)tx.objectStore('sprites').delete(id+':'+key);tx.objectStore('sprites').delete(id+':voiceSample');window.PERSONA_CLOUD?.markAssetsDirty()}catch{}
  S.activeProfile=list[0].id;localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
  clearCurrentSprites();restore();populateProfiles();await loadSavedSprites();await loadReferenceSample();applyIndividualBackground();toast('Personaje eliminado.');
 };
@@ -638,13 +647,13 @@ async function loadReferenceSample(){
 $('voiceSampleFile').onchange=async e=>{
  const file=e.target.files?.[0];if(!file)return;
  if(file.size>12*1024*1024)return toast('La muestra debe pesar menos de 12 MB.',true);
- S.referenceBlob=file;if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(file,S.activeProfile+':voiceSample')}catch{toast('No se pudo guardar el audio.',true)}
+ S.referenceBlob=file;if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').put(file,S.activeProfile+':voiceSample');window.PERSONA_CLOUD?.markAssetsDirty()}catch{toast('No se pudo guardar el audio.',true)}
  $('voiceSampleInfo').textContent='✓ '+file.name+' · '+Math.round(file.size/1024)+' KB';
  toast('Muestra guardada en este personaje.');
 };
 $('removeSample').onclick=()=>{
  S.referenceBlob=null;S.sampleAudio?.pause();S.sampleAudio=null;
- if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':voiceSample')}catch{}
+ if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete(S.activeProfile+':voiceSample');window.PERSONA_CLOUD?.markAssetsDirty()}catch{}
  $('voiceSampleInfo').textContent='Sin muestra cargada';$('voiceSampleFile').value='';
 };
 $('listenSample').onclick=()=>{
@@ -1468,7 +1477,7 @@ $('sceneSaveBackground').onclick=async()=>{
  const id='bg_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
  try{
   await new Promise((res,rej)=>{const q=S.db.transaction('sprites','readwrite').objectStore('sprites').put(file,'bg:'+id);q.onsuccess=res;q.onerror=()=>rej(Error('No se pudo guardar la imagen'))});
-  BG.items.push({id,name});saveBackgroundItems();BG.urls.set(id,URL.createObjectURL(file));
+  BG.items.push({id,name});saveBackgroundItems();BG.urls.set(id,URL.createObjectURL(file));window.PERSONA_CLOUD?.markAssetsDirty();
   fillSceneBackgrounds(id);$('sceneNotice').textContent='Fondo guardado: '+name;
   $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';
  }catch(e){$('sceneNotice').textContent=e.message}
@@ -1481,7 +1490,7 @@ $('sceneDeleteBackground').onclick=()=>{
  storeProfileData(all);
  for(const t of D.topics)for(const k of ['leftBackgroundId','rightBackgroundId','stageBackgroundId'])if(t[k]===id)t[k]='';
  saveDuel();fillSceneBackgrounds('');applyIndividualBackground();applyDuelBackgrounds();
- if(u)URL.revokeObjectURL(u);if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete('bg:'+id)}catch{}
+ if(u)URL.revokeObjectURL(u);if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete('bg:'+id);window.PERSONA_CLOUD?.markAssetsDirty()}catch{}
  $('sceneNotice').textContent='Fondo eliminado.';
 };
 $('sceneApply').onclick=async()=>{
@@ -2054,6 +2063,28 @@ if(!microphoneEnvironment().holdToTalk){
  $('micPermissionButton').textContent='⚠ Revisar micrófono';
 } 
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
+window.PERSONA_CLOUD_BRIDGE={
+ isBusy:()=>D.running,
+ refresh:async()=>{
+  if(D.running)throw Error('Detené el debate antes de recuperar datos de la nube.');
+  clearCurrentSprites();
+  for(const u of BG.urls.values())URL.revokeObjectURL(u);
+  BG.urls.clear();
+  for(const side of ['left','right']){
+   for(const url of D.urls[side])URL.revokeObjectURL(url);
+   D.urls[side]=[];D.images[side].clear();D.profiles[side]=null;D.pose[side]='';
+  }
+  const names=profileIndex();
+  if(!names.some(p=>p.id===S.activeProfile))S.activeProfile=names[0]?.id||'default';
+  localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
+  populateProfiles();restore();
+  await loadSavedSprites();await loadReferenceSample();
+  initDuel();await loadBackgroundLibrary();
+  const t=duelActive();
+  if(t)await Promise.all([loadDuelSprites('left',t.left),loadDuelSprites('right',t.right)]);
+  applyIndividualBackground();applyDuelBackgrounds();
+ }
+};
 migrateWorkspaceOnce();populateProfiles();
 try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
 populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();loadBackgroundLibrary();connectLiveWindows();requestAnimationFrame(frame);status('Listo para conversar');
