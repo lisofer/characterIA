@@ -152,6 +152,39 @@
    status('Respaldo local descargado.');
   }catch(e){showError(e)}finally{busy=false}
  }
+ async function restoreLocalBackup(file){
+  if(busy||b()?.isBusy())return status('Detené el debate antes de importar un respaldo.',true);
+  if(!file||file.size>350000000)return status('Archivo de respaldo inválido o demasiado grande.',true);
+  if(!confirm('¿Importar este respaldo? Reemplazará los personajes, voces, fondos y debates LOCALES de este dispositivo.'))return;
+  busy=true;
+  try{
+   status('Leyendo el respaldo local…');
+   const backup=JSON.parse(await file.text());
+   if(backup?.schema!==1||!backup.kv||!Array.isArray(backup.assets)||
+      Object.keys(backup.kv).some(k=>!keys.includes(k))||backup.assets.length>750)
+    throw Error('Formato de respaldo inválido.');
+   const files=[];
+   for(const item of backup.assets){
+    if(typeof item.key!=='string'||item.key.length>220||typeof item.data!=='string'||
+       typeof item.type!=='string')throw Error('Archivo de respaldo inválido.');
+    const binary=atob(item.data);
+    if(binary.length>20000000)throw Error('Una imagen o voz supera el límite de 20 MB.');
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    files.push({key:item.key,blob:new Blob([bytes],{type:item.type})});
+   }
+   await writeAssets(files);
+   for(const key of keys){
+    if(typeof backup.kv[key]==='string')localStorage.setItem(key,backup.kv[key]);
+    else localStorage.removeItem(key);
+   }
+   markAssetsDirty();
+   conflict=linked; // Nunca subir una importación accidentalmente si hay otra copia remota.
+   await b().refresh();
+   status('✓ Respaldo importado. Si querés compartirlo, tocá Guardar este dispositivo.');
+  }catch(e){showError(e)}
+  finally{busy=false}
+ }
  function hasLocalWork(){
   try{
    const profiles=JSON.parse(localStorage.getItem(keys[1])||'[]');
@@ -188,6 +221,11 @@
    conflict=false;pull(true);
   };
   $('cloudBackup').onclick=downloadBackup;
+ $('cloudRestoreBackup').onclick=()=>$('cloudBackupFile').click();
+ $('cloudBackupFile').onchange=e=>{
+  const file=e.target.files?.[0];if(file)restoreLocalBackup(file);
+  e.target.value='';
+ };
   try{
    const cloudStatus=(await call('/api/cloud/status')).json();
    const cloud=await cloudStatus;available=Boolean(cloud.available);
