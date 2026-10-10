@@ -999,21 +999,40 @@ function duelParseBatch(response,count){
  if(result.some(x=>!x))throw Error('Gemini dejó una intervención vacía.');
  return result;
 }
+// El susurro es una nota de dirección externa al diálogo, no una frase del moderador.
+function duelLatestDirection(t){
+ return [...t.messages].reverse().find(m=>m.side==='human'&&m.kind==='whisper')?.text.slice(0,1000)||'';
+}
+function duelPublicContext(t){
+ const spoken=t.messages.filter(m=>m.kind!=='whisper');
+ const recent=spoken.slice(-12),moderator=spoken.filter(m=>m.side==='human').slice(-4);
+ return [...moderator.filter(m=>!recent.includes(m)),...recent]
+  .map(m=>(m.side==='human'?'MODERADOR':duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
+}
 async function duelGenerateBatch(t,participants,count){
  const model=getConversationModel()||DUEL_MODEL;
- const recent=t.messages.slice(-12);
- const notes=t.messages.filter(m=>m.side==='human').slice(-6);
- const context=[...notes.filter(m=>!recent.includes(m)),...recent];
- const prior=context.map(m=>(m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR (no mencionar ni citar)':'MODERADOR'):duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
+ const prior=duelPublicContext(t);
+ const direction=duelLatestDirection(t);
  const summary=t.summary?'Resumen acumulado: '+t.summary.slice(0,1400)+'\n':'';
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
  const names=Array.from({length:count},(_,i)=>((i+(first==='right'?1:0))%2===0?nLeft:nRight));
- const instruction='Escribís una escena dialogada entre dos personajes ficticios con un moderador que participa de verdad. Sus personalidades definen cómo hablan; la temática define de qué hablan. '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
+ const directionRules=
+  '\nDIRECCIÓN DE ESCENA: una nota de dirección es una instrucción fuera de cámara del creador, NO una intervención oral del moderador, NO un mensaje del chat y NO información que los personajes hayan escuchado. '+
+  'Usá esa indicación únicamente para orientar qué sucede después, las decisiones, los temas, los giros y las actitudes de los personajes. '+
+  'Integrá el cambio naturalmente, como iniciativa propia de los personajes. '+
+  'NUNCA respondas a la dirección, ni la reconozcas, ni la agradezcas, ni la cites, ni la reformules, ni preguntes por ella. '+
+  'No digas "tenés razón, moderador", "como dijiste", "lo que me pediste", "voy a obedecer", ni otras referencias a la existencia de la nota. '+
+  'Los personajes NO SABEN que hubo un susurro. Si la sugerencia ya produjo un cambio, continuá sus consecuencias sin repetir la orden.';
+ const instruction='Escribís una escena dialogada entre dos personajes ficticios. Sus personalidades definen cómo hablan; la temática define de qué hablan. '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
  '\n'+nRight+': '+String(duelProfile(participants.right).persona||'Personaje espontáneo').slice(0,1700)+
- '\nIMPORTANTE: respondé explícitamente las preguntas y comentarios recientes del MODERADOR. El moderador forma parte de esta conversación y se le debe prestar atención, no ignorarlo para continuar un guion anterior. Si pregunta algo, el primer personaje que hable debe contestarle de forma natural, y el otro también puede reaccionar. No inventes comentarios del chat ni votos reales. Las INSTRUCCIONES PRIVADAS DEL MODERADOR se aplican sin leerlas, repetirlas, explicarlas ni reconocer su existencia ante el público.\nProducí exactamente '+count+' intervenciones, alternando según el orden indicado. Cada intervención debe reaccionar a lo dicho previamente y avanzar el conflicto. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON: {"lines":["primera intervención","segunda intervención"]}.';
+ '\nDIFERENCIÁ DOS COSAS: las intervenciones públicas del MODERADOR sí son escuchadas y deben ser contestadas naturalmente cuando contienen preguntas o comentarios. La dirección privada jamás se escucha y jamás se contesta. '+
+ 'No inventes comentarios del chat, votos ni espectadores reales.'+
+ directionRules+
+ (direction?'\nDIRECCIÓN PRIVADA VIGENTE (SOLO PARA LA CONSTRUCCIÓN DE LA HISTORIA; NO PRONUNCIAR NI RECONOCER): '+direction:'')+
+ '\nProducí exactamente '+count+' intervenciones, alternando según el orden indicado. Cada intervención debe reaccionar a lo dicho públicamente y avanzar la historia. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON: {"lines":["primera intervención","segunda intervención"]}.';
  const input='Título: '+t.title.slice(0,100)+'\nTema: '+t.theme.slice(0,2200)+'\n'+summary+
- 'Conversación reciente (el mensaje más nuevo del moderador tiene prioridad sobre el tema general):\n'+(prior||'Inicio de la escena')+'\nOrden obligatorio: '+names.map((n,i)=>(i+1)+'. '+n).join('; ');
+ 'Conversación pública reciente (solo responder a lo que realmente se dijo en voz alta):\n'+(prior||'Inicio de la escena')+'\nOrden obligatorio: '+names.map((n,i)=>(i+1)+'. '+n).join('; ');
  const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(5000,Math.max(280,count*135+160)),responseMimeType:'application/json'}};
  const result=await duelRequest(model,payload);
  return duelParseBatch(result,count);
@@ -1029,8 +1048,8 @@ async function summarizeDuel(t){
    if(spoken>=(t.summaryAt||0)&&spoken<=target)segment.push(m);
   }
   const previous=t.summary?'Resumen previo:\n'+t.summary.slice(0,1500)+'\n':'';
-  const lines=segment.map(m=>duelMessageLabel(m)+': '+m.text.slice(0,250)).join('\n');
-  const payload={contents:[{role:'user',parts:[{text:'Actualizá el resumen de este diálogo ficticio. Conservá hechos, conflictos, decisiones, relaciones y detalles relevantes; no inventes. Máximo 190 palabras.\n'+previous+'Últimas 30 intervenciones con contexto humano:\n'+lines}]}],generationConfig:{temperature:.2,maxOutputTokens:320}};
+  const lines=segment.filter(m=>m.kind!=='whisper').map(m=>duelMessageLabel(m)+': '+m.text.slice(0,250)).join('\n');
+  const payload={contents:[{role:'user',parts:[{text:'Actualizá el resumen del diálogo público de esta historia ficticia. Conservá hechos, conflictos, decisiones y sus consecuencias observables; no menciones ni inventes indicaciones externas de producción. Máximo 190 palabras.\n'+previous+'Últimas 30 intervenciones con contexto humano:\n'+lines}]}],generationConfig:{temperature:.2,maxOutputTokens:320}};
   try{
    t.summary=(await duelRequest(DUEL_MODEL,payload)).slice(0,1800);
    t.summaryAt=target;saveDuel();$('duelSummary').textContent=t.summary;
