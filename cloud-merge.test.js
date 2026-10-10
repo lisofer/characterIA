@@ -53,3 +53,29 @@ test('No modifica ni el original remoto ni el local',()=>{
  assert.equal(JSON.stringify(pc),beforeA);
  assert.equal(JSON.stringify(phone),beforeB);
 });
+const GLOBAL='persona-studio-global-v3',MUSIC='music:background';
+const musicCfg=(name,time)=>JSON.stringify({music:{name,size:100,updatedAt:time,volume:18,duck:22}});
+const musicAsset=(letter)=>({hash:letter.repeat(64),type:'audio/mpeg',size:100});
+test('La pista más reciente reemplaza la anterior sin duplicados',()=>{
+ const remote=snapshot();remote.kv[GLOBAL]=musicCfg('vieja.mp3',100);remote.assets[MUSIC]=musicAsset('a');
+ const newer={schema:1,kv:{[GLOBAL]:musicCfg('nueva.mp3',200)},assets:{[MUSIC]:musicAsset('b')}};
+ const result=merge(remote,newer,{base:remote}).state;
+ assert.equal(result.assets[MUSIC].hash,'b'.repeat(64));
+ assert.equal(Object.keys(result.assets).filter(k=>k.includes('music')).length,1);
+ assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'nueva.mp3');
+});
+test('Borrar la música también se sincroniza',()=>{
+ const remote=snapshot();remote.kv[GLOBAL]=musicCfg('vieja.mp3',100);remote.assets[MUSIC]=musicAsset('a');
+ const removed={schema:1,kv:{[GLOBAL]:musicCfg('',300)},assets:{}};
+ const result=merge(remote,removed,{base:remote}).state;
+ assert.equal(result.assets[MUSIC],undefined);
+ assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'');
+});
+test('Una versión vieja de otro dispositivo no reemplaza la canción nueva',()=>{
+ const original=snapshot();original.kv[GLOBAL]=musicCfg('vieja.mp3',100);original.assets[MUSIC]=musicAsset('a');
+ const remote=snapshot();remote.kv[GLOBAL]=musicCfg('nueva.mp3',400);remote.assets[MUSIC]=musicAsset('b');
+ const stale={schema:1,kv:{[GLOBAL]:musicCfg('',250)},assets:{}};
+ const result=merge(remote,stale,{base:original}).state;
+ assert.equal(result.assets[MUSIC].hash,'b'.repeat(64));
+ assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'nueva.mp3');
+});

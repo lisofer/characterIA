@@ -3,6 +3,7 @@
  'use strict';
  const PROFILE='persona-studio-profiles-v3', INDEX='persona-studio-profile-index-v3';
  const TOPICS='persona-studio-duels-v1', BACKGROUNDS='persona-studio-backgrounds-v1';
+ const GLOBAL='persona-studio-global-v3', MUSIC='music:background';
  const deep=value=>JSON.parse(JSON.stringify(value));
  const parse=(kv,key,fallback)=>{try{const value=JSON.parse(kv?.[key]||'null');return value===null?deep(fallback):value}catch{return deep(fallback)}};
  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -27,6 +28,7 @@
   const duels=parse(kv,TOPICS,{topics:[]});
   if(duels.topics?.some(t=>t.theme||t.messages?.length||t.left||t.right||(t.title&&t.title!=='Nueva temática')))return true;
   if(parse(kv,BACKGROUNDS,[]).length)return true;
+  if(parse(kv,GLOBAL,{}).music?.name)return true;
   return false;
  }
  function merge(remote,local,options={}){
@@ -97,6 +99,7 @@
    if(!rindex.has(item.id)){const copy=deep(item);ri.push(copy);rindex.set(copy.id,copy)}
   }
   for(const [key,asset] of Object.entries(la)){
+   if(key===MUSIC)continue; // La música nunca crea versiones duplicadas.
    let target=key;
    if(key.startsWith('bg:')){
     const id=key.slice(3);target='bg:'+(bgMap[id]||id);
@@ -145,6 +148,22 @@
   for(const [k,v] of Object.entries(lkv)){
    if(!has(rkv,k)||options.base&&!has([PROFILE,INDEX,TOPICS,BACKGROUNDS].reduce((o,x)=>(o[x]=true,o),{}),k)&&
        (rkv[k]===options.base.kv?.[k]))rkv[k]=v;
+  }
+  // Pista global única: reemplazar o borrar según la última actualización.
+  if(has(lkv,GLOBAL)){
+   const localMusic=parse(lkv,GLOBAL,{}).music;
+   if(localMusic&&typeof localMusic==='object'){
+    const oldMusic=parse(options.base?.kv,GLOBAL,{}).music;
+    const remoteMusic=parse(remote.kv,GLOBAL,{}).music;
+    const changed=!options.base||!equal(localMusic,oldMusic)||
+     (has(la,MUSIC)&&!equal(la[MUSIC],options.base.assets?.[MUSIC]));
+    if(changed&&(Number(localMusic.updatedAt)||0)>=(Number(remoteMusic?.updatedAt)||0)){
+     const settings=parse(rkv,GLOBAL,{});
+     settings.music=deep(localMusic);rkv[GLOBAL]=JSON.stringify(settings);
+     if(!localMusic.name)delete ra[MUSIC];
+     else if(has(la,MUSIC))ra[MUSIC]=deep(la[MUSIC]);
+    }
+   }
   }
   return {state:result,forks};
  }
