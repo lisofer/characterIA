@@ -330,9 +330,14 @@ body.live-output #appShell .duel-broadcast{
         <div class="hint">Tocá cada cuadro para elegir personaje y fondo. El fondo general del LIVE es independiente.</div>
         <div class="section-heading">Fondo de la transmisión</div>
         <div class="field"><label>Imagen detrás de ambos personajes</label><div class="button-row"><button id="duelSceneBackground" type="button" class="btn small">▧ Elegir fondo general</button><span id="duelStageBackgroundLabel" class="hint">Predeterminado</span></div></div>
-        <div class="section-heading">Salida para TikTok LIVE Studio</div>
-        <div class="button-row"><button id="duelOpenOutput" type="button" class="btn primary">↗ Abrir ventana de transmisión 9:16</button></div>
-        <p class="hint">Capturá esa ventana en LIVE Studio. No se muestran configuraciones, historial ni controles. Dejá abierta esta ventana para manejar los diálogos y el audio.</p>
+        <div class="section-heading">TikTok LIVE Studio · Escenario sin Chrome</div>
+        <div class="button-row"><button id="duelCopyLiveLink" type="button" class="btn primary">🔗 Copiar enlace LIVE 9:16</button></div>
+        <div class="field" style="margin-top:8px"><input id="duelLiveLink" type="text" readonly placeholder="Tocá Copiar enlace LIVE" aria-label="Enlace privado de la fuente web"></div>
+        <p class="hint" id="duelLiveLinkStatus">En LIVE Studio: Agregar fuente → Link / Página web → pegar enlace → resolución 1080 × 1920. El público verá únicamente el escenario y nunca la barra de Chrome.</p>
+        <details style="margin-top:9px"><summary class="hint">Alternativa: capturar ventana de Chrome</summary>
+          <div class="button-row" style="margin-top:8px"><button id="duelOpenOutput" type="button" class="btn small ghost">↗ Abrir ventana tradicional</button></div>
+          <p class="hint">Si tu LIVE Studio no ofrece Link, usá captura de ventana y recortá la barra de Chrome.</p>
+        </details>
         <div class="field"><label for="duelLimit">Intervenciones por tanda (ambos sumados)</label><input type="number" id="duelLimit" min="1" max="30" step="1" value="6"></div>
         <div class="hint">Al completar la tanda, esperan tu siguiente intervención. Cada 30 mensajes de los personajes se actualiza un resumen.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
@@ -783,8 +788,12 @@ $('duelExport').onclick=()=>{
    Usa BroadcastChannel ENTRE VENTANAS del mismo origen y navegador.
    Gemini/Fish se ejecutan SOLO en el panel de control. */
 let liveOutputLastPing=0,liveBackgroundLoading=false;
+let liveWebEnabled=false,liveWebLastSent=0,liveWebInFlight=false,liveWebErrorShown=false;
+try{liveWebEnabled=localStorage.getItem('persona-studio-live-link-enabled-v1')==='yes'}catch{}
 function publishLiveSnapshot(){
- if(LIVE_OUTPUT_MODE||!LIVE_CHANNEL||Date.now()-liveOutputLastPing>12000)return;
+ if(LIVE_OUTPUT_MODE)return;
+ const windowListening=Boolean(LIVE_CHANNEL&&Date.now()-liveOutputLastPing<12000);
+ if(!windowListening&&!liveWebEnabled)return;
  const t=duelActive();if(!t)return;
  const characters=D.running&&D.batchCharacters?D.batchCharacters:{left:t.left,right:t.right};
  const p=D.speech;
@@ -793,11 +802,28 @@ function publishLiveSnapshot(){
   const elapsed=p.audio?p.audio.currentTime*1000:performance.now()-p.started;
   speech={side:p.side,ready:true,plan:p.plan,delay:p.delay,intensity:p.intensity,elapsed:Math.max(0,elapsed)};
  }
- LIVE_CHANNEL.postMessage({type:'scene',
+ const snapshot={type:'scene',
   topic:{id:t.id,title:t.title,left:characters.left,right:characters.right,
          leftBackgroundId:t.leftBackgroundId||'',rightBackgroundId:t.rightBackgroundId||'',
          stageBackgroundId:t.stageBackgroundId||''},
-  episode:$('duelLiveTitle').textContent,scales:{left:duelScaleForSide('left'),right:duelScaleForSide('right')},speech});
+  episode:$('duelLiveTitle').textContent,
+  names:{left:duelName(characters.left),right:duelName(characters.right)},
+  scales:{left:duelScaleForSide('left'),right:duelScaleForSide('right')},speech};
+ if(windowListening)LIVE_CHANNEL.postMessage(snapshot);
+ const now=Date.now(),interval=D.running?280:1100;
+ if(liveWebEnabled&&!liveWebInFlight&&now-liveWebLastSent>=interval){
+  liveWebLastSent=now;liveWebInFlight=true;
+  fetch('/api/live/scene',{method:'POST',headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',body:JSON.stringify(snapshot)})
+   .then(r=>{if(!r.ok)throw Error('HTTP '+r.status);liveWebErrorShown=false})
+   .catch(error=>{
+    if(!liveWebErrorShown){
+     liveWebErrorShown=true;
+     $('duelLiveLinkStatus').textContent='⚠ La fuente LIVE no recibe actualizaciones: '+error.message;
+    }
+   })
+   .finally(()=>{liveWebInFlight=false});
+ }
 }
 function receiveLiveSnapshot(message){
  if(!LIVE_OUTPUT_MODE||message?.type!=='scene'||!message.topic)return;
@@ -837,6 +863,21 @@ function connectLiveWindows(){
   setInterval(publishLiveSnapshot,140);
  }
 }
+$('duelCopyLiveLink').onclick=async()=>{
+ try{
+  const res=await fetch('/api/live/link',{credentials:'same-origin',cache:'no-store'});
+  if(!res.ok)throw Error('No se pudo obtener el enlace de Railway ('+res.status+').');
+  const info=await res.json(),url=new URL(info.path,location.origin).href;
+  const field=$('duelLiveLink');field.value=url;
+  liveWebEnabled=true;try{localStorage.setItem('persona-studio-live-link-enabled-v1','yes')}catch{}
+  publishLiveSnapshot();
+  let copied=false;
+  try{await navigator.clipboard.writeText(url);copied=true}catch{field.focus();field.select()}
+  $('duelLiveLinkStatus').textContent=(copied?'✓ Enlace copiado. ':'Seleccioná y copiá el enlace. ')+
+   'En LIVE Studio: Agregar fuente → Link / Página web → pegar → resolución 1080 × 1920. NO uses Captura de ventana. El sonido sigue viniendo del panel principal. Conservá este enlace en privado.';
+  toast(copied?'Enlace LIVE copiado: pegalo como fuente Link.':'Enlace generado: copiá el campo de texto.');
+ }catch(error){toast('No se pudo generar el enlace LIVE: '+error.message,true)}
+};
 $('duelOpenOutput').onclick=()=>{
  if(LIVE_OUTPUT_MODE)return;
  if(!LIVE_CHANNEL)return toast('Tu navegador no soporta la sincronización entre ventanas.',true);
