@@ -299,9 +299,11 @@ body.live-output #appShell .duel-broadcast{
 .music-playback input[type=range]{flex:1;min-width:0;accent-color:var(--mint);cursor:pointer}
 .music-playback input[type=range]:disabled{opacity:.4;cursor:default}
 #musicClock{white-space:nowrap;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;min-width:73px;text-align:right}
-.music-footer{display:flex;align-items:center;gap:10px;min-height:20px;color:var(--muted);font-size:11px}
+.music-footer{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;min-height:20px;color:var(--muted);font-size:11px}
 .music-footer span{white-space:nowrap}
 .music-levels{margin-left:auto;max-width:100%}
+.music-levels[open]{order:3;flex:1 1 100%;margin-left:0;max-width:none}
+.music-levels[open]>summary{text-align:right}
 .music-levels>summary{cursor:pointer;list-style:none;white-space:nowrap;color:var(--blue);font-size:11px}
 .music-levels>summary::-webkit-details-marker{display:none}
 .music-level-controls{display:grid;grid-template-columns:1fr;gap:4px;margin-top:10px;padding:10px;background:#0b1421;border:1px solid var(--line);border-radius:9px;min-width:0}
