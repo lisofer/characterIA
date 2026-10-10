@@ -393,7 +393,15 @@ body.live-output #appShell .middle .stage-body,body.live-output #appShell .middl
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
 const LIVE_OUTPUT_MODE=new URLSearchParams(location.search).get('output')==='1';
-const LIVE_CHANNEL=typeof BroadcastChannel==='function'?new BroadcastChannel('persona-studio-live-sync-v1'):null;
+const LIVE_OUTPUT_SESSION=(()=>{
+ if(LIVE_OUTPUT_MODE)return new URLSearchParams(location.search).get('channel')||'sin-vincular';
+ try{
+  let id=sessionStorage.getItem('persona-studio-live-channel-v1');
+  if(!id){id=typeof crypto?.randomUUID==='function'?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);sessionStorage.setItem('persona-studio-live-channel-v1',id)}
+  return id;
+ }catch{return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}
+})();
+const LIVE_CHANNEL=typeof BroadcastChannel==='function'?new BroadcastChannel('persona-studio-live-sync-v1-'+LIVE_OUTPUT_SESSION):null;
 const S={files:new Map(),urls:new Map(),db:null,history:[],activeProfile:'default',profiles:[],currentViseme:'REPOSO',previewSilentOnce:false,referenceBlob:null,sampleAudio:null,narrationBusy:false,fishAbort:null,fishControllers:new Set(),fishPreloading:0,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
 const settingsIds=['model','customModel','characterName','persona','creativity','mouthIntensity','voiceDelay','voiceProvider','fishTranscript','fishLatency','fishTemperature','fishFallback','rate','pitch','transcriptionModel','recognitionLang','enableSpeech','autoBlink'];
 const slotList=[['aClosed','Ojos cerrados','Boca A'],['aOpen','Ojos abiertos','Boca A'],['idleClosed','Ojos cerrados','Boca cerrada'],['idleOpen','Ojos abiertos','Boca cerrada'],['oClosed','Ojos cerrados','Boca O'],['oOpen','Ojos abiertos','Boca O'],['eClosed','Ojos cerrados','Boca E'],['eOpen','Ojos abiertos','Boca E']];
@@ -725,7 +733,7 @@ function connectLiveWindows(){
 $('duelOpenOutput').onclick=()=>{
  if(LIVE_OUTPUT_MODE)return;
  if(!LIVE_CHANNEL)return toast('Tu navegador no soporta la sincronización entre ventanas.',true);
- const url=new URL(location.href);url.searchParams.set('output','1');
+ const url=new URL(location.href);url.searchParams.set('output','1');url.searchParams.set('channel',LIVE_OUTPUT_SESSION);
  const output=window.open(url.toString(),'persona-studio-live-output','popup=yes,width=540,height=960');
  if(!output)return toast('El navegador bloqueó la ventana: permití ventanas emergentes para este sitio.',true);
  output.focus();toast('Capturá la ventana «Salida LIVE» en TikTok LIVE Studio; el audio sale del panel principal.');
