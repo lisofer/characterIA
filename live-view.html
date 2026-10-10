@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Persona Studio · Escena LIVE 9:16</title>
+<style>
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#05070c;color:#fff3f6}
+body{display:grid;place-items:center;font-family:Inter,system-ui,sans-serif}
+#screen{position:relative;isolation:isolate;width:min(100vw,56.25dvh);height:min(100dvh,177.777777vw);aspect-ratio:9/16;max-width:100vw;max-height:100dvh;min-width:0;min-height:0;overflow:hidden;container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:11% 56% 10% 23%;background:radial-gradient(ellipse at 76% 78%,#54363b54,transparent 58%),linear-gradient(160deg,#0c1421,#211721 55%,#070a11);background-size:cover;background-position:center}
+#head{min-width:0;display:flex;justify-content:center;align-items:center;padding:0 3cqw;overflow:hidden;background:linear-gradient(#05070c9c,transparent)}
+#heading{width:100%;min-width:0;display:flex;flex-direction:column;gap:.2cqw;align-items:center;text-align:center}
+#heading strong{font-family:Georgia,serif;font-size:clamp(11px,3.65cqw,29px);font-weight:500;line-height:1.13;letter-spacing:.065em;max-width:100%;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#heading small{font-size:1.65cqw;letter-spacing:.2em;color:#c8b4bf}
+#stage{display:flex;min-width:0;min-height:0;gap:1.3cqw;padding:1.2cqw 2cqw .5cqw}
+.character{position:relative;flex:1 1 0;min-width:0;min-height:0;overflow:hidden;border:1px solid #8490a7;border-radius:2.4cqw;background:linear-gradient(#303548,#121a29);box-shadow:0 .9cqw 3cqw #0009}
+.character.talking{border-color:#ff5279;box-shadow:0 0 0 .34cqw #ff4368aa,0 0 3cqw #ff3d6d6f}
+.character.talking:before{content:'◖)) HABLANDO';position:absolute;z-index:5;top:1.6cqw;left:1.6cqw;color:#ffadc1;background:#250912dc;border:1px solid #ff5e81;border-radius:1.2cqw;padding:.6cqw 1.15cqw;font-size:1.85cqw;font-weight:750}
+.portrait{position:absolute;inset:0;background:#1b2030;background-size:cover;background-position:center}
+.portrait:after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,transparent 72%,#040609b8 100%)}
+.portrait canvas{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 1cqw 2cqw #0008)}
+.person-name{position:absolute;z-index:3;left:1.6cqw;bottom:1.6cqw;max-width:calc(100% - 3.2cqw);padding:.65cqw 1.4cqw;text-align:left;background:#070910e6;border:1px solid #d2cad2a6;border-radius:1cqw;font-family:Georgia,serif;font-size:3.1cqw;line-height:1.2}
+.person-name:after{content:'  🎙';font-family:system-ui;font-size:1.9cqw;opacity:.8}
+#caption{display:flex;align-items:center;justify-content:center;margin:1.7cqw 5.5cqw;padding:1.4cqw 2.5cqw;min-height:0;border:1px solid #ff507b;border-radius:1.8cqw;background:#1d0b1be9;box-shadow:0 0 2cqw #fc3d712c;text-align:center;overflow:hidden}
+#caption span{font-family:Georgia,serif;font-size:3.35cqw;line-height:1.28;font-weight:500;color:#ffebf0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+#safe{min-height:0;pointer-events:none;background:linear-gradient(transparent,#05071050)}
+#waiting{position:absolute;z-index:10;inset:0;display:grid;place-items:center;background:#0c1320ef;text-align:center;padding:10%;font-size:4cqw}
+#waiting[hidden]{display:none}
+</style>
+</head>
+<body>
+<main id="screen" aria-label="Salida vertical en directo de Persona Studio">
+ <header id="head"><div id="heading"><strong id="title">PERSONA STUDIO · LIVE</strong><small>DOS VERSIONES · UNA VERDAD</small></div></header>
+ <section id="stage">
+  <div id="leftBox" class="character"><div id="leftPortrait" class="portrait"><canvas id="leftCanvas"></canvas></div><div id="leftName" class="person-name">Personaje 1</div></div>
+  <div id="rightBox" class="character"><div id="rightPortrait" class="portrait"><canvas id="rightCanvas"></canvas></div><div id="rightName" class="person-name">Personaje 2</div></div>
+ </section>
+ <section id="caption"><span id="words"></span></section>
+ <div id="safe"></div>
+ <div id="waiting">Esperando a Persona Studio…<br>Iniciá el panel de control para mostrar los personajes.</div>
+</main>
+<script>
+(()=>{
+ 'use strict';
+ const token=new URLSearchParams(location.search).get('key')||'';
+ const $=id=>document.getElementById(id);
+ const assets={};const images={left:new Map(),right:new Map()};
+ const state={scene:null,updated:0,receivedAt:0,blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''},scales:{left:1.1,right:1.1}};
+ const slots=['idleOpen','idleClosed','aOpen','aClosed','oOpen','oClosed','eOpen','eClosed'];
+ const map={closed:{open:'idleOpen',closed:'idleClosed'},A:{open:'aOpen',closed:'aClosed'},O:{open:'oOpen',closed:'oClosed'},E:{open:'eOpen',closed:'eClosed'}};
+ const assetUrl=sha=>'/api/live/asset/'+sha+'?key='+encodeURIComponent(token);
+ let fetching=false;
+ async function update(){
+  if(fetching)return;fetching=true;
+  try{
+   const res=await fetch('/api/live/state?key='+encodeURIComponent(token),{cache:'no-store'});
+   if(!res.ok)throw Error('No se pudo conectar la salida LIVE');
+   const payload=await res.json(),scene=payload.scene;
+   if(!scene){$('waiting').hidden=false;state.scene=null;return}
+   $('waiting').hidden=true;
+   state.scene=scene;state.updated=payload.updatedAt;state.receivedAt=performance.now();
+   $('title').textContent=scene.episode||scene.topic?.title||'PERSONA STUDIO · LIVE';
+   for(const side of ['left','right']){
+    $(side+'Name').textContent=scene.names?.[side]||'Personaje';
+    state.scales[side]=Math.max(.8,Math.min(1.4,Number(scene.scales?.[side])||1.1));
+    const id=scene.topic?.[side]||'',mapForSide=images[side],keys=[];
+    for(const slot of slots){
+     const key=id+':'+slot;
+     const meta=payload.assets?.[key]||(id==='default'?payload.assets?.[slot]:null);
+     if(!meta)continue;
+     keys.push(slot);
+     const existing=mapForSide.get(slot);
+     if(existing?.hash===meta.hash)continue;
+     const img=new Image();img.onload=()=>{state.pose[side]=''};img.src=assetUrl(meta.hash);
+     mapForSide.set(slot,{img,hash:meta.hash});
+    }
+    for(const key of [...mapForSide.keys()])if(!keys.includes(key)){mapForSide.delete(key);state.pose[side]=''}
+    const bg=payload.assets?.['bg:'+(scene.topic?.[side+'BackgroundId']||'')];
+    $(side+'Portrait').style.backgroundImage=bg?'url("'+assetUrl(bg.hash)+'")':'';
+   }
+   const general=payload.assets?.['bg:'+(scene.topic?.stageBackgroundId||'')];
+   $('screen').style.backgroundImage=general?'linear-gradient(#080d1b30,#080d1b30),url("'+assetUrl(general.hash)+'")':'';
+  }catch(e){$('waiting').textContent='Esperando conexión con Persona Studio…';$('waiting').hidden=false}
+  finally{fetching=false}
+ }
+ function render(now){
+  const scene=state.scene;
+  if(scene){
+   const speech=scene.speech?.ready&&scene.speech.side!=='moderator'?scene.speech:null;
+   const elapsed=speech?(speech.elapsed+Math.max(0,now-state.receivedAt)+speech.delay):0;
+   const plan=speech?.plan||null;
+   let wordIndex=-1,completed=-1,subtitle='';
+   if(plan){
+    for(let i=0;i<plan.words.length;i++){
+     if(elapsed>=plan.offsets[i]+plan.lengths[i])completed=i;
+     if(elapsed>=plan.offsets[i]&&elapsed<plan.offsets[i]+plan.lengths[i]){wordIndex=i;break}
+    }
+    const sentence=wordIndex>=0?plan.sentences.find(q=>wordIndex>=q.first&&wordIndex<=q.last):
+      plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
+    if(sentence&&!(wordIndex<0&&completed===sentence.last))subtitle=sentence.text;
+   }
+   if($('words').textContent!==subtitle)$('words').textContent=subtitle;
+   for(const side of ['left','right']){
+    const active=speech?.side===side&&wordIndex>=0;
+    $(side+'Box').classList.toggle('talking',Boolean(active));
+    if(!state.blink[side])state.blink[side]=now+2500+Math.random()*4000;
+    let blink=now<state.blinkUntil[side];
+    if(now>=state.blink[side]){state.blinkUntil[side]=now+115;state.blink[side]=now+2600+Math.random()*3700;blink=true}
+    let mouth='closed';
+    if(active&&plan){
+     const word=plan.words[wordIndex]?.text||'';
+     const dur=plan.lengths[wordIndex],age=elapsed-plan.offsets[wordIndex];
+     const attack=Math.min(62,Math.max(20,dur*.11));
+     const hold=Math.min(dur-attack-18,Math.max(95,Math.min(240,dur*(.32+(speech.intensity||45)/100*.2))));
+     if(age>=attack&&age<attack+hold){
+      const vowel=(word.match(/[aoe]/i)||[])[0]?.toUpperCase()||'A';
+      mouth=vowel==='O'?'O':vowel==='E'?'E':'A';
+     }
+    }
+    const m=images[side],preferred=map[mouth]?.[blink?'closed':'open'];
+    const alternate=map[mouth]?.[blink?'open':'closed'];
+    const key=[preferred,alternate,'idleOpen','idleClosed',...slots].find(k=>m.get(k)?.img?.naturalWidth)||'';
+    const el=$(side+'Canvas'),rect=el.getBoundingClientRect(),ctx=el.getContext('2d');
+    if(!ctx||rect.width<=0||rect.height<=0)continue;
+    const ratio=Math.min(2,window.devicePixelRatio||1),w=Math.round(rect.width*ratio),h=Math.round(rect.height*ratio);
+    if(el.width!==w||el.height!==h){el.width=w;el.height=h;state.pose[side]=''}
+    if(state.pose[side]===key)continue;
+    ctx.clearRect(0,0,w,h);state.pose[side]=key;
+    const img=m.get(key)?.img;
+    if(!img?.naturalWidth)continue;
+    const factor=Math.min(w/img.naturalWidth,h/img.naturalHeight)*state.scales[side];
+    const dw=img.naturalWidth*factor,dh=img.naturalHeight*factor;
+    ctx.drawImage(img,(w-dw)/2,h-dh,dw,dh);
+   }
+  }
+  requestAnimationFrame(render);
+ }
+ update();setInterval(update,350);requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
