@@ -428,6 +428,8 @@ body.live-output #appShell .middle .stage-body,body.live-output #appShell .middl
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
+const LIVE_OUTPUT_MODE=new URLSearchParams(location.search).get('output')==='1';
+const LIVE_CHANNEL=typeof BroadcastChannel==='function'?new BroadcastChannel('persona-studio-live-sync-v1'):null;
 const S={files:new Map(),urls:new Map(),db:null,history:[],activeProfile:'default',profiles:[],currentViseme:'REPOSO',previewSilentOnce:false,referenceBlob:null,sampleAudio:null,narrationBusy:false,fishAbort:null,fishControllers:new Set(),fishPreloading:0,fishAudio:null,fishAudioURL:null,requestId:0,abort:null,recognition:null,listening:false,recognizedText:'',micEndedByUser:false,speechQueue:[],speaking:false,utterance:null,activeSpeech:null,voiceToken:0,streaming:false,blink:false,blinkUntil:0,nextBlink:performance.now()+2700,manual:null,subtitle:'',lastPose:'',lastHighlighted:-1,toastTimer:0,demoIndex:0,pendingVoiceStart:false,pttHeld:false,pttSeq:0,captureSeq:0,micStream:null,micPromise:null,mediaRecorder:null,micChunks:[],recordingSince:0,sttCtrl:null,transcribing:false,micReady:false};
 const settingsIds=['model','customModel','characterName','persona','creativity','mouthIntensity','voiceDelay','voiceProvider','fishTranscript','fishLatency','fishTemperature','fishFallback','rate','pitch','transcriptionModel','recognitionLang','enableSpeech','autoBlink'];
 const slotList=[['aClosed','Ojos cerrados','Boca A'],['aOpen','Ojos abiertos','Boca A'],['idleClosed','Ojos cerrados','Boca cerrada'],['idleOpen','Ojos abiertos','Boca cerrada'],['oClosed','Ojos cerrados','Boca O'],['oOpen','Ojos abiertos','Boca O'],['eClosed','Ojos cerrados','Boca E'],['eOpen','Ojos abiertos','Boca E']];
@@ -702,6 +704,67 @@ $('duelExport').onclick=()=>{
  const t=duelActive();if(!t)return;
  const name=(t.title||'debate').replace(/[^\p{L}\p{N}-]+/gu,'-').slice(0,40);
  download('debate-'+name+'.json',JSON.stringify(t,null,2));
+};
+
+
+/* Ventana de salida para captura en TikTok LIVE Studio.
+   Usa BroadcastChannel ENTRE VENTANAS del mismo origen y navegador.
+   Gemini/Fish se ejecutan SOLO en el panel de control. */
+let liveOutputLastPing=0,liveBackgroundLoading=false;
+function publishLiveSnapshot(){
+ if(LIVE_OUTPUT_MODE||!LIVE_CHANNEL||Date.now()-liveOutputLastPing>12000)return;
+ const t=duelActive();if(!t)return;
+ const characters=D.running&&D.batchCharacters?D.batchCharacters:{left:t.left,right:t.right};
+ const p=D.speech;
+ let speech=null;
+ if(p?.ready){
+  const elapsed=p.audio?p.audio.currentTime*1000:performance.now()-p.started;
+  speech={side:p.side,ready:true,plan:p.plan,delay:p.delay,intensity:p.intensity,elapsed:Math.max(0,elapsed)};
+ }
+ LIVE_CHANNEL.postMessage({type:'scene',
+  topic:{id:t.id,title:t.title,left:characters.left,right:characters.right,
+         leftBackgroundId:t.leftBackgroundId||'',rightBackgroundId:t.rightBackgroundId||'',
+         stageBackgroundId:t.stageBackgroundId||''},
+  episode:$('duelLiveTitle').textContent,speech});
+}
+function receiveLiveSnapshot(message){
+ if(!LIVE_OUTPUT_MODE||message?.type!=='scene'||!message.topic)return;
+ const t=message.topic;
+ D.topics=[{...t,messages:[],limit:6}];D.activeId=t.id;
+ D.batchCharacters={left:t.left,right:t.right};
+ $('duelLiveTitle').textContent=message.episode||t.title||'Debate';
+ $('duelLeftName').textContent=duelName(t.left);$('duelRightName').textContent=duelName(t.right);
+ loadDuelSprites('left',t.left);loadDuelSprites('right',t.right);
+ applyDuelBackgrounds();
+ if([t.leftBackgroundId,t.rightBackgroundId,t.stageBackgroundId].some(id=>id&&!BG.urls.has(id))&&!liveBackgroundLoading){
+  liveBackgroundLoading=true;
+  loadBackgroundLibrary().finally(()=>{liveBackgroundLoading=false;applyDuelBackgrounds()});
+ }
+ const speech=message.speech;
+ D.speech=speech?.ready?{...speech,audio:null,started:performance.now()-speech.elapsed}:null;
+ for(const side of ['left','right'])$('duel'+(side==='left'?'Left':'Right')+'Box').classList.toggle('is-speaking',speech?.side===side&&speech?.ready);
+ if(!speech?.ready){$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=''}
+}
+function connectLiveWindows(){
+ if(!LIVE_CHANNEL){if(!LIVE_OUTPUT_MODE)toast('Este navegador no admite ventanas sincronizadas; usá un navegador actualizado.',true);return}
+ if(LIVE_OUTPUT_MODE){
+  document.body.classList.add('live-output');$('appShell').dataset.duelMode='true';
+  $('appShell').dataset.mobilePane='live';document.title='Salida LIVE · Persona Studio';
+  LIVE_CHANNEL.onmessage=e=>receiveLiveSnapshot(e.data);
+  const hello=()=>LIVE_CHANNEL.postMessage({type:'hello'});
+  hello();setInterval(hello,2500);
+ }else{
+  LIVE_CHANNEL.onmessage=e=>{if(e.data?.type==='hello'){liveOutputLastPing=Date.now();publishLiveSnapshot()}};
+  setInterval(publishLiveSnapshot,140);
+ }
+}
+$('duelOpenOutput').onclick=()=>{
+ if(LIVE_OUTPUT_MODE)return;
+ if(!LIVE_CHANNEL)return toast('Tu navegador no soporta la sincronización entre ventanas.',true);
+ const url=new URL(location.href);url.searchParams.set('output','1');
+ const output=window.open(url.toString(),'persona-studio-live-output','popup=yes,width=540,height=960');
+ if(!output)return toast('El navegador bloqueó la ventana: permití ventanas emergentes para este sitio.',true);
+ output.focus();toast('Capturá la ventana «Salida LIVE» en TikTok LIVE Studio; el audio sale del panel principal.');
 };
 
 function stopDuel(){
@@ -1684,7 +1747,7 @@ if(!microphoneEnvironment().holdToTalk){
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
 migrateWorkspaceOnce();populateProfiles();
 try{const last=localStorage.getItem('persona-studio-active-profile-v3');if(last&&S.profiles.some(p=>p.id===last))S.activeProfile=last}catch{}
-populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();loadBackgroundLibrary();requestAnimationFrame(frame);status('Listo para conversar');
+populateProfiles();restore();buildGrid();updateSpriteDiagnostic();loadSavedSprites().then(loadReferenceSample);initDuel();loadBackgroundLibrary();connectLiveWindows();requestAnimationFrame(frame);status('Listo para conversar');
 window.PERSONA_STUDIO_TEST={getConversationModel,getTranscriptionModel,microphoneEnvironment,ensureMicrophone,paintSprite,wordsOf,vowelsOf,wordGestures,buildSpeechPlan,speechPose,parseSSE,enqueueSpeak,stopAll,beginPTT,endPTT,getState:()=>({speaking:S.speaking,word:S.activeSpeech?S.activeSpeech.plan.words[speechPose(performance.now()).word]?.text:null,viseme:S.currentViseme,visibleSprite:currentVisibleSprite,queue:S.speechQueue.length,loaded:S.files.size,listening:S.listening,held:S.pttHeld,transcribing:S.transcribing,history:S.history.length,pose:S.lastPose,currentSprite:currentVisibleSprite,visible:spriteLayer.style.display==='grid'||$('demoFace').style.display!=='none',canvas:!!spriteCanvas.width,environment:microphoneEnvironment()}),addSprite,manual,previewTextSilently:(text)=>{stopAll();S.previewSilentOnce=true;enqueueSpeak(text)}};
 })();
 </script>
