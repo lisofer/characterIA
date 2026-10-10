@@ -808,7 +808,9 @@ function publishLiveSnapshot(){
          stageBackgroundId:t.stageBackgroundId||''},
   episode:$('duelLiveTitle').textContent,
   names:{left:duelName(characters.left),right:duelName(characters.right)},
-  scales:{left:duelScaleForSide('left'),right:duelScaleForSide('right')},speech};
+  scales:{left:duelScaleForSide('left'),right:duelScaleForSide('right')},
+  // El moderador no se subtitula ni se envía como texto a la fuente web.
+  speech:speech?.side==='moderator'?null:speech};
  if(windowListening)LIVE_CHANNEL.postMessage(snapshot);
  const now=Date.now(),interval=D.running?280:1100;
  if(liveWebEnabled&&!liveWebInFlight&&now-liveWebLastSent>=interval){
