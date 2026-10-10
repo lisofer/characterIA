@@ -438,8 +438,8 @@ body.live-output #appShell .duel-broadcast{
         <div class="field" style="margin:0 0 8px"><label for="duelModeratorVoice">Voz del moderador</label><select id="duelModeratorVoice" aria-label="Elegir la voz del moderador"></select></div>
         <textarea id="duelHuman" rows="2" maxlength="1000" placeholder="Escribí algo como moderador o susurrá a las IA…"></textarea>
         <div class="button-row" style="margin-top:8px"><button type="button" id="duelModeratorSend" class="btn primary small">🎙 Intervenir con voz</button><button type="button" id="duelModeratorWhisper" class="btn small ghost">🤫 Susurrar</button></div>
-        <div class="hint" style="margin-top:5px">Intervenir se escucha en el LIVE. Susurrar solo se envía como contexto privado a las IA, sin voz ni subtítulos.</div>
-        <div class="button-row" style="margin-top:8px"><button type="button" id="duelNext" class="btn primary small">▶ Continuar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
+        <div class="hint" style="margin-top:5px">Intervenir y Susurrar también continúan el debate. Intervenir se escucha en el LIVE; Susurrar solo llega a las IA, sin voz ni subtítulos.</div>
+        <div class="button-row" style="margin-top:8px"><button type="button" id="duelNext" style="display:none" aria-hidden="true" tabindex="-1">▶ Continuar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
         <div id="duelStatus" class="hint" style="margin-top:8px" aria-live="polite">Elegí dos personajes y una temática.</div>
       </div>
     </div>
@@ -669,7 +669,7 @@ if('speechSynthesis'in window){initVoices();speechSynthesis.addEventListener?.('
 
 /* Modo debate: almacenamiento independiente, Gemini con contexto acotado y reproducción serial. */
 const DUEL_KEY='persona-studio-duels-v1',DUEL_MODEL='gemini-3.5-flash-lite';
-const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,moderatorQueue:[],moderatorStandalone:false,audioJobs:new Map(),audioControllers:new Set(),audioInFlight:0,batchCharacters:null,batchProfiles:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
+const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,moderatorQueue:[],moderatorStandalone:false,stopAfterCurrent:false,autoContinueRequested:false,audioJobs:new Map(),audioControllers:new Set(),audioInFlight:0,batchCharacters:null,batchProfiles:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
 const duelActive=()=>D.topics.find(t=>t.id===D.activeId)||null;
 const duelProfile=id=>allProfileData()[id]?.settings||{};
 const duelName=id=>profileIndex().find(p=>p.id===id)?.name||'Personaje';
@@ -854,9 +854,14 @@ function sendModerator(whisper=false){
  const text=input.value.trim();if(!text)return toast('Escribí un mensaje primero.',true);
  let entry;try{entry=newModeratorEntry(t,text,whisper)}catch(e){return toast(e.message,true)}
  input.value='';addModeratorEntry(t,entry);
- if(whisper)toast(D.running?'Susurro privado: lo recibirán en la próxima tanda generada.':'Susurro privado guardado.');
- else if(D.running)toast('El moderador hablará entre intervenciones.');
- else playModeratorsStandalone();
+ // Enviar cualquier tipo de intervención es también la orden de continuar.
+ if(D.running){
+  if(D.stopAfterCurrent){D.stopAfterCurrent=false;setDuelStopButtons(false)}
+  D.autoContinueRequested=true;
+  toast(whisper?'Susurro privado recibido. Las IA lo tendrán en cuenta al generar la próxima tanda.':'El moderador hablará entre intervenciones. El debate continuará.');
+ }else{
+  runDuelBatch();
+ }
 }
 $('duelModeratorSend').onclick=()=>sendModerator(false);
 $('duelModeratorWhisper').onclick=()=>sendModerator(true);
