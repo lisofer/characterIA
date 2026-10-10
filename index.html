@@ -309,16 +309,16 @@ body.live-output #appShell .duel-broadcast{
           <button id="profileDuplicate" class="btn small" type="button">Duplicar</button>
           <button id="profileDelete" class="btn small danger" type="button">Eliminar</button>
         </div>
-        <div class="section-heading">☁ Respaldo en la nube</div>
+        <div class="section-heading">☁ Sincronización automática</div>
         <div id="cloudStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 10px">Comprobando almacenamiento…</div>
-        <div class="button-row">
-          <button type="button" id="cloudPush" class="btn primary small">☁ Guardar este dispositivo</button>
-          <button type="button" id="cloudPull" class="btn small">↓ Recuperar de la nube</button>
-          <button type="button" id="cloudBackup" class="btn small ghost">↓ Respaldo local</button>
-          <button type="button" id="cloudRestoreBackup" class="btn small ghost">↑ Importar respaldo</button>
-          <input id="cloudBackupFile" type="file" accept="application/json,.json" hidden>
-        </div>
-        <p class="hint" style="margin-top:9px">La primera vez, elegí cuál dispositivo tiene los datos correctos. Después se sincronizarán automáticamente. Recuperar reemplaza los datos locales de este navegador.</p>
+        <p class="hint" style="margin:8px 0">Personajes, voces, imágenes, fondos y debates se sincronizan entre el celular y la computadora sin botones. El volumen persistente de Railway conserva los archivos entre actualizaciones.</p>
+        <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Respaldo de seguridad (opcional)</summary>
+          <div class="button-row" style="margin-top:8px">
+            <button type="button" id="cloudBackup" class="btn small ghost">↓ Descargar copia local</button>
+            <button type="button" id="cloudRestoreBackup" class="btn small ghost">↑ Importar copia local</button>
+            <input id="cloudBackupFile" type="file" accept="application/json,.json" hidden>
+          </div>
+        </details>
       </section>
       <section id="tab-duel" class="setting-tab">
         <div class="section-heading">Temáticas guardadas</div>
@@ -476,6 +476,7 @@ body.live-output #appShell .duel-broadcast{
     <div id="sceneNotice" class="hint" role="status" style="margin-top:10px"></div>
   </div>
 </div>
+<script src="/cloud-merge.js" defer></script>
 <script src="/cloud-sync.js" defer></script>
 <script>
 (()=>{'use strict';
@@ -500,7 +501,7 @@ function toast(msg,error=false){const e=$('toast');e.textContent=msg;e.className
 function status(msg,kind=''){const b=$('statusBadge');b.className='pill '+kind;$('statusText').textContent=msg}
 function saved(){const o={};for(const id of settingsIds){const el=$(id);if(el)o[id]=el.type==='checkbox'?el.checked:el.value}return o}
 function allProfileData(){try{return JSON.parse(localStorage.getItem('persona-studio-profiles-v3')||'{}')||{}}catch{return {}}}
-function storeProfileData(d){try{localStorage.setItem('persona-studio-profiles-v3',JSON.stringify(d))}catch{toast('No se pudieron guardar los personajes.',true)}}
+function storeProfileData(d){try{localStorage.setItem('persona-studio-profiles-v3',JSON.stringify(d));window.PERSONA_CLOUD?.schedule()}catch{toast('No se pudieron guardar los personajes.',true)}}
 function migrateWorkspaceOnce(){
  try{
   if(localStorage.getItem('persona-studio-workspace-migrated-v1'))return;
@@ -586,7 +587,7 @@ function renderHistory(){
  for(const item of S.history){if(!item?.parts)continue;const txt=item.parts.map(x=>x.text||'').join('');if(txt)appendMessage(item.role==='user'?'user':'assistant',txt)}
 }
 function profileIndex(){try{const p=JSON.parse(localStorage.getItem('persona-studio-profile-index-v3')||'[]');return Array.isArray(p)?p:[]}catch{return []}}
-function saveProfileIndex(list){try{localStorage.setItem('persona-studio-profile-index-v3',JSON.stringify(list))}catch{toast('No se pudieron guardar los personajes.',true)}}
+function saveProfileIndex(list){try{localStorage.setItem('persona-studio-profile-index-v3',JSON.stringify(list));window.PERSONA_CLOUD?.schedule()}catch{toast('No se pudieron guardar los personajes.',true)}}
 function populateProfiles(){
  let names=profileIndex();if(!names.length){names=[{id:'default',name:'Mi personaje'}];saveProfileIndex(names)}
  S.profiles=names;if(!names.some(p=>p.id===S.activeProfile))S.activeProfile=names[0].id;
@@ -686,7 +687,7 @@ const duelMessageLabel=m=>m.side==='human'?(m.kind==='whisper'?'Susurro · priva
 function duelCount(topic){return topic.messages.filter(m=>m.side==='left'||m.side==='right').length}
 function duelStatus(message){$('duelStatus').textContent=message;$('duelCounter').textContent=message}
 function saveDuel(){
- try{localStorage.setItem(DUEL_KEY,JSON.stringify({topics:D.topics,activeId:D.activeId}))}
+ try{localStorage.setItem(DUEL_KEY,JSON.stringify({topics:D.topics,activeId:D.activeId}));window.PERSONA_CLOUD?.schedule()}
  catch{duelStatus('No se pudo guardar el historial. Exportá la temática para conservarlo.')}
 }
 function newDuelTopic(){
@@ -1395,7 +1396,7 @@ function frameDuel(now){
 
 const BG_KEY='persona-studio-backgrounds-v1',BG={items:[],urls:new Map(),scene:null};
 function backgroundItems(){try{const a=JSON.parse(localStorage.getItem(BG_KEY)||'[]');return Array.isArray(a)?a:[]}catch{return []}}
-function saveBackgroundItems(){try{localStorage.setItem(BG_KEY,JSON.stringify(BG.items))}catch{toast('No se pudo guardar la lista de fondos.',true)}}
+function saveBackgroundItems(){try{localStorage.setItem(BG_KEY,JSON.stringify(BG.items));window.PERSONA_CLOUD?.schedule()}catch{toast('No se pudo guardar la lista de fondos.',true)}}
 async function loadBackgroundLibrary(){
  BG.items=backgroundItems();S.db=S.db||await openDB();if(!S.db)return;
  for(const item of BG.items){
