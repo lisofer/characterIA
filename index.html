@@ -163,8 +163,10 @@
 .duel-broadcast .duel-character.is-speaking{border-color:#ff5279;box-shadow:0 0 0 .34cqw #ff4368aa,0 0 3cqw #ff3d6d6f}
 .duel-broadcast .duel-character.is-speaking:before{content:'◖)) HABLANDO';position:absolute;z-index:5;top:1.6cqw;left:1.6cqw;color:#ffadc1;background:#250912dc;border:1px solid #ff5e81;border-radius:1.2cqw;padding:.6cqw 1.15cqw;font-size:1.85cqw;font-weight:750}
 .duel-broadcast .duel-avatar{position:absolute;inset:0;width:100%;height:100%;border-radius:0;background-color:#1b2030}
-.duel-broadcast .duel-avatar:after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(transparent 67%,#05060bbd)}
-.duel-broadcast .duel-avatar canvas{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 1cqw 2cqw #0008)}
+.duel-broadcast .duel-avatar:after{content:'';position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,transparent 70%,#04060936 84%,#040609b8 100%)}
+.duel-broadcast .duel-avatar:before{content:'';position:absolute;inset:auto 0 0;z-index:2;height:9%;pointer-events:none;background:linear-gradient(180deg,transparent,#090b1480);box-shadow:inset 0 -1px #ffffff16}
+.duel-broadcast .duel-avatar .duel-placeholder{position:relative;z-index:1}
+.duel-broadcast .duel-avatar canvas{position:absolute;inset:0;z-index:1;width:100%;height:100%;filter:drop-shadow(0 1cqw 2cqw #0008)}
 .duel-broadcast .duel-character-name{position:absolute;z-index:3;left:1.6cqw;bottom:1.6cqw;max-width:calc(100% - 3.2cqw);width:auto;display:block;padding:.65cqw 1.4cqw;text-align:left;background:#070910e6;border:1px solid #d2cad2a6;border-radius:1cqw;font-family:Georgia,serif;font-size:3.1cqw;line-height:1.2;font-weight:500}
 .duel-broadcast .duel-character-name:after{content:'  🎙';font-family:system-ui;font-size:1.9cqw;opacity:.8}
 .duel-broadcast .duel-caption{display:none}
@@ -380,6 +382,7 @@ body.live-output #appShell .middle .stage-body,body.live-output #appShell .middl
   <div class="scene-dialog">
     <div class="scene-dialog-top"><strong id="sceneModalTitle">Elegir personaje y fondo</strong><button id="sceneClose" type="button" class="btn small ghost" aria-label="Cerrar">✕</button></div>
     <div class="field" id="sceneCharacterField"><label for="sceneCharacter">Personaje (obligatorio)</label><select id="sceneCharacter"></select></div>
+    <div class="field" id="sceneScaleField" style="display:none"><div class="field-line"><label for="sceneScale">Tamaño del personaje</label><output id="sceneScaleValue" class="param-value">110%</output></div><input id="sceneScale" type="range" min="0.90" max="1.25" step="0.025" value="1.10" aria-label="Ajustar solo el tamaño"><div class="field-line"><span class="hint">Siempre centrado y apoyado abajo.</span><button id="sceneScaleReset" class="btn small ghost" type="button">Restablecer</button></div></div>
     <div class="field"><label for="sceneBackground">Fondo (opcional)</label><select id="sceneBackground"></select></div>
     <div class="section-heading">Guardar un fondo nuevo</div>
     <div class="field"><label for="sceneBackgroundName">Nombre del fondo</label><input id="sceneBackgroundName" maxlength="70" placeholder="Ej.: Oficina, playa, living…"></div>
@@ -1034,6 +1037,16 @@ async function loadDuelSprites(side,id){
  }
  $('duel'+label+'Placeholder').style.display=D.images[side].size?'none':'block';
 }
+// Misma base para los ocho PNG; sin controles de desplazamiento ni espejado.
+const DUEL_DEFAULT_SCALE=1.10;
+function normalizeDuelScale(value){const n=Number(value);return Number.isFinite(n)?Math.min(1.25,Math.max(.90,Math.round(n*40)/40)):DUEL_DEFAULT_SCALE}
+function duelScaleForProfile(id){const raw=allProfileData()[id]?.settings?.duelScale;return raw===undefined||raw===null?DUEL_DEFAULT_SCALE:normalizeDuelScale(raw)}
+function duelScaleForSide(side){
+ const profileId=D.running&&D.batchCharacters?.[side]||duelActive()?.[side];
+ if(LIVE_OUTPUT_MODE&&D.liveScales?.[side]!==undefined)return D.liveScales[side];
+ if(BG.scene?.kind===side&&$('sceneCharacter').value===profileId&&BG.scene.previewScale!==undefined)return BG.scene.previewScale;
+ return duelScaleForProfile(profileId);
+}
 function frameDuel(now){
  for(const side of ['left','right']){
   const images=D.images[side],name=side==='left'?'Left':'Right',canvas=$('duel'+name+'Canvas');
@@ -1067,9 +1080,10 @@ function frameDuel(now){
   const key=(preferred&&images.has(preferred)?preferred:null)||(images.has(keyMap[mouth]?.[closed?'open':'closed'])?keyMap[mouth][closed?'open':'closed']:null)||(['idleOpen','idleClosed',...slotList.map(x=>x[0])].find(k=>images.has(k))||null);
   if(!key){if(D.pose[side]!=='empty'){ctx.clearRect(0,0,w,h);D.pose[side]='empty'}continue}
   if(D.pose[side]===key)continue;
-  const image=images.get(key),factor=Math.min(w/image.naturalWidth,h/image.naturalHeight);
+  const image=images.get(key),factor=Math.min(w/image.naturalWidth,h/image.naturalHeight)*duelScaleForSide(side);
   const dw=image.naturalWidth*factor,dh=image.naturalHeight*factor;
-  ctx.clearRect(0,0,w,h);ctx.drawImage(image,(w-dw)/2,(h-dh)/2,dw,dh);D.pose[side]=key;
+  // Centro horizontal sin modificar la asimetría; base fija en el borde inferior.
+  ctx.clearRect(0,0,w,h);ctx.drawImage(image,(w-dw)/2,h-dh,dw,dh);D.pose[side]=key;
  }
 }
 
