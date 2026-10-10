@@ -18,7 +18,11 @@
    if(id!=='default'||p?.history?.length)return true;
    if(cfg.persona&&cfg.persona!==def)return true;
    if(cfg.characterName&&cfg.characterName!=='Mi personaje')return true;
-   if(cfg.fishTranscript||cfg.backgroundId||cfg.duelScale)return true;
+   if(cfg.fishTranscript||cfg.backgroundId||cfg.duelScale||cfg.voiceReferenceId||
+      cfg.fishReferenceId||cfg.referenceId||cfg.referenceText)return true;
+   if(cfg.voiceProvider&&cfg.voiceProvider!=='fish')return true;
+   if(cfg.rate&&Number(cfg.rate)!==1)return true;
+   if(cfg.pitch&&Number(cfg.pitch)!==1)return true;
   }
   const duels=parse(kv,TOPICS,{topics:[]});
   if(duels.topics?.some(t=>t.theme||t.messages?.length||t.left||t.right||(t.title&&t.title!=='Nueva temática')))return true;
@@ -29,13 +33,14 @@
   // The remote version remains the canonical one. Conflicting local records are
   // preserved under new IDs instead of silently replacing originals.
   if(!remote)return {state:deep(local),forks:0};
-  if(!local||!meaningful(local))return {state:deep(remote),forks:0};
+  if(!local||(!options.base&&!meaningful(local)))return {state:deep(remote),forks:0};
   const result=deep(remote),lkv=local.kv||{},rkv=result.kv||{};
   result.kv=rkv;result.assets=result.assets||{};
   const ra=result.assets,la=local.assets||{};
   const rid=()=>('sync_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10));
   let forks=0;
   const rp=parse(rkv,PROFILE,{}),lp=parse(lkv,PROFILE,{});
+  const brp=parse(options.base?.kv,PROFILE,{}),bra=options.base?.assets||{};
   const ri=parse(rkv,INDEX,[]),li=parse(lkv,INDEX,[]);
   const rb=parse(rkv,BACKGROUNDS,[]),lb=parse(lkv,BACKGROUNDS,[]);
   const rt=parse(rkv,TOPICS,{topics:[],activeId:null}),lt=parse(lkv,TOPICS,{topics:[],activeId:null});
@@ -61,8 +66,10 @@
   for(const [id,profile] of Object.entries(lp)){
    let target=id;
    if(has(rp,id)&&(!equal(rp[id],profile)||!equal(rAssetOf(id),lAssetOf(id)))){
+    const cloudUnchanged=options.base&&equal(rp[id],brp[id])&&
+     Object.keys(ra).filter(k=>k.startsWith(id+':')).every(k=>equal(ra[k],bra[k]));
     const existingEmpty=(!rp[id]?.history?.length)&&!Object.keys(rp[id]?.settings||{}).some(k=>['persona','fishTranscript','backgroundId'].includes(k)&&rp[id].settings[k]&&rp[id].settings[k]!=='Sos un personaje con una voz y una personalidad propias. Hablá de forma natural.');
-    if(existingEmpty&&rAssetOf(id).length===0){
+    if(cloudUnchanged||(existingEmpty&&rAssetOf(id).length===0)){
      target=id;
     }else{
      target=rid();forks++;
@@ -73,7 +80,8 @@
    if(copy.settings?.backgroundId)copy.settings.backgroundId=bgMap[copy.settings.backgroundId]||copy.settings.backgroundId;
    if(target===id&&!has(rp,id))rp[id]=copy;
    else if(target!==id)rp[target]=copy;
-   else if(!equal(rp[id],profile)&&rAssetOf(id).length===0)rp[id]=copy;
+   else if(!equal(rp[id],profile)&&(rAssetOf(id).length===0||
+    (options.base&&equal(rp[id],brp[id]))))rp[id]=copy;
    const old=lindex.get(id)||{name:copy.settings?.characterName||'Personaje'};
    if(!rindex.has(target)){
     const item={...deep(old),id:target,name:target===id?old.name:((old.name||'Personaje')+' (otro dispositivo)').slice(0,75)};
@@ -101,7 +109,8 @@
      target=profileMap.default&&profileMap.default!=='default'?profileMap.default+':'+key:key;
     }
    }
-   if(!has(ra,target)||ra[target]?.hash===asset.hash)ra[target]=deep(asset);
+   if(!has(ra,target)||ra[target]?.hash===asset.hash||
+      (options.base&&equal(ra[target],bra[target])))ra[target]=deep(asset);
    else if(target===key){
     // Only possible if both devices used the same binary slot; keep both originals.
     const backup='archive_'+rid()+':'+key.replace(/[^a-zA-Z0-9_:-]/g,'_');
@@ -110,9 +119,17 @@
   }
   for(const topic of lt.topics||[]){
    let target=topic.id;const existing=(rt.topics||[]).find(x=>x.id===target);
-   if(existing&&!equal(existing,topic)){target=rid();forks++}
+   if(existing&&!equal(existing,topic)){
+    const old=parse(options.base?.kv,TOPICS,{topics:[]}).topics?.find(t=>t.id===topic.id);
+    if(!options.base||!equal(existing,old)){target=rid();forks++}
+   }
    topicMap[topic.id]=target;
-   if(existing&&target===topic.id)continue;
+   if(existing&&target===topic.id){
+    Object.assign(existing,deep(topic));
+    if(existing.left)existing.left=profileMap[existing.left]||existing.left;
+    if(existing.right)existing.right=profileMap[existing.right]||existing.right;
+    continue;
+   }
    const copy=deep(topic);copy.id=target;
    if(copy.left)copy.left=profileMap[copy.left]||copy.left;
    if(copy.right)copy.right=profileMap[copy.right]||copy.right;
@@ -125,7 +142,10 @@
   if(!rt.activeId&&lt.activeId)rt.activeId=topicMap[lt.activeId]||lt.activeId;
   rkv[PROFILE]=JSON.stringify(rp);rkv[INDEX]=JSON.stringify(ri);
   rkv[TOPICS]=JSON.stringify(rt);rkv[BACKGROUNDS]=JSON.stringify(rb);
-  for(const [k,v] of Object.entries(lkv))if(!has(rkv,k))rkv[k]=v;
+  for(const [k,v] of Object.entries(lkv)){
+   if(!has(rkv,k)||options.base&&!has([PROFILE,INDEX,TOPICS,BACKGROUNDS].reduce((o,x)=>(o[x]=true,o),{}),k)&&
+       (rkv[k]===options.base.kv?.[k]))rkv[k]=v;
+  }
   return {state:result,forks};
  }
  if(typeof module!=='undefined'&&module.exports)module.exports={merge,meaningful};
