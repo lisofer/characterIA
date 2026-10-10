@@ -330,6 +330,12 @@ body.live-output #appShell .duel-broadcast{
         <div class="hint">Tocá cada cuadro para elegir personaje y fondo. El fondo general del LIVE es independiente.</div>
         <div class="section-heading">Fondo de la transmisión</div>
         <div class="field"><label>Imagen detrás de ambos personajes</label><div class="button-row"><button id="duelSceneBackground" type="button" class="btn small">▧ Elegir fondo general</button><span id="duelStageBackgroundLabel" class="hint">Predeterminado</span></div></div>
+        <div class="section-heading">♫ Música de fondo</div>
+        <div class="field"><label for="musicFile">Archivo de audio (preferentemente MP3 · máximo 19 MB)</label><input id="musicFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg" style="display:block;width:100%"><div id="musicInfo" class="hint">Sin música cargada</div></div>
+        <div class="button-row"><button type="button" id="musicPlay" class="btn small" disabled>▶ Reproducir música</button><button type="button" id="musicRemove" class="btn small danger" disabled>Eliminar pista</button></div>
+        <div class="field"><div class="field-line"><label for="musicVolume">Volumen de fondo</label><output id="musicVolumeValue" class="param-value">18%</output></div><input id="musicVolume" type="range" min="0" max="100" value="18" step="1"></div>
+        <div class="field"><div class="field-line"><label for="musicDuck">Volumen cuando habla un personaje o moderador</label><output id="musicDuckValue" class="param-value">22%</output></div><input id="musicDuck" type="range" min="0" max="100" value="22" step="1"></div>
+        <p class="hint" id="musicStatus" role="status" aria-live="polite">La música sale del dispositivo donde está abierto el panel. LIVE Studio debe capturar su audio.</p>
         <div class="section-heading">TikTok LIVE Studio · Escenario sin Chrome</div>
         <div class="button-row"><button id="duelCopyLiveLink" type="button" class="btn primary">🔗 Copiar enlace LIVE 9:16</button></div>
         <div class="field" style="margin-top:8px"><input id="duelLiveLink" type="text" readonly placeholder="Tocá Copiar enlace LIVE" aria-label="Enlace privado de la fuente web"></div>
@@ -483,6 +489,7 @@ body.live-output #appShell .duel-broadcast{
 </div>
 <script src="/cloud-merge.js" defer></script>
 <script src="/cloud-sync.js" defer></script>
+<script src="/music-runtime.js" defer></script>
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
@@ -2109,6 +2116,7 @@ if(!microphoneEnvironment().holdToTalk){
  $('micPermissionButton').textContent='⚠ Revisar micrófono';
 } 
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
+window.PERSONA_MUSIC_BRIDGE={isSpeaking:()=>Boolean(D.speech?.ready||(S.speaking&&S.activeSpeech?.ready))};
 window.PERSONA_CLOUD_BRIDGE={
  isBusy:()=>D.running,
  notify:(message,error=false)=>toast(message,error),
@@ -2126,7 +2134,7 @@ window.PERSONA_CLOUD_BRIDGE={
   localStorage.setItem('persona-studio-active-profile-v3',S.activeProfile);
   populateProfiles();restore();
   await loadSavedSprites();await loadReferenceSample();
-  initDuel();await loadBackgroundLibrary();
+  initDuel();await loadBackgroundLibrary();await window.PERSONA_MUSIC?.refresh?.();
   const t=duelActive();
   if(t)await Promise.all([loadDuelSprites('left',t.left),loadDuelSprites('right',t.right)]);
   applyIndividualBackground();applyDuelBackgrounds();
