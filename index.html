@@ -359,11 +359,11 @@
       <div class="duel-live-bottom">
         <div class="duel-live-feed" id="duelLiveFeed" aria-label="Intervenciones reproducidas"><div class="duel-live-feed-label">DIÁLOGO · PREVIA</div><div class="duel-live-feed-empty">El intercambio aparecerá cuando hablen los personajes.</div></div>
         <div class="duel-live-poll" id="duelLivePoll"><strong>¿Quién tiene razón?</strong>
-          <button class="duel-live-vote" id="duelLiveVoteLeft" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteLeftName">Izquierda</span><span id="duelVoteLeftPct">50%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteLeftBar"></span></span></button>
-          <button class="duel-live-vote right" id="duelLiveVoteRight" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteRightName">Derecha</span><span id="duelVoteRightPct">50%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteRightBar"></span></span></button>
+          <button class="duel-live-vote" id="duelLiveVoteLeft" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteLeftName">Izquierda</span><span id="duelVoteLeftPct">0%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteLeftBar"></span></span></button>
+          <button class="duel-live-vote right" id="duelLiveVoteRight" type="button"><span class="duel-live-vote-row"><span class="vote-name" id="duelVoteRightName">Derecha</span><span id="duelVoteRightPct">0%</span></span><span class="duel-live-track"><span class="duel-live-fill" id="duelVoteRightBar"></span></span></button>
           <small id="duelVoteCount">0 votos · Prueba local</small></div>
       </div>
-      <footer class="duel-live-foot"><div class="duel-live-input"><input id="duelLiveInput" maxlength="1000" placeholder="Intervenir en el debate…" aria-label="Tu intervención"><button id="duelLiveSend" type="button" title="Enviar intervención">➤</button></div><button class="duel-live-action" id="duelLiveRose" type="button" title="Reacción de prueba"><b>🌹</b>Rosa</button><button class="duel-live-action" id="duelLivePollButton" type="button" title="Votación de prueba"><b>♥</b>Votar</button><button class="duel-live-action" id="duelLiveGift" type="button" title="Regalos reales requieren conexión con TikTok"><b>🎁</b>Regalo</button></footer>
+      <footer class="duel-live-foot"><div class="duel-live-input"><input id="duelLiveInput" maxlength="1000" placeholder="Intervenir en el debate…" aria-label="Tu intervención"><button id="duelLiveSend" type="button" title="Enviar intervención">➤</button></div><button class="duel-live-action" id="duelLiveRose" type="button" title="Reacción de prueba"><b>🌹</b>Rosa</button><button class="duel-live-action" id="duelLivePollButton" type="button" title="Votación de prueba"><b>♥</b>Votar</button><button class="duel-live-action" id="duelLiveGift" type="button" title="Regalos reales requieren conexión con TikTok"><b>🎁</b>Regalo</button><button class="duel-live-action" id="duelLiveShare" type="button" title="Compartir enlace de Persona Studio"><b>↗</b>Compartir</button></footer>
       <div class="duel-live-controls"><button id="duelLiveNext" type="button" title="Comenzar o continuar debate">▶ Continuar</button><button id="duelLiveStop" type="button" title="Detener debate">■</button></div><div class="duel-live-hearts" id="duelLiveHearts" aria-hidden="true"></div>
     </section>
     <div class="stage-foot"><button id="talkButton" class="btn primary space-button" type="button">🎙 Mantené para hablar</button><div class="foot-hint">Mantené <b>ESPACIO</b> mientras hablás.<br><b>Soltá</b> y Gemini recibe tu mensaje. <b>Esc</b> cancela.</div></div>
@@ -463,7 +463,7 @@ function openTab(tab){
  $('mobileChat').textContent=show?'📜 Historial':'💬 Chat';
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
  document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
- $('settingsPanel').scrollTop=0;if(tab==='duel'){refreshDuelDisplay();if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live')}
+ $('settingsPanel').scrollTop=0;if(tab==='duel'){refreshDuelDisplay();if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live')}else if(!show&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
@@ -692,10 +692,10 @@ function refreshDuelLiveFeed(){
  for(const m of entries){const line=document.createElement('div');line.className='duel-live-feed-line'+(m.side==='human'?' human':'');const avatar=document.createElement('div');avatar.className='duel-live-avatar';avatar.textContent=m.side==='human'?'✦':m.side==='left'?'◉':'●';const content=document.createElement('div');content.className='text';const name=document.createElement('strong');name.textContent=m.side==='human'?'Tu intervención':duelName(m.profileId);const body=document.createElement('span');body.textContent=m.text;content.append(name,body);line.append(avatar,content);el.append(line)}
 }
 function renderDuelPoll(){
- const t=duelActive();if(!t)return;const a=Math.max(0,Number(t.poll?.left)||0),b=Math.max(0,Number(t.poll?.right)||0),n=a+b,p=n?Math.round(100*a/n):50;
+ const t=duelActive();if(!t)return;const a=Math.max(0,Number(t.poll?.left)||0),b=Math.max(0,Number(t.poll?.right)||0),n=a+b,p=n?Math.round(100*a/n):0;
  $('duelVoteLeftName').textContent=duelName(t.left);$('duelVoteRightName').textContent=duelName(t.right);
- $('duelVoteLeftPct').textContent=p+'%';$('duelVoteRightPct').textContent=100-p+'%';
- $('duelVoteLeftBar').style.width=p+'%';$('duelVoteRightBar').style.width=100-p+'%';
+ $('duelVoteLeftPct').textContent=p+'%';$('duelVoteRightPct').textContent=(n?100-p:0)+'%';
+ $('duelVoteLeftBar').style.width=p+'%';$('duelVoteRightBar').style.width=(n?100-p:0)+'%';
  $('duelVoteCount').textContent=n+' voto'+(n===1?'':'s')+' · Prueba local';
 }
 function duelLiveHeart(emoji){
@@ -708,6 +708,7 @@ for(const side of ['left','right'])$('duelLiveVote'+(side==='left'?'Left':'Right
 $('duelLiveRose').onclick=()=>{duelLiveHeart('🌹');duelLiveHeart('❤️')};
 $('duelLivePollButton').onclick=()=>toast('Tocá un personaje para votar. Los votos son locales de prueba.');
 $('duelLiveGift').onclick=()=>toast('Los regalos reales requieren la conexión con TikTok LIVE.');
+$('duelLiveShare').onclick=async()=>{try{if(navigator.share)await navigator.share({title:'Persona Studio · Debate',url:location.href});else if(navigator.clipboard){await navigator.clipboard.writeText(location.href);toast('Enlace copiado.')}else toast('Copiá la dirección del navegador para compartir.')}catch(e){if(e?.name!=='AbortError')toast('No se pudo compartir el enlace.',true)}};
 $('duelLiveExpand').onclick=()=>{const full=$('appShell').classList.toggle('duel-focused');$('duelLiveExpand').textContent=full?'↙':'⛶'};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}});
 $('duelLiveNext').onclick=()=>$('duelNext').click();$('duelLiveStop').onclick=()=>$('duelStop').click();
@@ -1131,6 +1132,7 @@ $('sceneApply').onclick=async()=>{
   const t=duelActive();if(!t)return;
   t[kind]=id;t[kind+'BackgroundId']=bg;saveDuel();
   if(!D.running){loadDuelSprites(kind,id);$('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id)}
+   renderDuelPoll();
   applyDuelBackgrounds();
  }
  closeSceneChooser();
@@ -1525,6 +1527,7 @@ function wireTalkPress(el){
 wireTalkPress($('talkButton'));wireTalkPress($('mobileTalk'));
 function switchMobilePane(pane){
  const live=$('appShell').dataset.duelMode==='true',selected=live?pane:(pane==='settings'?'settings':'chat');
+ if(selected!=='live'&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}
  $('appShell').dataset.mobilePane=selected;
  for(const [id,on] of [['mobileSettings',selected==='settings'],['mobileChat',selected==='chat'],['mobileLive',live&&selected==='live']]){$(id).classList.toggle('selected',on);$(id).setAttribute('aria-pressed',String(on))}
 }
