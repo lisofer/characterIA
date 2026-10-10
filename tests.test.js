@@ -56,3 +56,31 @@ test('Cookies falsificadas, CSRF, modelo inválido y logout',async()=>{
  const r=await post('/api/auth/logout',{},session);assert.match(r.headers.get('set-cookie'),/Max-Age=0/)
 });
 test('MessagePack incluye audio binario',()=>{assert.ok(pack({b:Buffer.from('test')}).includes(Buffer.from('test')))});
+
+test('Fuente LIVE: enlace de solo lectura, sin barra de Chrome ni acceso al panel privado',async()=>{
+ const anon=await fetchLocal(BASE+'/api/live/link');
+ assert.equal(anon.status,401);
+ const linkResponse=await fetchLocal(BASE+'/api/live/link',{headers:{Cookie:session}});
+ assert.equal(linkResponse.status,200);
+ const {path:livePath}=await linkResponse.json();
+ assert.match(livePath,/^\/live\?key=[a-f0-9]{64}$/);
+ assert.equal((await fetchLocal(BASE+'/live?key=incorrect')).status,403);
+ const browser=await fetchLocal(BASE+livePath);
+ assert.equal(browser.status,200);
+ assert.match(browser.headers.get('content-type'),/text\/html/);
+ const html=await browser.text();
+ assert.match(html,/id="screen"/);
+ assert.match(html,/aspect-ratio:9\/16/);
+ assert.doesNotMatch(html,/APP_ACCESS_TOKEN/);
+ const scene={topic:{id:'live-test',title:'El debate',left:'profile_a',right:'profile_b'},
+  episode:'EP. 01 · TEST',names:{left:'Patrick Jane',right:'Roro'},
+  scales:{left:1.1,right:1},speech:null};
+ const submit=await post('/api/live/scene',scene,session);
+ assert.equal(submit.status,200);
+ const state=await(await fetchLocal(BASE+'/api/live/state?key='+livePath.split('key=')[1])).json();
+ assert.equal(state.scene.names.left,'Patrick Jane');
+ assert.equal(state.scene.topic.title,'El debate');
+ assert.deepEqual(state.assets,{});
+ assert.equal((await fetchLocal(BASE+'/api/live/state?key=bad')).status,403);
+ assert.equal((await fetchLocal(BASE+'/api/live/asset/'+'f'.repeat(64)+'?key='+livePath.split('key=')[1])).status,404);
+});
