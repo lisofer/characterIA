@@ -961,15 +961,13 @@ function stopDuel(){
 $('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
 $('duelNext').onclick=runDuelBatch;$('duelStartFromSettings').onclick=runDuelBatch;
 function duelText(t,side){
- const nextId=t[side],other=side==='left'?'right':'left';
- const recent=t.messages.slice(-12).map(m=>{
-  const n=m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR':'MODERADOR'):duelName(m.profileId);
-  return n+': '+m.text.slice(0,420);
- }).join('\n');
+ const nextId=t[side];
+ // Esta vista de contexto, igual que la generación por tandas, no convierte susurros en diálogo.
+ const recent=duelPublicContext(t);
  const summary=t.summary?'Resumen anterior: '+t.summary.slice(0,1400)+'\n':'';
  return 'TEMA: '+t.title.slice(0,100)+'\nSITUACIÓN: '+t.theme.slice(0,1800)+'\n'+summary+
   'Personaje a la izquierda: '+duelName(t.left)+'\nPersonaje a la derecha: '+duelName(t.right)+
-  '\nINTERCAMBIO RECIENTE:\n'+(recent||'Todavía no hablaron.')+
+  '\nINTERCAMBIO PÚBLICO RECIENTE:\n'+(recent||'Todavía no hablaron.')+
   '\nAhora le toca a '+duelName(nextId)+'. Respondé solo con su intervención, nunca con la del otro.';
 }
 async function duelRequest(model,payload){
