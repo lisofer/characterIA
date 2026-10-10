@@ -7,7 +7,7 @@
   'persona-studio-backgrounds-v1','persona-studio-global-v3','persona-studio-stage-share-v1'];
  const LINK='persona-studio-cloud-linked-v1',REV='persona-studio-cloud-revision-v1',
        BASE='persona-studio-cloud-base-v2',FP='persona-studio-cloud-fingerprint-v1',
-       DIRTY='persona-studio-cloud-assets-dirty-v1';
+       DIRTY='persona-studio-cloud-assets-dirty-v1',PENDING='persona-studio-cloud-pending-apply-v1';
  const $=id=>document.getElementById(id),bridge=()=>window.PERSONA_CLOUD_BRIDGE;
  const merge=()=>window.PERSONA_CLOUD_MERGE;
  let available=false,working=false,timer=null,initialized=false,loadError=false;
@@ -156,8 +156,29 @@
   working=true;
   try{
    const remote=await cloud();
+   const pendingRaw=persistent(PENDING);
+   if(pendingRaw&&remote.state){
+    try{
+     const pending=JSON.parse(pendingRaw);
+     if(pending.revision===remote.revision&&pending.fingerprint===await fingerprint(values())){
+      if(bridge()?.isBusy()){
+       status('☁ Cambios en la nube: esperando que termine la intervención.');
+       return;
+      }
+      const success=await apply(remote.state,remote.revision,pending.fingerprint);
+      if(success){
+       await remember(remote.revision,remote.state,values());
+       localStorage.removeItem(PENDING);
+       status('✓ Actualizado en todos los dispositivos · versión '+remote.revision);
+       return;
+      }
+     }
+    }catch(e){notice('⚠ Restauración pendiente: '+e.message,true);return}
+    localStorage.removeItem(PENDING);
+   }
    const capturedKV=values(),capturedFingerprint=await fingerprint(capturedKV);
-   const linked=persistent(LINK)==='yes';
+   // Las versiones anteriores no conservaban la base: importar, nunca reemplazar.
+   const linked=persistent(LINK)==='yes'&&Boolean(base);
    const rev=Number(persistent(REV)||0);
    if(linked&&remote.state&&remote.revision!==rev&&bridge()?.isBusy()){
     status('☁ Hay cambios para sincronizar cuando termine la intervención.');
@@ -180,7 +201,7 @@
     const dirty=changedSinceBase(localState)||capturedFingerprint!==lastFingerprint;
     if(dirty){
      const edits=delta(base,localState);
-     next=merge().merge(remote.state,edits).state;
+     next=merge().merge(remote.state,edits,{base}).state;
     }else{next=remote.state;shouldApply=true}
    }else{
     if(!changedSinceBase(localState)&&capturedFingerprint===lastFingerprint){
@@ -215,8 +236,8 @@
    }
    const committed=await publish(next,remote.revision,buffers,remote.state?.assets);
    if(bridge()?.isBusy()||await fingerprint(values())!==capturedFingerprint){
-    // Keep a correct base, but never replace the currently playing stage.
     await remember(committed.revision,next,capturedKV);
+    if(!same(localState,next))set(PENDING,JSON.stringify({revision:committed.revision,fingerprint:capturedFingerprint}));
     status('✓ Guardado en Railway · versión '+committed.revision);
     return;
    }
@@ -224,11 +245,13 @@
     const applied=await apply(next,committed.revision,capturedFingerprint);
     if(!applied){
      await remember(committed.revision,next,capturedKV);
+     set(PENDING,JSON.stringify({revision:committed.revision,fingerprint:capturedFingerprint}));
      status('☁ Guardado; pendiente de actualizar la pantalla.');
      return;
     }
    }
    await remember(committed.revision,next,values());
+   localStorage.removeItem(PENDING);
    status('✓ Sincronizado en la nube · versión '+committed.revision);
   }catch(e){
    loadError=true;
@@ -269,7 +292,7 @@
    for(const [key,blob] of files)current.set(key,blob);
    await restoreFiles(current);
    for(const key of keys)if(typeof data.kv[key]==='string')set(key,data.kv[key]);
-   localStorage.removeItem(LINK);localStorage.removeItem(BASE);localStorage.removeItem(REV);
+   localStorage.removeItem(LINK);localStorage.removeItem(BASE);localStorage.removeItem(REV);localStorage.removeItem(PENDING);
    base=null;lastRevision=0;
    set(DIRTY,'yes');
    await bridge().refresh();
