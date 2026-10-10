@@ -835,8 +835,83 @@ $('duelOpenOutput').onclick=()=>{
  output.focus();toast('Capturá la ventana «Salida LIVE» en TikTok LIVE Studio; el audio sale del panel principal.');
 };
 
+
+function newModeratorEntry(t,text,whisper=false){
+ const id=$('duelModeratorVoice').value;
+ if(!whisper&&!profileIndex().some(p=>p.id===id))throw Error('Elegí la voz del moderador.');
+ return {id:'mod_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),side:'human',
+  kind:whisper?'whisper':'spoken',profileId:whisper?null:id,text:String(text).trim().slice(0,1000),at:Date.now()};
+}
+function addModeratorEntry(t,entry){
+ t.messages.push(entry);appendDuelMessage(entry);
+ if(entry.kind==='spoken')D.moderatorQueue.push(entry);
+ saveDuel();
+}
+function sendModerator(whisper=false){
+ const t=duelActive(),input=$('duelHuman');if(!t)return;
+ const text=input.value.trim();if(!text)return toast('Escribí un mensaje primero.',true);
+ let entry;try{entry=newModeratorEntry(t,text,whisper)}catch(e){return toast(e.message,true)}
+ input.value='';addModeratorEntry(t,entry);
+ if(whisper)toast(D.running?'Susurro privado: lo recibirán en la próxima tanda generada.':'Susurro privado guardado.');
+ else if(D.running)toast('El moderador hablará entre intervenciones.');
+ else playModeratorsStandalone();
+}
+$('duelModeratorSend').onclick=()=>sendModerator(false);
+$('duelModeratorWhisper').onclick=()=>sendModerator(true);
+async function prepareModeratorAudio(entry,token){
+ const cfg=duelProfile(entry.profileId);
+ if(cfg.voiceProvider==='browser')return {browser:true};
+ const ctrl=new AbortController();D.audioControllers.add(ctrl);D.moderatorBusy=true;
+ let counted=false;
+ try{
+  while(D.audioInFlight>=2&&D.running&&D.generation===token)await new Promise(r=>setTimeout(r,45));
+  if(!D.running||D.generation!==token)return {error:Error('Interrumpido')};
+  D.audioInFlight++;counted=true;
+  const body={text:entry.text,format:'mp3',speed:Number(cfg.rate)||1,latency:cfg.fishLatency||'balanced',temperature:Number(cfg.fishTemperature)||.7};
+  const sample=await duelSample(entry.profileId);
+  if(sample){
+   const transcript=String(cfg.fishTranscript||'').trim();
+   if(!transcript)throw Error('Falta transcribir la muestra de '+duelName(entry.profileId));
+   const data=await readBlob(sample);
+   body.reference_audio=data.split(',')[1];body.reference_mime=sample.type||'audio/mpeg';body.reference_text=transcript;
+  }
+  if(ctrl.signal.aborted)throw Error('Audio cancelado');
+  const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+  if(!res.ok){const x=await res.json().catch(()=>({}));throw Error('Fish: '+(x.error||res.statusText))}
+  const blob=await res.blob();if(!blob.size)throw Error('Audio vacío');
+  return {blob};
+ }catch(error){return {error}}
+ finally{
+  D.audioControllers.delete(ctrl);if(counted)D.audioInFlight=Math.max(0,D.audioInFlight-1);
+  D.moderatorBusy=false;
+ }
+}
+async function drainModeratorQueue(t,token){
+ while(D.moderatorQueue.length&&D.running&&D.generation===token){
+  const entry=D.moderatorQueue.shift();if(entry?.kind!=='spoken')continue;
+  D.moderatorBusy=true;
+  D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,token)});
+  duelStatus('Moderador · voz de '+duelName(entry.profileId));
+  try{await duelVoice(t,'moderator',entry.text,token,entry)}
+  catch(e){if(D.generation===token&&D.running)toast('Falló la voz del moderador: '+e.message,true)}
+  finally{D.audioJobs.delete(entry.id);D.moderatorBusy=false}
+ }
+}
+async function playModeratorsStandalone(){
+ if(D.running||!D.moderatorQueue.length)return;
+ stopAll();D.running=true;D.moderatorStandalone=true;
+ const token=++D.generation;$('appShell').dataset.duelMode='true';
+ $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
+ try{await drainModeratorQueue(duelActive(),token)}
+ finally{if(token===D.generation){
+  D.running=false;D.moderatorStandalone=false;D.speech=null;
+  $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
+  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · Tu turno');
+ }}
+}
+
 function stopDuel(){
- D.generation++;D.running=false;D.abort?.abort();D.abort=null;
+ D.generation++;D.running=false;D.moderatorStandalone=false;D.moderatorQueue.length=0;D.abort?.abort();D.abort=null;
  for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
@@ -933,7 +1008,7 @@ async function duelSample(id){
 }
 
 function primeDuelAudio(t,token){
- if(!D.running||D.generation!==token)return;
+ if(!D.running||D.generation!==token||D.moderatorBusy)return;
  // Precalentar como máximo los siguientes cuatro turnos; solo dos peticiones Fish simultáneas.
  for(const entry of (t.pending||[]).slice(0,4)){
   if(D.audioInFlight>=2)break;
@@ -965,9 +1040,9 @@ async function duelVoice(t,side,text,token,entry){
  const cfg=D.batchProfiles?.[side]||duelProfile(entry.profileId),rate=Number(cfg.rate)||1;
  const speech={side,text,plan:duelSpeechPlan(text,rate),ready:false,started:0,audio:null,rate,delay:Number(cfg.voiceDelay)||0,intensity:Number(cfg.mouthIntensity||45)};
  D.speech=speech;
- const label=side==='left'?'Left':'Right',box=$('duel'+label+'Box');
+ const label=side==='left'?'Left':side==='right'?'Right':null,box=label?$('duel'+label+'Box'):null;
  for(const n of ['Left','Right']){$('duel'+n+'Box').classList.toggle('is-speaking',n===label);$('duel'+n+'Caption').textContent=''}
- $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+ $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=side==='moderator'?'Moderador':'';
  const browser=async()=>{
   if(!('speechSynthesis'in window))throw Error('No se puede reproducir la voz en este navegador.');
   const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=rate;u.pitch=Number(cfg.pitch)||1;
@@ -1011,7 +1086,7 @@ async function duelVoice(t,side,text,token,entry){
   if(D.generation===token){
    D.audio=null;D.resolveAudio=null;D.speech=null;
    $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
-   box.classList.remove('is-speaking');
+   box?.classList.remove('is-speaking');
   }
  }
 }
