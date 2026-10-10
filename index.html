@@ -700,13 +700,20 @@ function publishLiveSnapshot(){
   topic:{id:t.id,title:t.title,left:characters.left,right:characters.right,
          leftBackgroundId:t.leftBackgroundId||'',rightBackgroundId:t.rightBackgroundId||'',
          stageBackgroundId:t.stageBackgroundId||''},
-  episode:$('duelLiveTitle').textContent,speech});
+  episode:$('duelLiveTitle').textContent,scales:{left:duelScaleForSide('left'),right:duelScaleForSide('right')},speech});
 }
 function receiveLiveSnapshot(message){
  if(!LIVE_OUTPUT_MODE||message?.type!=='scene'||!message.topic)return;
  const t=message.topic;
  D.topics=[{...t,messages:[],limit:6}];D.activeId=t.id;
  D.batchCharacters={left:t.left,right:t.right};
+ if(message.scales){
+  for(const side of ['left','right']){
+   const scale=normalizeDuelScale(message.scales[side]);
+   if(D.liveScales?.[side]!==scale)D.pose[side]='';
+   D.liveScales=D.liveScales||{};D.liveScales[side]=scale;
+  }
+ }
  $('duelLiveTitle').textContent=message.episode||t.title||'Debate';
  $('duelLeftName').textContent=duelName(t.left);$('duelRightName').textContent=duelName(t.right);
  loadDuelSprites('left',t.left);loadDuelSprites('right',t.right);
@@ -1118,18 +1125,43 @@ function fillSceneBackgrounds(selected){
 function openSceneChooser(kind){
  BG.scene={kind};const t=duelActive(),single=kind==='individual';
  $('sceneCharacterField').style.display=kind==='broadcast'?'none':'';
+ $('sceneScaleField').style.display=kind==='left'||kind==='right'?'':'none';
  const select=$('sceneCharacter');select.replaceChildren();
  for(const x of profileIndex()){const opt=document.createElement('option');opt.value=x.id;opt.textContent=x.name;select.append(opt)}
  select.value=single?S.activeProfile:(t?.[kind]||'');
+ syncSceneScale();
  fillSceneBackgrounds(kind==='broadcast'?(t?.stageBackgroundId||''):single?backgroundIdForProfile(S.activeProfile):(t?.[kind+'BackgroundId']||''));
  $('sceneModalTitle').textContent=kind==='broadcast'?'Fondo general del LIVE':single?'Escenario individual':kind==='left'?'Cuadro izquierdo':'Cuadro derecho';
  $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';$('sceneNotice').textContent='';
  $('sceneModal').hidden=false;
 }
+function syncSceneScale(){
+ if(!BG.scene||!['left','right'].includes(BG.scene.kind))return;
+ const scale=duelScaleForProfile($('sceneCharacter').value);
+ BG.scene.previewScale=scale;$('sceneScale').value=String(scale);
+ $('sceneScaleValue').textContent=Math.round(scale*100)+'%';
+}
 $('sceneCharacter').addEventListener('change',()=>{
  if(BG.scene?.kind==='individual')fillSceneBackgrounds(backgroundIdForProfile($('sceneCharacter').value));
+ syncSceneScale();
+ for(const side of ['left','right'])D.pose[side]='';
 });
-function closeSceneChooser(){BG.scene=null;$('sceneModal').hidden=true}
+$('sceneScale').addEventListener('input',()=>{
+ if(!BG.scene||!['left','right'].includes(BG.scene.kind))return;
+ BG.scene.previewScale=normalizeDuelScale($('sceneScale').value);
+ $('sceneScaleValue').textContent=Math.round(BG.scene.previewScale*100)+'%';
+ D.pose[BG.scene.kind]='';
+});
+$('sceneScaleReset').onclick=()=>{
+ if(!BG.scene||!['left','right'].includes(BG.scene.kind))return;
+ $('sceneScale').value=String(DUEL_DEFAULT_SCALE);
+ $('sceneScale').dispatchEvent(new Event('input'));
+};
+function closeSceneChooser(){
+ const side=BG.scene?.kind;
+ if(side==='left'||side==='right')D.pose[side]='';
+ BG.scene=null;$('sceneModal').hidden=true;
+}
 $('sceneClose').onclick=closeSceneChooser;$('sceneCancel').onclick=closeSceneChooser;
 $('sceneModal').addEventListener('click',e=>{if(e.target===$('sceneModal'))closeSceneChooser()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sceneModal').hidden){e.stopPropagation();closeSceneChooser()}});
@@ -1177,6 +1209,11 @@ $('sceneApply').onclick=async()=>{
   profile.settings=profile.settings||{};profile.settings.backgroundId=bg;storeProfileData(all);applyIndividualBackground();
  }else{
   const t=duelActive();if(!t)return;
+  const all=allProfileData(),profile=all[id]||(all[id]={settings:{},history:[]});
+  profile.settings=profile.settings||{};
+  profile.settings.duelScale=normalizeDuelScale(BG.scene.previewScale);
+  storeProfileData(all);
+  D.pose[kind]='';
   t[kind]=id;t[kind+'BackgroundId']=bg;saveDuel();
   if(!D.running){loadDuelSprites(kind,id);$('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id)}
    
