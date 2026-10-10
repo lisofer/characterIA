@@ -463,7 +463,7 @@ function openTab(tab){
  $('mobileChat').textContent=show?'📜 Historial':'💬 Chat';
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
  document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
- $('settingsPanel').scrollTop=0;if(tab==='duel')refreshDuelDisplay();
+ $('settingsPanel').scrollTop=0;if(tab==='duel'){refreshDuelDisplay();if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live')}
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
@@ -624,6 +624,7 @@ function renderDuelSelects(){
  select.value=topic.id;
  $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;$('duelLimit').value=topic.limit||6;
  $('duelTopicHeading').textContent=topic.title;$('duelSummary').textContent=topic.summary||'Todavía no hay resumen.';
+ $('duelLiveTitle').textContent='EP. '+String(Math.max(1,D.topics.indexOf(topic)+1)).padStart(2,'0')+' · '+(topic.title||'DEBATE').toUpperCase();
 }
 function renderDuelTranscript(){
  const topic=duelActive(),container=$('duelMessages');container.replaceChildren();
@@ -634,18 +635,18 @@ function renderDuelTranscript(){
   const content=document.createElement('span');content.textContent=message.text;
   line.append(who,content);container.append(line);
  }
- container.scrollTop=container.scrollHeight;
+ container.scrollTop=container.scrollHeight;refreshDuelLiveFeed();
 }
 function appendDuelMessage(message){
  const line=document.createElement('div');line.className='duel-line '+(message.side||'human');
  const head=document.createElement('strong');head.textContent=message.side==='human'?'Tu intervención':duelName(message.profileId);
  const content=document.createElement('span');content.textContent=message.text;
- line.append(head,content);$('duelMessages').append(line);$('duelMessages').scrollTop=$('duelMessages').scrollHeight;
+ line.append(head,content);$('duelMessages').append(line);$('duelMessages').scrollTop=$('duelMessages').scrollHeight;refreshDuelLiveFeed();
 }
 function refreshDuelDisplay(){
  const topic=duelActive();if(!topic)return;
  renderDuelSelects();renderDuelTranscript();
- $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);applyDuelBackgrounds();
+ $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);applyDuelBackgrounds();renderDuelPoll();
  duelStatus(D.running?'Debate en curso…':duelCount(topic)+' intervenciones · Esperando tu señal');
  if($('appShell').dataset.duelMode==='true'){
   loadDuelSprites('left',topic.left);loadDuelSprites('right',topic.right);
@@ -656,6 +657,7 @@ function duelSyncInputs(){
  t.title=$('duelTitle').value.slice(0,100);t.theme=$('duelTheme').value.slice(0,2500);
  t.limit=Math.max(1,Math.min(30,Number($('duelLimit').value)||6));
  $('duelTopicHeading').textContent=t.title||'Sin título';
+ $('duelLiveTitle').textContent='EP. '+String(Math.max(1,D.topics.indexOf(t)+1)).padStart(2,'0')+' · '+(t.title||'DEBATE').toUpperCase();
  const o=$('duelTopicSelect').selectedOptions[0];if(o)o.textContent=t.title||'Sin título';
  saveDuel();
 }
@@ -680,6 +682,39 @@ $('duelExport').onclick=()=>{
  const name=(t.title||'debate').replace(/[^\p{L}\p{N}-]+/gu,'-').slice(0,40);
  download('debate-'+name+'.json',JSON.stringify(t,null,2));
 };
+
+function refreshDuelLiveFeed(){
+ const t=duelActive(),el=$('duelLiveFeed');el.replaceChildren();
+ const h=document.createElement('div');h.className='duel-live-feed-label';h.textContent='DIÁLOGO · PREVIA';el.append(h);
+ const q=new Set((t?.pending||[]).map(x=>x.id));
+ const entries=(t?.messages||[]).filter(x=>!x.id||!q.has(x.id)).slice(-4);
+ if(!entries.length){const e=document.createElement('div');e.className='duel-live-feed-empty';e.textContent='El intercambio aparecerá cuando hablen los personajes.';el.append(e)}
+ for(const m of entries){const line=document.createElement('div');line.className='duel-live-feed-line'+(m.side==='human'?' human':'');const avatar=document.createElement('div');avatar.className='duel-live-avatar';avatar.textContent=m.side==='human'?'✦':m.side==='left'?'◉':'●';const content=document.createElement('div');content.className='text';const name=document.createElement('strong');name.textContent=m.side==='human'?'Tu intervención':duelName(m.profileId);const body=document.createElement('span');body.textContent=m.text;content.append(name,body);line.append(avatar,content);el.append(line)}
+}
+function renderDuelPoll(){
+ const t=duelActive();if(!t)return;const a=Math.max(0,Number(t.poll?.left)||0),b=Math.max(0,Number(t.poll?.right)||0),n=a+b,p=n?Math.round(100*a/n):50;
+ $('duelVoteLeftName').textContent=duelName(t.left);$('duelVoteRightName').textContent=duelName(t.right);
+ $('duelVoteLeftPct').textContent=p+'%';$('duelVoteRightPct').textContent=100-p+'%';
+ $('duelVoteLeftBar').style.width=p+'%';$('duelVoteRightBar').style.width=100-p+'%';
+ $('duelVoteCount').textContent=n+' voto'+(n===1?'':'s')+' · Prueba local';
+}
+function duelLiveHeart(emoji){
+ const el=document.createElement('span');el.className='duel-live-heart';el.textContent=emoji;$('duelLiveHearts').append(el);el.addEventListener('animationend',()=>el.remove(),{once:true});setTimeout(()=>el.remove(),2800);
+}
+for(const side of ['left','right'])$('duelLiveVote'+(side==='left'?'Left':'Right')).onclick=()=>{
+ const t=duelActive();if(!t?.left||!t?.right)return toast('Elegí los dos personajes.',true);
+ t.poll=t.poll||{left:0,right:0};t.poll[side]=(Number(t.poll[side])||0)+1;saveDuel();renderDuelPoll();duelLiveHeart('💗');
+};
+$('duelLiveRose').onclick=()=>{duelLiveHeart('🌹');duelLiveHeart('❤️')};
+$('duelLivePollButton').onclick=()=>toast('Tocá un personaje para votar. Los votos son locales de prueba.');
+$('duelLiveGift').onclick=()=>toast('Los regalos reales requieren la conexión con TikTok LIVE.');
+$('duelLiveExpand').onclick=()=>{const full=$('appShell').classList.toggle('duel-focused');$('duelLiveExpand').textContent=full?'↙':'⛶'};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}});
+$('duelLiveNext').onclick=()=>$('duelNext').click();$('duelLiveStop').onclick=()=>$('duelStop').click();
+function sendDuelLiveInput(){const value=$('duelLiveInput').value.trim();if(value){$('duelHuman').value=value;$('duelLiveInput').value=''}if(D.running){toast('Intervención preparada para la próxima tanda.');return}$('duelNext').click()}
+$('duelLiveSend').onclick=sendDuelLiveInput;
+$('duelLiveInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendDuelLiveInput()}});
+
 function stopDuel(){
  D.generation++;D.running=false;D.abort?.abort();D.abort=null;
  for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
@@ -688,7 +723,7 @@ function stopDuel(){
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
  D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
- $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
+ $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;$('duelLiveNext').disabled=false;
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
 }
 $('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
@@ -874,8 +909,8 @@ async function runDuelBatch(){
  D.running=true;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
- $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
- if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('chat');
+ $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;$('duelLiveNext').disabled=true;
+ if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
  try{
   if(!pending){
    const human=$('duelHuman').value.trim();
@@ -915,7 +950,7 @@ async function runDuelBatch(){
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
    await duelVoice(t,entry.side,entry.text,token,entry);
    if(token!==D.generation||!D.running)break;
-   t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();
+   t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();refreshDuelLiveFeed();
    primeDuelAudio(t,token);
   }
   if(token===D.generation&&D.running&&!t.pending?.length){
@@ -930,7 +965,7 @@ async function runDuelBatch(){
    D.running=false;D.abort=null;D.audio=null;D.speech=null;
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
-   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
+   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;$('duelLiveNext').disabled=false;saveDuel();
    if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
 
   }
@@ -1489,11 +1524,13 @@ function wireTalkPress(el){
 }
 wireTalkPress($('talkButton'));wireTalkPress($('mobileTalk'));
 function switchMobilePane(pane){
- const config=pane==='settings';$('appShell').dataset.mobilePane=config?'settings':'chat';
- for(const [id,on] of [['mobileSettings',config],['mobileChat',!config]]){$(id).classList.toggle('selected',on);$(id).setAttribute('aria-pressed',String(on))}
+ const live=$('appShell').dataset.duelMode==='true',selected=live?pane:(pane==='settings'?'settings':'chat');
+ $('appShell').dataset.mobilePane=selected;
+ for(const [id,on] of [['mobileSettings',selected==='settings'],['mobileChat',selected==='chat'],['mobileLive',live&&selected==='live']]){$(id).classList.toggle('selected',on);$(id).setAttribute('aria-pressed',String(on))}
 }
 $('mobileChat').onclick=()=>switchMobilePane('chat');
 $('mobileSettings').onclick=()=>switchMobilePane('settings');
+$('mobileLive').onclick=()=>switchMobilePane('live');
 const divider=$('stageDivider'),shell=$('appShell'),stage=shell.querySelector('.middle');
 let stageDrag=null;
 function setStageShare(fraction,save=true){
