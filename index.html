@@ -484,7 +484,7 @@ function openTab(tab){
  $('mobileChat').textContent=show?'📜 Historial':'💬 Chat';
  document.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
  document.querySelectorAll('.setting-tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+tab));
- $('settingsPanel').scrollTop=0;if(tab==='duel'){refreshDuelDisplay();if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live')}else if(!show&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}
+ $('settingsPanel').scrollTop=0;if(tab==='duel'){refreshDuelDisplay();if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live')}
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>openTab(b.dataset.tab)));
 function openDB(){return new Promise(resolve=>{if(!window.indexedDB)return resolve(null);try{let r=indexedDB.open('persona-studio-sprites-v1',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)}catch{resolve(null)}})}
@@ -656,18 +656,18 @@ function renderDuelTranscript(){
   const content=document.createElement('span');content.textContent=message.text;
   line.append(who,content);container.append(line);
  }
- container.scrollTop=container.scrollHeight;refreshDuelLiveFeed();
+ container.scrollTop=container.scrollHeight;
 }
 function appendDuelMessage(message){
  const line=document.createElement('div');line.className='duel-line '+(message.side||'human');
  const head=document.createElement('strong');head.textContent=message.side==='human'?'Tu intervención':duelName(message.profileId);
  const content=document.createElement('span');content.textContent=message.text;
- line.append(head,content);$('duelMessages').append(line);$('duelMessages').scrollTop=$('duelMessages').scrollHeight;refreshDuelLiveFeed();
+ line.append(head,content);$('duelMessages').append(line);$('duelMessages').scrollTop=$('duelMessages').scrollHeight;
 }
 function refreshDuelDisplay(){
  const topic=duelActive();if(!topic)return;
  renderDuelSelects();renderDuelTranscript();
- $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);applyDuelBackgrounds();renderDuelPoll();
+ $('duelLeftName').textContent=duelName(topic.left);$('duelRightName').textContent=duelName(topic.right);applyDuelBackgrounds();
  duelStatus(D.running?'Debate en curso…':duelCount(topic)+' intervenciones · Esperando tu señal');
  if($('appShell').dataset.duelMode==='true'){
   loadDuelSprites('left',topic.left);loadDuelSprites('right',topic.right);
@@ -704,39 +704,6 @@ $('duelExport').onclick=()=>{
  download('debate-'+name+'.json',JSON.stringify(t,null,2));
 };
 
-function refreshDuelLiveFeed(){
- const t=duelActive(),el=$('duelLiveFeed');el.replaceChildren();
- const h=document.createElement('div');h.className='duel-live-feed-label';h.textContent='DIÁLOGO · PREVIA';el.append(h);
- const q=new Set((t?.pending||[]).map(x=>x.id));
- const entries=(t?.messages||[]).filter(x=>!x.id||!q.has(x.id)).slice(-4);
- if(!entries.length){const e=document.createElement('div');e.className='duel-live-feed-empty';e.textContent='El intercambio aparecerá cuando hablen los personajes.';el.append(e)}
- for(const m of entries){const line=document.createElement('div');line.className='duel-live-feed-line'+(m.side==='human'?' human':'');const avatar=document.createElement('div');avatar.className='duel-live-avatar';avatar.textContent=m.side==='human'?'✦':m.side==='left'?'◉':'●';const content=document.createElement('div');content.className='text';const name=document.createElement('strong');name.textContent=m.side==='human'?'Tu intervención':duelName(m.profileId);const body=document.createElement('span');body.textContent=m.text;content.append(name,body);line.append(avatar,content);el.append(line)}
-}
-function renderDuelPoll(){
- const t=duelActive();if(!t)return;const a=Math.max(0,Number(t.poll?.left)||0),b=Math.max(0,Number(t.poll?.right)||0),n=a+b,p=n?Math.round(100*a/n):0;
- $('duelVoteLeftName').textContent=duelName(t.left);$('duelVoteRightName').textContent=duelName(t.right);
- $('duelVoteLeftPct').textContent=p+'%';$('duelVoteRightPct').textContent=(n?100-p:0)+'%';
- $('duelVoteLeftBar').style.width=p+'%';$('duelVoteRightBar').style.width=(n?100-p:0)+'%';
- $('duelVoteCount').textContent=n+' voto'+(n===1?'':'s')+' · Prueba local';
-}
-function duelLiveHeart(emoji){
- const el=document.createElement('span');el.className='duel-live-heart';el.textContent=emoji;$('duelLiveHearts').append(el);el.addEventListener('animationend',()=>el.remove(),{once:true});setTimeout(()=>el.remove(),2800);
-}
-for(const side of ['left','right'])$('duelLiveVote'+(side==='left'?'Left':'Right')).onclick=()=>{
- const t=duelActive();if(!t?.left||!t?.right)return toast('Elegí los dos personajes.',true);
- t.poll=t.poll||{left:0,right:0};t.poll[side]=(Number(t.poll[side])||0)+1;saveDuel();renderDuelPoll();duelLiveHeart('💗');
-};
-$('duelLiveRose').onclick=()=>{duelLiveHeart('🌹');duelLiveHeart('❤️')};
-$('duelLivePollButton').onclick=()=>toast('Tocá un personaje para votar. Los votos son locales de prueba.');
-$('duelLiveGift').onclick=()=>toast('Los regalos reales requieren la conexión con TikTok LIVE.');
-$('duelLiveShare').onclick=async()=>{try{if(navigator.share)await navigator.share({title:'Persona Studio · Debate',url:location.href});else if(navigator.clipboard){await navigator.clipboard.writeText(location.href);toast('Enlace copiado.')}else toast('Copiá la dirección del navegador para compartir.')}catch(e){if(e?.name!=='AbortError')toast('No se pudo compartir el enlace.',true)}};
-$('duelLiveExpand').onclick=()=>{const full=$('appShell').classList.toggle('duel-focused');$('duelLiveExpand').textContent=full?'↙':'⛶'};
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}});
-$('duelLiveNext').onclick=()=>$('duelNext').click();$('duelLiveStop').onclick=()=>$('duelStop').click();
-function sendDuelLiveInput(){const value=$('duelLiveInput').value.trim();if(value){$('duelHuman').value=value;$('duelLiveInput').value=''}if(D.running){toast('Intervención preparada para la próxima tanda.');return}$('duelNext').click()}
-$('duelLiveSend').onclick=sendDuelLiveInput;
-$('duelLiveInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendDuelLiveInput()}});
-
 function stopDuel(){
  D.generation++;D.running=false;D.abort?.abort();D.abort=null;
  for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
@@ -745,7 +712,7 @@ function stopDuel(){
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
  D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
- $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;$('duelLiveNext').disabled=false;
+ $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
 }
 $('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
@@ -931,7 +898,7 @@ async function runDuelBatch(){
  D.running=true;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
- $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;$('duelLiveNext').disabled=true;
+ $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
  if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
  try{
   if(!pending){
@@ -972,7 +939,7 @@ async function runDuelBatch(){
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
    await duelVoice(t,entry.side,entry.text,token,entry);
    if(token!==D.generation||!D.running)break;
-   t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();refreshDuelLiveFeed();
+   t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();
    primeDuelAudio(t,token);
   }
   if(token===D.generation&&D.running&&!t.pending?.length){
@@ -987,7 +954,7 @@ async function runDuelBatch(){
    D.running=false;D.abort=null;D.audio=null;D.speech=null;
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
-   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;$('duelLiveNext').disabled=false;saveDuel();
+   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
    if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
 
   }
@@ -1087,7 +1054,12 @@ async function loadBackgroundLibrary(){
 function backgroundIdForProfile(id){return allProfileData()[id]?.settings?.backgroundId||''}
 function setBackgroundStyle(el,id){const u=BG.urls.get(id);el.style.backgroundImage=u?'linear-gradient(#07132120,#07132120),url("'+u+'")':'';el.style.backgroundSize='cover';el.style.backgroundPosition='center'}
 function applyIndividualBackground(){setBackgroundStyle($('stageSurface'),backgroundIdForProfile(S.activeProfile))}
-function applyDuelBackgrounds(){const t=duelActive();if(!t)return;setBackgroundStyle($('duelLeftBackground'),t.leftBackgroundId);setBackgroundStyle($('duelRightBackground'),t.rightBackgroundId)}
+function applyDuelBackgrounds(){const t=duelActive();if(!t)return;setBackgroundStyle($('duelLeftBackground'),t.leftBackgroundId);setBackgroundStyle($('duelRightBackground'),t.rightBackgroundId);setBroadcastBackground(t.stageBackgroundId);$('duelStageBackgroundLabel').textContent=BG.items.find(x=>x.id===t.stageBackgroundId)?.name||'Predeterminado'}
+function setBroadcastBackground(id){
+ const url=BG.urls.get(id);
+ const el=$('duelBroadcast');
+ el.style.backgroundImage=url?'linear-gradient(#080d1b30,#080d1b30),url("'+url+'")':'';
+}
 function fillSceneBackgrounds(selected){
  const el=$('sceneBackground');el.replaceChildren();
  const first=document.createElement('option');first.value='';first.textContent='Sin fondo';el.append(first);
@@ -1096,11 +1068,12 @@ function fillSceneBackgrounds(selected){
 }
 function openSceneChooser(kind){
  BG.scene={kind};const t=duelActive(),single=kind==='individual';
+ $('sceneCharacterField').style.display=kind==='broadcast'?'none':'';
  const select=$('sceneCharacter');select.replaceChildren();
  for(const x of profileIndex()){const opt=document.createElement('option');opt.value=x.id;opt.textContent=x.name;select.append(opt)}
  select.value=single?S.activeProfile:(t?.[kind]||'');
- fillSceneBackgrounds(single?backgroundIdForProfile(S.activeProfile):(t?.[kind+'BackgroundId']||''));
- $('sceneModalTitle').textContent=single?'Escenario individual':kind==='left'?'Cuadro izquierdo':'Cuadro derecho';
+ fillSceneBackgrounds(kind==='broadcast'?(t?.stageBackgroundId||''):single?backgroundIdForProfile(S.activeProfile):(t?.[kind+'BackgroundId']||''));
+ $('sceneModalTitle').textContent=kind==='broadcast'?'Fondo general del LIVE':single?'Escenario individual':kind==='left'?'Cuadro izquierdo':'Cuadro derecho';
  $('sceneBackgroundName').value='';$('sceneBackgroundFile').value='';$('sceneNotice').textContent='';
  $('sceneModal').hidden=false;
 }
@@ -1112,10 +1085,12 @@ $('sceneClose').onclick=closeSceneChooser;$('sceneCancel').onclick=closeSceneCho
 $('sceneModal').addEventListener('click',e=>{if(e.target===$('sceneModal'))closeSceneChooser()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sceneModal').hidden){e.stopPropagation();closeSceneChooser()}});
 $('stageSurface').addEventListener('click',()=>openSceneChooser('individual'));
+$('duelSceneBackground').onclick=()=>openSceneChooser('broadcast');
+$('duelBroadcast').addEventListener('click',e=>{if(!LIVE_OUTPUT_MODE&&!e.target.closest('.duel-character'))openSceneChooser('broadcast')});
 $('stageSurface').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSceneChooser('individual')}});
 for(const [id,kind] of [['duelLeftBox','left'],['duelRightBox','right']]){
- $(id).addEventListener('click',()=>openSceneChooser(kind));
- $(id).addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSceneChooser(kind)}});
+ $(id).addEventListener('click',()=>{if(!LIVE_OUTPUT_MODE)openSceneChooser(kind)});
+ $(id).addEventListener('keydown',e=>{if(!LIVE_OUTPUT_MODE&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openSceneChooser(kind)}});
 }
 $('sceneSaveBackground').onclick=async()=>{
  const name=$('sceneBackgroundName').value.trim().slice(0,70),file=$('sceneBackgroundFile').files?.[0];
@@ -1136,7 +1111,7 @@ $('sceneDeleteBackground').onclick=()=>{
  const u=BG.urls.get(id);BG.urls.delete(id);
  const all=allProfileData();for(const x of Object.values(all))if(x.settings?.backgroundId===id)x.settings.backgroundId='';
  storeProfileData(all);
- for(const t of D.topics)for(const k of ['leftBackgroundId','rightBackgroundId'])if(t[k]===id)t[k]='';
+ for(const t of D.topics)for(const k of ['leftBackgroundId','rightBackgroundId','stageBackgroundId'])if(t[k]===id)t[k]='';
  saveDuel();fillSceneBackgrounds('');applyIndividualBackground();applyDuelBackgrounds();
  if(u)URL.revokeObjectURL(u);if(S.db)try{S.db.transaction('sprites','readwrite').objectStore('sprites').delete('bg:'+id)}catch{}
  $('sceneNotice').textContent='Fondo eliminado.';
@@ -1144,8 +1119,10 @@ $('sceneDeleteBackground').onclick=()=>{
 $('sceneApply').onclick=async()=>{
  if(!BG.scene)return;
  const kind=BG.scene.kind,id=$('sceneCharacter').value,bg=$('sceneBackground').value;
- if(!id||!profileIndex().some(p=>p.id===id))return $('sceneNotice').textContent='El personaje es obligatorio.';
- if(kind==='individual'){
+ if(kind!=='broadcast'&&(!id||!profileIndex().some(p=>p.id===id)))return $('sceneNotice').textContent='El personaje es obligatorio.';
+ if(kind==='broadcast'){
+  const t=duelActive();if(!t)return;t.stageBackgroundId=bg;saveDuel();applyDuelBackgrounds();
+ }else if(kind==='individual'){
   if(id!==S.activeProfile)await switchProfile(id);
   const all=allProfileData(),profile=all[id]||(all[id]={settings:{},history:[]});
   profile.settings=profile.settings||{};profile.settings.backgroundId=bg;storeProfileData(all);applyIndividualBackground();
@@ -1153,7 +1130,7 @@ $('sceneApply').onclick=async()=>{
   const t=duelActive();if(!t)return;
   t[kind]=id;t[kind+'BackgroundId']=bg;saveDuel();
   if(!D.running){loadDuelSprites(kind,id);$('duel'+(kind==='left'?'Left':'Right')+'Name').textContent=duelName(id)}
-   renderDuelPoll();
+   
   applyDuelBackgrounds();
  }
  closeSceneChooser();
@@ -1548,7 +1525,6 @@ function wireTalkPress(el){
 wireTalkPress($('talkButton'));wireTalkPress($('mobileTalk'));
 function switchMobilePane(pane){
  const live=$('appShell').dataset.duelMode==='true',selected=live?pane:(pane==='settings'?'settings':'chat');
- if(selected!=='live'&&$('appShell').classList.contains('duel-focused')){$('appShell').classList.remove('duel-focused');$('duelLiveExpand').textContent='⛶'}
  $('appShell').dataset.mobilePane=selected;
  for(const [id,on] of [['mobileSettings',selected==='settings'],['mobileChat',selected==='chat'],['mobileLive',live&&selected==='live']]){$(id).classList.toggle('selected',on);$(id).setAttribute('aria-pressed',String(on))}
 }
