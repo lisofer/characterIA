@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
+const cloud=require('./cloud-store');
 const PORT = Number(process.env.PORT) || 3000;
 const FISH_ENDPOINT = 'https://api.fish.audio/v1/tts';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -40,6 +41,12 @@ function authenticated(req){if(!ready)return false;const m=String(req.headers.co
 function csrfSafe(req){const origin=req.headers.origin;if(origin){try{if(new URL(origin).host!==req.headers.host)return false}catch{return false}}return req.headers['sec-fetch-site']!=='cross-site'}
 function quotaCheck(req,max=120,windowMs=15*60000){const key=req.socket.remoteAddress||'unknown';const now=Date.now();let q=quotas.get(key);if(!q||now-q.start>windowMs){q={start:now,used:0};quotas.set(key,q)}q.used++;return q.used<=max}
 async function jsonBody(req,limit=22000000){if(!String(req.headers['content-type']||'').startsWith('application/json'))throw Error('Se requiere JSON');const chunks=[];let total=0;for await(const chunk of req){total+=chunk.length;if(total>limit)throw Error('Solicitud demasiado grande');chunks.push(chunk)}try{return JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{throw Error('JSON inválido')}}
+async function binaryBody(req,limit=20000000){
+ const chunks=[];let size=0;
+ for await(const chunk of req){size+=chunk.length;if(size>limit)throw Object.assign(Error('Archivo demasiado grande'),{status:413});chunks.push(chunk)}
+ return Buffer.concat(chunks);
+}
+function cloudError(res,e){respond(res,e.status||500,{error:e.message,currentRevision:e.currentRevision??undefined})}
 const loginPage=fs.readFileSync(path.join(__dirname,'login.html'));
 const appHtml=fs.readFileSync(path.join(__dirname,'index.html'));
 function pack(value){
@@ -96,11 +103,28 @@ const server=http.createServer(async(req,res)=>{
   attempts.delete(key);return respond(res,200,{ok:true},{'Set-Cookie':cookie(req,makeSession())});
  }
  if(!authenticated(req)){if(req.method==='GET'&&['/','/index.html'].includes(route)){res.writeHead(302,{...baseHeaders,Location:'/login'});res.end();return}return respond(res,401,{error:'Sesión no autorizada. Ingresá con tu token.'})}
- if(req.method==='POST'&&!csrfSafe(req))return respond(res,403,{error:'Origen no autorizado'});
+ if(['POST','PUT','DELETE'].includes(req.method)&&!csrfSafe(req))return respond(res,403,{error:'Origen no autorizado'});
  if(req.method==='POST'&&route==='/api/auth/logout')return respond(res,200,{ok:true},{'Set-Cookie':cookie(req,'',0)});
  if(req.method==='GET'&&(route==='/'||route==='/index.html'))return page(res,200,appHtml);
  if(req.method==='GET'&&route==='/api/health')return respond(res,200,{ok:true,model:'s2.1-pro-free',fishKeyConfigured:!!FISH_KEY,geminiKeyConfigured:!!GEMINI_KEY,authenticated:true});
- if(req.method==='POST'&&!quotaCheck(req))return respond(res,429,{error:'Demasiadas solicitudes. Esperá unos minutos.'});
+ if(['POST','PUT'].includes(req.method)&&!quotaCheck(req,240))return respond(res,429,{error:'Demasiadas solicitudes. Esperá unos minutos.'});
+ // Datos privados: solo se accede con la sesión autenticada del propietario.
+ if(req.method==='GET'&&route==='/api/cloud/status')return respond(res,200,cloud.status());
+ if(req.method==='GET'&&route==='/api/cloud/state')try{return respond(res,200,cloud.readState())}catch(e){return cloudError(res,e)}
+ if(req.method==='PUT'&&route==='/api/cloud/state'){
+  try{return respond(res,200,cloud.updateState(await jsonBody(req,6000000)))}
+  catch(e){return cloudError(res,e)}
+ }
+ if(route.startsWith('/api/cloud/assets/')){
+  const hash=route.slice('/api/cloud/assets/'.length);
+  if(req.method==='PUT')try{return respond(res,200,cloud.putAsset(hash,await binaryBody(req)))}
+    catch(e){return cloudError(res,e)}
+  if(req.method==='GET')try{
+   const data=cloud.getAsset(hash);
+   res.writeHead(200,{...baseHeaders,'Content-Type':'application/octet-stream','Content-Length':data.length});
+   res.end(data);return;
+  }catch(e){return cloudError(res,e)}
+ }
  if(req.method==='POST'&&route==='/api/fish/tts')return fish(req,res);
  if(req.method==='POST'&&route==='/api/gemini/stream')return gemini(req,res,true);
  if(req.method==='POST'&&route==='/api/gemini/transcribe')return gemini(req,res,false);
