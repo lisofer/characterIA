@@ -899,9 +899,16 @@ async function drainModeratorQueue(t,token){
   D.moderatorBusy=true;
   D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,token)});
   duelStatus('Moderador · voz de '+duelName(entry.profileId));
-  try{await duelVoice(t,'moderator',entry.text,token,entry)}
-  catch(e){if(D.generation===token&&D.running)toast('Falló la voz del moderador: '+e.message,true)}
-  finally{D.audioJobs.delete(entry.id);D.moderatorBusy=false}
+  let completed=false;
+  try{
+   await duelVoice(t,'moderator',entry.text,token,entry);
+   completed=D.generation===token&&D.running;
+  }catch(e){if(D.generation===token&&D.running)toast('Falló la voz del moderador: '+e.message,true)}
+  finally{
+   // Si se canceló antes de comenzar a hablar, conservar el texto para el próximo intento.
+   if(D.generation!==token&&!completed)D.moderatorQueue.unshift(entry);
+   D.audioJobs.delete(entry.id);D.moderatorBusy=false;
+  }
  }
 }
 async function playModeratorsStandalone(){
@@ -1136,8 +1143,9 @@ async function runDuelBatch(){
  $('mobileChat').textContent='📜 Historial';
  $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;setDuelStopButtons(false);
  if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
+ let batchFailed=false;
  try{
-  // «Continuar» también lee en voz alta el mensaje pendiente del moderador.
+  // Al comenzar o continuar, también se lee en voz alta el texto pendiente del moderador.
   const human=$('duelHuman').value.trim();
   if(human){const entry=newModeratorEntry(t,human,false);$('duelHuman').value='';addModeratorEntry(t,entry)}
   await drainModeratorQueue(t,token);
@@ -1188,16 +1196,28 @@ async function runDuelBatch(){
    await summarizeDuel(t);
   }
  }catch(error){
+  batchFailed=true;
   if(token===D.generation&&D.running){duelStatus('Debate detenido: '+error.message);toast(error.message,true)}
  }finally{
   if(token===D.generation){
+   const pausing=D.stopAfterCurrent;
+   const continueAutomatically=D.autoContinueRequested&&!pausing&&!batchFailed;
    D.running=false;D.abort=null;D.audio=null;D.speech=null;
+   D.stopAfterCurrent=false;D.autoContinueRequested=false;D.moderatorBusy=false;
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
-   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
+   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
+   if(pausing){
+    if(Array.isArray(t.pending)&&!t.pending.length){
+     t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;
+    }
+    duelStatus(duelCount(t)+' intervenciones · En pausa');
+   }
+   saveDuel();
    if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
-   if(D.moderatorQueue.length)Promise.resolve().then(()=>playModeratorsStandalone());
-
+   // Un envío durante la tanda autoriza exactamente una tanda más;
+   // no repetir una llamada Gemini si la tanda anterior se interrumpió o falló.
+   if(continueAutomatically)Promise.resolve().then(()=>runDuelBatch());
   }
  }
 }
