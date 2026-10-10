@@ -53,29 +53,55 @@ test('No modifica ni el original remoto ni el local',()=>{
  assert.equal(JSON.stringify(pc),beforeA);
  assert.equal(JSON.stringify(phone),beforeB);
 });
-const GLOBAL='persona-studio-global-v3',MUSIC='music:background';
-const musicCfg=(name,time)=>JSON.stringify({music:{name,size:100,updatedAt:time,volume:18,duck:22}});
-const musicAsset=(letter)=>({hash:letter.repeat(64),type:'audio/mpeg',size:100});
-test('La pista más reciente reemplaza la anterior sin duplicados',()=>{
- const remote=snapshot();remote.kv[GLOBAL]=musicCfg('vieja.mp3',100);remote.assets[MUSIC]=musicAsset('a');
- const newer={schema:1,kv:{[GLOBAL]:musicCfg('nueva.mp3',200)},assets:{[MUSIC]:musicAsset('b')}};
- const result=merge(remote,newer,{base:remote}).state;
- assert.equal(result.assets[MUSIC].hash,'b'.repeat(64));
- assert.equal(Object.keys(result.assets).filter(k=>k.includes('music')).length,1);
- assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'nueva.mp3');
+
+const MUSIC_GLOBAL='persona-studio-global-v3';
+function musicState(tracks,selectedId='',time=0,hashes={}){
+ const st=snapshot();
+ st.kv[MUSIC_GLOBAL]=JSON.stringify({music:{tracks,selectedId,volume:18,duck:22,settingsUpdatedAt:time}});
+ for(const [id,hash] of Object.entries(hashes))st.assets[id==='legacy'?'music:background':'music:track:'+id]=
+  {hash:hash.repeat(64),type:'audio/mpeg',size:1024};
+ return st;
+}
+const track=(id,name,when,removed=false)=>({id,name,size:1024,addedAt:when,updatedAt:when,...(removed?{deletedAt:when}:{})});
+test('Permite varias canciones y conserva la anterior al agregar otra',()=>{
+ const first=musicState([track('t_one','Primera',10)],'t_one',10,{t_one:'a'});
+ const next=musicState([track('t_two','Segunda',20)],'t_two',20,{t_two:'b'});
+ const merged=merge(first,next,{base:first}).state;
+ assert.deepEqual(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks.map(t=>t.name),['Primera','Segunda']);
+ assert.ok(merged.assets['music:track:t_one']);
+ assert.ok(merged.assets['music:track:t_two']);
+ assert.equal(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.selectedId,'t_two');
 });
-test('Borrar la música también se sincroniza',()=>{
- const remote=snapshot();remote.kv[GLOBAL]=musicCfg('vieja.mp3',100);remote.assets[MUSIC]=musicAsset('a');
- const removed={schema:1,kv:{[GLOBAL]:musicCfg('',300)},assets:{}};
- const result=merge(remote,removed,{base:remote}).state;
- assert.equal(result.assets[MUSIC],undefined);
- assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'');
+test('Renombrar una pista mantiene el archivo y no duplica el ID',()=>{
+ const first=musicState([track('t_one','Antes',10)],'t_one',10,{t_one:'a'});
+ const edited=musicState([track('t_one','Después',30)],'t_one',10,{t_one:'a'});
+ const merged=merge(first,edited,{base:first}).state;
+ assert.equal(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks.length,1);
+ assert.equal(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks[0].name,'Después');
+ assert.equal(merged.assets['music:track:t_one'].hash,'a'.repeat(64));
 });
-test('Una versión vieja de otro dispositivo no reemplaza la canción nueva',()=>{
- const original=snapshot();original.kv[GLOBAL]=musicCfg('vieja.mp3',100);original.assets[MUSIC]=musicAsset('a');
- const remote=snapshot();remote.kv[GLOBAL]=musicCfg('nueva.mp3',400);remote.assets[MUSIC]=musicAsset('b');
- const stale={schema:1,kv:{[GLOBAL]:musicCfg('',250)},assets:{}};
- const result=merge(remote,stale,{base:original}).state;
- assert.equal(result.assets[MUSIC].hash,'b'.repeat(64));
- assert.equal(JSON.parse(result.kv[GLOBAL]).music.name,'nueva.mp3');
+test('Los borrados se propagan y no reaparecen al sincronizar dispositivos',()=>{
+ const first=musicState([track('t_one','Borrar',10)],'t_one',10,{t_one:'a'});
+ const removed=musicState([track('t_one','Borrar',30,true)],'',30,{});
+ const merged=merge(first,removed,{base:first}).state;
+ assert.equal(merged.assets['music:track:t_one'],undefined);
+ assert.ok(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks[0].deletedAt);
+});
+test('Otro dispositivo desactualizado no borra una canción editada posteriormente',()=>{
+ const base=musicState([track('t_one','Viejo',10)],'t_one',10,{t_one:'a'});
+ const remote=musicState([track('t_one','Más nuevo',90)],'t_one',90,{t_one:'b'});
+ const stale=musicState([track('t_one','Viejo',40,true)],'',40,{});
+ const merged=merge(remote,stale,{base}).state;
+ assert.equal(merged.assets['music:track:t_one'].hash,'b'.repeat(64));
+ assert.equal(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks[0].name,'Más nuevo');
+});
+test('La pista anterior sigue disponible al crear la biblioteca nueva',()=>{
+ const legacy=snapshot();
+ legacy.kv[MUSIC_GLOBAL]=JSON.stringify({music:{name:'Canción antigua.mp3',size:1024,updatedAt:10}});
+ legacy.assets['music:background']={hash:'a'.repeat(64),type:'audio/mpeg',size:1024};
+ const newer=musicState([track('t_new','Nueva',90)],'t_new',90,{t_new:'b'});
+ const merged=merge(legacy,newer,{base:legacy}).state;
+ assert.equal(JSON.parse(merged.kv[MUSIC_GLOBAL]).music.tracks.length,2);
+ assert.ok(merged.assets['music:background']);
+ assert.ok(merged.assets['music:track:t_new']);
 });

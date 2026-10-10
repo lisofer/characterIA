@@ -58,3 +58,16 @@ test('admite música de más de 20 MB sin ampliar el límite de los demás archi
  assert.throws(()=>cloud.updateState({baseRevision:before+1,state:{schema:1,kv:{},assets:{'music:background':{hash,type:'audio/mpeg',size:100*1024*1024+1}}}}),/Manifiesto/);
  assert.throws(()=>cloud.updateState({baseRevision:before+1,state:{schema:1,kv:{},assets:{'p1:idleOpen':{hash,type:'image/png',size:20000001}}}}),/Manifiesto/);
 });
+
+test('archivos de música de la biblioteca mantienen el límite de 100 MB',()=>{
+ const data=Buffer.alloc(20000001,0x37);
+ const hash=crypto.createHash('sha256').update(data).digest('hex');
+ cloud.putAsset(hash,data);
+ const start=cloud.readState().revision;
+ const state={schema:1,kv:{},assets:{'music:track:t_example':{hash,type:'audio/mpeg',size:data.length}}};
+ assert.equal(cloud.updateState({baseRevision:start,state}).revision,start+1);
+ assert.throws(()=>cloud.updateState({baseRevision:start+1,
+  state:{schema:1,kv:{},assets:{'music:track:t_large':{hash,type:'audio/mpeg',size:104857601}}}}),/Manifiesto/);
+ assert.throws(()=>cloud.updateState({baseRevision:start+1,
+  state:{schema:1,kv:{},assets:{'p1:voiceSample':{hash,type:'audio/mpeg',size:data.length}}}}),/Manifiesto/);
+});

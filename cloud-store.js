@@ -54,7 +54,7 @@ function validateState(st){
  if(Object.keys(st.assets).length>750)throw Object.assign(Error('Demasiados archivos'),{status:413});
  for(const [k,v] of Object.entries(st.assets)){
   if(k.length>220||!v||typeof v!=='object'||!/^([a-f0-9]{64})$/.test(v.hash)||
-     !Number.isInteger(v.size)||v.size<0||v.size>(k==='music:background'?MAX_MUSIC_BYTES:20000000)||
+     !Number.isInteger(v.size)||v.size<0||v.size>((k==='music:background'||/^music:track:[a-z0-9_-]{1,80}$/i.test(k))?MAX_MUSIC_BYTES:20000000)||
      typeof v.type!=='string'||v.type.length>100)throw Object.assign(Error('Manifiesto de archivo inválido'),{status:400});
   if(!fs.existsSync(assetPath(v.hash)))throw Object.assign(Error('Falta subir un archivo antes del manifiesto'),{status:409});
  }

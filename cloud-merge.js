@@ -28,7 +28,8 @@
   const duels=parse(kv,TOPICS,{topics:[]});
   if(duels.topics?.some(t=>t.theme||t.messages?.length||t.left||t.right||(t.title&&t.title!=='Nueva temática')))return true;
   if(parse(kv,BACKGROUNDS,[]).length)return true;
-  if(parse(kv,GLOBAL,{}).music?.name)return true;
+  const music=parse(kv,GLOBAL,{}).music;
+  if(music?.name||music?.tracks?.some(t=>!t.deletedAt))return true;
   return false;
  }
  function merge(remote,local,options={}){
@@ -99,7 +100,7 @@
    if(!rindex.has(item.id)){const copy=deep(item);ri.push(copy);rindex.set(copy.id,copy)}
   }
   for(const [key,asset] of Object.entries(la)){
-   if(key===MUSIC)continue; // La música nunca crea versiones duplicadas.
+   if(key===MUSIC||key.startsWith('music:track:'))continue; // Las pistas se concilian abajo.
    let target=key;
    if(key.startsWith('bg:')){
     const id=key.slice(3);target='bg:'+(bgMap[id]||id);
@@ -149,21 +150,51 @@
    if(!has(rkv,k)||options.base&&!has([PROFILE,INDEX,TOPICS,BACKGROUNDS].reduce((o,x)=>(o[x]=true,o),{}),k)&&
        (rkv[k]===options.base.kv?.[k]))rkv[k]=v;
   }
-  // Pista global única: reemplazar o borrar según la última actualización.
-  if(has(lkv,GLOBAL)){
-   const localMusic=parse(lkv,GLOBAL,{}).music;
-   if(localMusic&&typeof localMusic==='object'){
-    const oldMusic=parse(options.base?.kv,GLOBAL,{}).music;
-    const remoteMusic=parse(remote.kv,GLOBAL,{}).music;
-    const changed=!options.base||!equal(localMusic,oldMusic)||
-     (has(la,MUSIC)&&!equal(la[MUSIC],options.base.assets?.[MUSIC]));
-    if(changed&&(Number(localMusic.updatedAt)||0)>=(Number(remoteMusic?.updatedAt)||0)){
-     const settings=parse(rkv,GLOBAL,{});
-     settings.music=deep(localMusic);rkv[GLOBAL]=JSON.stringify(settings);
-     if(!localMusic.name)delete ra[MUSIC];
-     else if(has(la,MUSIC))ra[MUSIC]=deep(la[MUSIC]);
+  // Biblioteca de música: cada pista usa un ID estable; los borrados permanecen
+  // como marcas para no revivir canciones eliminadas desde otro dispositivo.
+  const normalizeMusic=raw=>{
+   const music=raw&&typeof raw==='object'?raw:{};
+   const tracks=Array.isArray(music.tracks)?music.tracks:
+    music.name?[{id:'legacy',name:String(music.name).replace(/\.[^.]+$/,''),fileName:music.name,
+      size:music.size||0,addedAt:music.updatedAt||1,updatedAt:music.updatedAt||1}]:[];
+   return {tracks:deep(tracks),selectedId:music.selectedId||((tracks.find(t=>!t.deletedAt)||{}).id||''),
+    volume:Number.isFinite(Number(music.volume))?Number(music.volume):18,
+    duck:Number.isFinite(Number(music.duck))?Number(music.duck):22,
+    settingsUpdatedAt:Number(music.settingsUpdatedAt||music.updatedAt)||0};
+  };
+  const keyOf=id=>id==='legacy'?MUSIC:'music:track:'+id;
+  const rg=parse(remote.kv,GLOBAL,{}),lg=parse(lkv,GLOBAL,{});
+  if(rg.music!==undefined||lg.music!==undefined){
+   const rm=normalizeMusic(rg.music),lm=normalizeMusic(lg.music);
+   const map=new Map(rm.tracks.map(t=>[t.id,t]));
+   const localHasMusic=lg.music&&typeof lg.music==='object';
+   if(localHasMusic)for(const t of lm.tracks){
+    if(!t||typeof t.id!=='string'||!/^[a-z0-9_-]{1,80}$/i.test(t.id))continue;
+    const previous=map.get(t.id),key=keyOf(t.id);
+    const localTime=Number(t.updatedAt)||0,remoteTime=Number(previous?.updatedAt)||0;
+    const localWins=!previous||localTime>remoteTime;
+    if(localWins){
+     map.set(t.id,deep(t));
+     if(t.deletedAt)delete ra[key];
+     else if(la[key])ra[key]=deep(la[key]);
     }
    }
+   const resultMusic={...rm,tracks:[...map.values()]};
+   if(localHasMusic&&lm.settingsUpdatedAt>rm.settingsUpdatedAt){
+    resultMusic.selectedId=lm.selectedId;
+    resultMusic.volume=lm.volume;
+    resultMusic.duck=lm.duck;
+    resultMusic.settingsUpdatedAt=lm.settingsUpdatedAt;
+   }
+   for(const t of resultMusic.tracks){
+    if(t.deletedAt)delete ra[keyOf(t.id)];
+   }
+   const selectable=resultMusic.tracks.filter(t=>!t.deletedAt);
+   if(!selectable.some(t=>t.id===resultMusic.selectedId))
+    resultMusic.selectedId=selectable[0]?.id||'';
+   const chosenGlobal=parse(rkv,GLOBAL,{});
+   chosenGlobal.music=resultMusic;
+   rkv[GLOBAL]=JSON.stringify(chosenGlobal);
   }
   return {state:result,forks};
  }
