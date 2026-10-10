@@ -116,7 +116,6 @@
 .duel-line.human{border-left:3px solid #f1c387;background:#293126}
 .duel-line.whisper{border-left:3px solid #ab96d2;background:#1c192e;color:#d9ceec}
 .duel-line.whisper strong{color:#c9b5f7}
-.duel-broadcast .duel-global-caption.moderator-speaking strong{display:inline-block;flex:0 0 auto;font:700 2.1cqw/1.1 Inter,system-ui,sans-serif;color:#ffbbcf;letter-spacing:.02em}
 .duel-line strong{display:block;margin-bottom:3px;color:#d4f4e9}
 .duel-summary{border:1px solid #304459;border-radius:12px;background:#132232;padding:11px;font-size:12px;white-space:pre-wrap;min-height:42px;overflow-wrap:anywhere}
 .shell[data-duel-mode="true"] .middle .stage-body,.shell[data-duel-mode="true"] .middle .stage-foot{display:none}
@@ -437,9 +436,8 @@ body.live-output #appShell .duel-broadcast{
       <div class="composer">
         <div class="field" style="margin:0 0 8px"><label for="duelModeratorVoice">Voz del moderador</label><select id="duelModeratorVoice" aria-label="Elegir la voz del moderador"></select></div>
         <textarea id="duelHuman" rows="2" maxlength="1000" placeholder="Escribí algo como moderador o susurrá a las IA…"></textarea>
-        <div class="button-row" style="margin-top:8px"><button type="button" id="duelModeratorSend" class="btn primary small">🎙 Intervenir con voz</button><button type="button" id="duelModeratorWhisper" class="btn small ghost">🤫 Susurrar</button></div>
-        <div class="hint" style="margin-top:5px">Intervenir y Susurrar también continúan el debate. Intervenir se escucha en el LIVE; Susurrar solo llega a las IA, sin voz ni subtítulos.</div>
-        <div class="button-row" style="margin-top:8px"><button type="button" id="duelNext" style="display:none" aria-hidden="true" tabindex="-1">▶ Continuar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
+        <div class="button-row" style="margin-top:8px"><button type="button" id="duelModeratorSend" class="btn primary small">🎙 Intervenir con voz</button><button type="button" id="duelModeratorWhisper" class="btn small ghost">🤫 Susurrar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
+        <button type="button" id="duelNext" style="display:none" aria-hidden="true" tabindex="-1">▶ Continuar</button>
         <div id="duelStatus" class="hint" style="margin-top:8px" aria-live="polite">Elegí dos personajes y una temática.</div>
       </div>
     </div>
@@ -812,8 +810,7 @@ function receiveLiveSnapshot(message){
  const speech=message.speech;
  D.speech=speech?.ready?{...speech,audio:null,started:performance.now()-speech.elapsed}:null;
  for(const side of ['left','right'])$('duel'+(side==='left'?'Left':'Right')+'Box').classList.toggle('is-speaking',speech?.side===side&&speech?.ready);
- $('duelGlobalCaption').classList.toggle('moderator-speaking',speech?.side==='moderator'&&speech?.ready);
- if(!speech?.ready){$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=''}
+ if(!speech?.ready||speech.side==='moderator'){$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=''}
 }
 function connectLiveWindows(){
  if(!LIVE_CHANNEL){if(!LIVE_OUTPUT_MODE)toast('Este navegador no admite ventanas sincronizadas; usá un navegador actualizado.',true);return}
@@ -934,7 +931,7 @@ function stopDuelImmediately(){
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
- D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';$('duelGlobalCaption').classList.remove('moderator-speaking');
+ D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
  $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
@@ -1077,8 +1074,7 @@ async function duelVoice(t,side,text,token,entry){
  D.speech=speech;
  const label=side==='left'?'Left':side==='right'?'Right':null,box=label?$('duel'+label+'Box'):null;
  for(const n of ['Left','Right']){$('duel'+n+'Box').classList.toggle('is-speaking',n===label);$('duel'+n+'Caption').textContent=''}
- $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=side==='moderator'?'Moderador':'';
- $('duelGlobalCaption').classList.toggle('moderator-speaking',side==='moderator');
+ $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  const browser=async()=>{
   if(!('speechSynthesis'in window))throw Error('No se puede reproducir la voz en este navegador.');
   const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=rate;u.pitch=Number(cfg.pitch)||1;
@@ -1122,7 +1118,6 @@ async function duelVoice(t,side,text,token,entry){
   if(D.generation===token){
    D.audio=null;D.resolveAudio=null;D.speech=null;
    $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
-   $('duelGlobalCaption').classList.remove('moderator-speaking');
    box?.classList.remove('is-speaking');
   }
  }
@@ -1221,14 +1216,24 @@ async function runDuelBatch(){
   }
  }
 }
+// La apertura de pregunta o exclamación siempre queda con la siguiente oración.
+function speechBoundaryOffset(text,words,i){
+ const wordEnd=words[i].index+words[i].text.length,next=words[i+1];
+ if(!next)return text.length;
+ const gap=text.slice(wordEnd,next.index);
+ const mark=gap.match(/[.!?…]+(?:["”’\)\]]*)/u);
+ return mark?wordEnd+mark.index+mark[0].length:null;
+}
 function duelSpeechPlan(text,rate){
  const words=wordsOf(text),lengths=words.map(w=>wordDuration(w,rate));
- const offsets=[],sentences=[];let total=0,start=0;
+ const offsets=[],sentences=[];let total=0,first=0,segmentStart=0;
  for(let i=0;i<words.length;i++){
   offsets.push(total);total+=lengths[i];
   const next=words[i+1],between=text.slice(words[i].index+words[i].text.length,next?next.index:text.length);
-  if(!next||/[.!?…]/.test(between)){
-   sentences.push({first:start,last:i,text:text.slice(start===0?0:words[start].index,next?next.index:text.length).trim()});start=i+1;
+  const boundary=speechBoundaryOffset(text,words,i);
+  if(boundary!==null){
+   sentences.push({first,last:i,text:text.slice(segmentStart,boundary).trim()});
+   first=i+1;segmentStart=boundary;
   }
   if(next)total+=/[.!?…]/.test(between)?260:/[,;:]/.test(between)?100:0;
  }
@@ -1271,25 +1276,7 @@ function duelScaleForSide(side){
  return duelScaleForProfile(profileId);
 }
 function frameDuel(now){
- // El moderador no anima a los dos personajes: solamente habla y aparece subtitulado.
- const mod=D.speech?.side==='moderator'?D.speech:null;
- if(mod){
-  const caption=$('duelGlobalText');
-  if(!mod.ready){if(caption.textContent)caption.textContent=''}
-  else{
-   const t=Math.max(0,(mod.audio?mod.audio.currentTime*1000:now-mod.started)+mod.delay);
-   const plan=mod.plan;let index=-1,completed=-1;
-   for(let i=0;i<plan.words.length;i++){
-    if(t>=plan.offsets[i]+plan.lengths[i])completed=i;
-    if(t>=plan.offsets[i]&&t<plan.offsets[i]+plan.lengths[i]){index=i;break}
-   }
-   const sentence=index>=0?plan.sentences.find(q=>index>=q.first&&index<=q.last):
-                                  plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
-   const wanted=sentence&&!(index<0&&completed===sentence.last)?sentence.text:'';
-   if(caption.textContent!==wanted)caption.textContent=wanted;
-  }
-  $('duelGlobalSpeaker').textContent='Moderador';
- }
+ // El moderador habla fuera de cámara y nunca aparece en los subtítulos.
  for(const side of ['left','right']){
   const images=D.images[side],name=side==='left'?'Left':'Right',canvas=$('duel'+name+'Canvas');
   const ctx=canvas.getContext('2d');if(!ctx)continue;
@@ -1466,15 +1453,14 @@ function wordDuration(word,rate){return Math.min(800,Math.max(150,(115+word.text
 
 function buildSpeechPlan(text){
  const words=wordsOf(text),lengths=words.map(w=>wordDuration(w,Number($('rate').value)));
- const offsets=[],sentences=[];let total=0,first=0;
+ const offsets=[],sentences=[];let total=0,first=0,segmentStart=0;
  for(let i=0;i<words.length;i++){
   offsets.push(total);total+=lengths[i];
-  const next=words[i+1];
-  const between=text.slice(words[i].index+words[i].text.length,next?next.index:text.length);
-  const boundary=!next||/[.!?…]/.test(between);
-  if(boundary){
-   const start=first===0?0:words[first].index,end=next?next.index:text.length;
-   sentences.push({first,last:i,text:text.slice(start,end).trim()});first=i+1;
+  const next=words[i+1],between=text.slice(words[i].index+words[i].text.length,next?next.index:text.length);
+  const boundary=speechBoundaryOffset(text,words,i);
+  if(boundary!==null){
+   sentences.push({first,last:i,text:text.slice(segmentStart,boundary).trim()});
+   first=i+1;segmentStart=boundary;
   }
   if(next){if(/[.!?…]/.test(between))total+=260;else if(/[,;:]/.test(between))total+=100}
  }
