@@ -116,6 +116,7 @@
 .duel-line.human{border-left:3px solid #f1c387;background:#293126}
 .duel-line.whisper{border-left:3px solid #ab96d2;background:#1c192e;color:#d9ceec}
 .duel-line.whisper strong{color:#c9b5f7}
+.duel-broadcast .duel-global-caption.moderator-speaking strong{display:inline-block;flex:0 0 auto;font:700 2.1cqw/1.1 Inter,system-ui,sans-serif;color:#ffbbcf;letter-spacing:.02em}
 .duel-line strong{display:block;margin-bottom:3px;color:#d4f4e9}
 .duel-summary{border:1px solid #304459;border-radius:12px;background:#132232;padding:11px;font-size:12px;white-space:pre-wrap;min-height:42px;overflow-wrap:anywhere}
 .shell[data-duel-mode="true"] .middle .stage-body,.shell[data-duel-mode="true"] .middle .stage-foot{display:none}
@@ -811,6 +812,7 @@ function receiveLiveSnapshot(message){
  const speech=message.speech;
  D.speech=speech?.ready?{...speech,audio:null,started:performance.now()-speech.elapsed}:null;
  for(const side of ['left','right'])$('duel'+(side==='left'?'Left':'Right')+'Box').classList.toggle('is-speaking',speech?.side===side&&speech?.ready);
+ $('duelGlobalCaption').classList.toggle('moderator-speaking',speech?.side==='moderator'&&speech?.ready);
  if(!speech?.ready){$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=''}
 }
 function connectLiveWindows(){
@@ -916,7 +918,7 @@ function stopDuel(){
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
- D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+ D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';$('duelGlobalCaption').classList.remove('moderator-speaking');
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
  $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
@@ -967,7 +969,7 @@ async function duelGenerateBatch(t,participants,count){
  const recent=t.messages.slice(-12);
  const notes=t.messages.filter(m=>m.side==='human').slice(-6);
  const context=[...notes.filter(m=>!recent.includes(m)),...recent];
- const prior=context.map(m=>(m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR (no mencionar ni citar)':'MODERADOR'):duelName(m.profileId))+': '+m.text.slice(0,380)).join('\\n');
+ const prior=context.map(m=>(m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR (no mencionar ni citar)':'MODERADOR'):duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
  const summary=t.summary?'Resumen acumulado: '+t.summary.slice(0,1400)+'\n':'';
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
@@ -1046,6 +1048,7 @@ async function duelVoice(t,side,text,token,entry){
  const label=side==='left'?'Left':side==='right'?'Right':null,box=label?$('duel'+label+'Box'):null;
  for(const n of ['Left','Right']){$('duel'+n+'Box').classList.toggle('is-speaking',n===label);$('duel'+n+'Caption').textContent=''}
  $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=side==='moderator'?'Moderador':'';
+ $('duelGlobalCaption').classList.toggle('moderator-speaking',side==='moderator');
  const browser=async()=>{
   if(!('speechSynthesis'in window))throw Error('No se puede reproducir la voz en este navegador.');
   const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=rate;u.pitch=Number(cfg.pitch)||1;
@@ -1089,6 +1092,7 @@ async function duelVoice(t,side,text,token,entry){
   if(D.generation===token){
    D.audio=null;D.resolveAudio=null;D.speech=null;
    $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+   $('duelGlobalCaption').classList.remove('moderator-speaking');
    box?.classList.remove('is-speaking');
   }
  }
@@ -1168,6 +1172,7 @@ async function runDuelBatch(){
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
    $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;saveDuel();
    if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
+   if(D.moderatorQueue.length)Promise.resolve().then(()=>playModeratorsStandalone());
 
   }
  }
