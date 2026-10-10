@@ -13,6 +13,10 @@
  let lastKV='';let lastRev=Number(localStorage.getItem(REV)||0);
  let lastFingerprint=localStorage.getItem(FP)||'';
  function status(text,error=false){const node=$('cloudStatus');if(node){node.textContent=text;node.style.color=error?'#ffc3a9':''}}
+ function announce(text,error=false){status(text,error);b()?.notify?.(text,error)}
+ function storageUnavailable(){
+  announce('⚠ NO SE GUARDÓ: falta conectar el volumen persistente de Railway. Tus datos siguen en este dispositivo.',true);
+ }
  function kv(){const data={};for(const key of keys){const value=localStorage.getItem(key);if(value!==null)data[key]=value}return data}
  function serialized(obj){return JSON.stringify(obj)}
  async function digest(buffer){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))].map(x=>x.toString(16).padStart(2,'0')).join('')}
@@ -83,9 +87,10 @@
   localStorage.setItem(FP,lastFingerprint);
   conflict=false;
  }
- function showError(e){status('Nube: '+e.message,true)}
+ function showError(e){announce('No se pudo sincronizar con la nube: '+e.message,true)}
  async function upload(force=false){
-  if(!available||busy)return;
+  if(!available)return storageUnavailable();
+  if(busy)return status('Esperá a que termine el guardado anterior.');
   // Guardar en segundo plano no interrumpe el audio ni el debate.
   busy=true;
   try{
@@ -103,12 +108,13 @@
    const response=await saved;
    lastRemote={revision:response.revision,state:snapshot,updatedAt:response.updatedAt};
    await finishLinked(response.revision,data);
-   status('✓ Guardado en la nube · versión '+response.revision);
+   announce('✓ Guardado en la nube · versión '+response.revision);
   }catch(e){if(e.status===409)conflict=true;showError(e)}
   finally{busy=false}
  }
  async function pull(force=false){
-  if(!available||busy)return;
+  if(!available)return storageUnavailable();
+  if(busy)return status('Esperá a que termine la operación anterior.');
   if(b()?.isBusy())return status('Esperá a que termine el debate para recuperar la copia.');
   busy=true;
   try{
@@ -131,7 +137,7 @@
    await finishLinked(remote.revision,remote.state.kv);
    lastRemote=remote;
    await b().refresh();
-   status('✓ Recuperado desde la nube · versión '+remote.revision);
+   announce('✓ Recuperado desde la nube · versión '+remote.revision);
   }catch(e){showError(e)}finally{busy=false}
  }
  async function downloadBackup(){
@@ -230,9 +236,10 @@
   try{
    const cloudStatus=(await call('/api/cloud/status')).json();
    const cloud=await cloudStatus;available=Boolean(cloud.available);
-   if(!available){status('⚠ Falta configurar el volumen persistente de Railway. Los datos todavía son locales.');return}
+   if(!available){status('⚠ Nube no activada: falta el volumen persistente de Railway. Los datos solo están en este dispositivo.',true);return}
    const remote=await getRemote();lastRemote=remote;
-   status(remote.state?'Copia existente en la nube. Elegí Recuperar o Guardar este dispositivo.':'Nube lista. Elegí Guardar este dispositivo para la primera copia.');
+   status(remote.state?'☁ Hay una copia disponible en la nube. Para verla acá, pulsá Recuperar de la nube.':'Nube lista. Elegí Guardar este dispositivo para la primera copia.');
+   if(remote.state&&!linked)b()?.notify?.('☁ Tus personajes están en la nube. Abrí Perfiles y tocá Recuperar de la nube.');
    if(linked&&remote.state){
     const fp=await fingerprint(kv());
     const dirty=fp!==lastFingerprint||localStorage.getItem(DIRTY)==='yes';
