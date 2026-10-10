@@ -50,6 +50,7 @@ function cloudError(res,e){respond(res,e.status||500,{error:e.message,currentRev
 const loginPage=fs.readFileSync(path.join(__dirname,'login.html'));
 const appHtml=fs.readFileSync(path.join(__dirname,'index.html'));
 const cloudSyncScript=fs.readFileSync(path.join(__dirname,'cloud-sync.js'));
+const cloudMergeScript=fs.readFileSync(path.join(__dirname,'cloud-merge.js'));
 function pack(value){
  const out=[];const put=n=>out.push(n&255);const bytes=b=>{for(const v of b)put(v)};const uint=(n,len)=>{for(let i=len-1;i>=0;i--)put(Math.floor(n/256**i))};
  function enc(v){
@@ -107,9 +108,9 @@ const server=http.createServer(async(req,res)=>{
  if(['POST','PUT','DELETE'].includes(req.method)&&!csrfSafe(req))return respond(res,403,{error:'Origen no autorizado'});
  if(req.method==='POST'&&route==='/api/auth/logout')return respond(res,200,{ok:true},{'Set-Cookie':cookie(req,'',0)});
  if(req.method==='GET'&&(route==='/'||route==='/index.html'))return page(res,200,appHtml);
- if(req.method==='GET'&&route==='/cloud-sync.js'){
+ if(req.method==='GET'&&(route==='/cloud-sync.js'||route==='/cloud-merge.js')){
   res.writeHead(200,{...baseHeaders,'Content-Type':'text/javascript; charset=utf-8'});
-  res.end(cloudSyncScript);return;
+  res.end(route==='/cloud-sync.js'?cloudSyncScript:cloudMergeScript);return;
  }
  if(req.method==='GET'&&route==='/api/health')return respond(res,200,{ok:true,model:'s2.1-pro-free',fishKeyConfigured:!!FISH_KEY,geminiKeyConfigured:!!GEMINI_KEY,authenticated:true});
  if(['POST','PUT'].includes(req.method)&&!quotaCheck(req,240))return respond(res,429,{error:'Demasiadas solicitudes. Esperá unos minutos.'});
