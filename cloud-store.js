@@ -12,7 +12,8 @@ const KEYS=new Set([
  'persona-studio-global-v3',
  'persona-studio-stage-share-v1',
 ]);
-const dir=process.env.PERSISTENT_DATA_DIR?path.resolve(process.env.PERSISTENT_DATA_DIR):null;
+// Railway permite montar un volumen en /data sin otra configuración.
+const dir=path.resolve(process.env.PERSISTENT_DATA_DIR||'/data');
 function isMountedDirectory(folder){
  if(!folder||folder==='/'||folder.startsWith('/tmp/')||folder==='/tmp')return false;
  if(process.env.NODE_ENV!=='production'&&process.env.CLOUD_ALLOW_DEV_DISK==='1')return true;
@@ -21,13 +22,13 @@ function isMountedDirectory(folder){
   return mounts.some(m=>m!=='/'&&(folder===m||folder.startsWith(m+'/')));
  }catch{return false}
 }
-let root=null,error='Falta un volumen persistente en Railway montado y PERSISTENT_DATA_DIR apuntando a él.';
+let root=null,error='Falta montar un volumen persistente en Railway (ruta /data).';
 try{
  if(dir&&fs.existsSync(dir)&&fs.statSync(dir).isDirectory()&&isMountedDirectory(dir)){
   root=path.join(dir,'persona-studio-cloud-v1');
   fs.mkdirSync(path.join(root,'assets'),{recursive:true});
   fs.accessSync(root,fs.constants.R_OK|fs.constants.W_OK);
- }else if(dir)error='PERSISTENT_DATA_DIR no apunta a un volumen persistente montado. No se guardará en disco temporal.';
+ }else error='No se detectó un volumen persistente en '+dir+'. Los datos seguirán locales hasta montarlo.';
 }catch(e){root=null;error='No se puede acceder al volumen persistente: '+e.message}
 function available(){return Boolean(root)}
 function status(){return {available:available(),reason:root?null:error}}
