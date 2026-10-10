@@ -1,262 +1,310 @@
-/* Persona Studio — sincronización privada con volumen persistente.
-   Nunca sube ni reemplaza datos iniciales sin que el propietario elija la versión. */
+/* Persona Studio: automatic, non-destructive synchronization between devices.
+   All actual files live on the mounted persistent Railway volume, NOT GitHub. */
 (()=>{
  'use strict';
+ if(new URLSearchParams(location.search).get('output')==='1')return;
  const keys=['persona-studio-profiles-v3','persona-studio-profile-index-v3','persona-studio-duels-v1',
   'persona-studio-backgrounds-v1','persona-studio-global-v3','persona-studio-stage-share-v1'];
  const LINK='persona-studio-cloud-linked-v1',REV='persona-studio-cloud-revision-v1',
-       FP='persona-studio-cloud-fingerprint-v1',DIRTY='persona-studio-cloud-assets-dirty-v1';
- const $=id=>document.getElementById(id);
- const b=()=>window.PERSONA_CLOUD_BRIDGE;
- const dbName='persona-studio-sprites-v1';
- let available=false,linked=localStorage.getItem(LINK)==='yes',busy=false,conflict=false,lastRemote=null;
- let lastKV='';let lastRev=Number(localStorage.getItem(REV)||0);
- let lastFingerprint=localStorage.getItem(FP)||'';
- function status(text,error=false){const node=$('cloudStatus');if(node){node.textContent=text;node.style.color=error?'#ffc3a9':''}}
- function announce(text,error=false){status(text,error);b()?.notify?.(text,error)}
- function storageUnavailable(){
-  announce('⚠ NO SE GUARDÓ: falta conectar el volumen persistente de Railway. Tus datos siguen en este dispositivo.',true);
- }
- function kv(){const data={};for(const key of keys){const value=localStorage.getItem(key);if(value!==null)data[key]=value}return data}
- function serialized(obj){return JSON.stringify(obj)}
- async function digest(buffer){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))].map(x=>x.toString(16).padStart(2,'0')).join('')}
- async function fingerprint(data){return digest(new TextEncoder().encode(serialized(data)))}
- async function call(url,opts={}){
-  const response=await fetch(url,{credentials:'same-origin',cache:'no-store',...opts});
-  if(!response.ok){const detail=await response.json().catch(()=>({}));const err=Error(detail.error||'Error de nube ('+response.status+')');err.status=response.status;throw err}
+       BASE='persona-studio-cloud-base-v2',FP='persona-studio-cloud-fingerprint-v1',
+       DIRTY='persona-studio-cloud-assets-dirty-v1';
+ const $=id=>document.getElementById(id),bridge=()=>window.PERSONA_CLOUD_BRIDGE;
+ const merge=()=>window.PERSONA_CLOUD_MERGE;
+ let available=false,working=false,timer=null,initialized=false,loadError=false;
+ let base=null,lastRevision=0,lastFingerprint='';
+ const persistent=key=>{try{return localStorage.getItem(key)}catch{return null}};
+ const set=(key,value)=>localStorage.setItem(key,value);
+ function status(msg,error=false){const e=$('cloudStatus');if(e){e.textContent=msg;e.style.color=error?'#ffc3a9':''}}
+ function notice(msg,error=false){status(msg,error);if(error)bridge()?.notify?.(msg,true)}
+ function values(){const out={};for(const key of keys){const value=persistent(key);if(value!==null)out[key]=value}return out}
+ function same(a,b){return JSON.stringify(a)===JSON.stringify(b)}
+ function parse(kv,key,fallback){try{return JSON.parse(kv?.[key]||'null')??fallback}catch{return fallback}}
+ async function hash(bytes){const result=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(result)].map(n=>n.toString(16).padStart(2,'0')).join('')}
+ async function fingerprint(kv){return hash(new TextEncoder().encode(JSON.stringify(kv)))}
+ async function request(url,options={}){
+  const response=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});
+  if(!response.ok){
+   const obj=await response.json().catch(()=>({}));
+   const err=Error(obj.error||'Servidor '+response.status);err.status=response.status;throw err;
+  }
   return response;
  }
- async function getRemote(){return (await call('/api/cloud/state')).json()}
- function readDB(){return new Promise((resolve,reject)=>{
-  const req=indexedDB.open(dbName,1);
-  req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('sprites'))req.result.createObjectStore('sprites')};
-  req.onsuccess=()=>resolve(req.result);
-  req.onerror=()=>reject(Error('No se pudo abrir IndexedDB'));
+ async function cloud(){return (await request('/api/cloud/state')).json()}
+ async function db(){return new Promise((resolve,reject)=>{
+  const r=indexedDB.open('persona-studio-sprites-v1',1);
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sprites'))r.result.createObjectStore('sprites')};
+  r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(Error('No se puede abrir el almacenamiento de archivos del navegador.'));
  })}
- async function scanAssets(){
-  const db=await readDB();
+ async function localFiles(){
+  const database=await db();
   try{return await new Promise((resolve,reject)=>{
-   const values=[];const tx=db.transaction('sprites','readonly');
-   const cursor=tx.objectStore('sprites').openCursor();
-   cursor.onsuccess=()=>{
-    const p=cursor.result;if(!p)return;
-    if(typeof p.key==='string'&&p.value instanceof Blob)values.push({key:p.key,blob:p.value});
-    p.continue();
-   };
-   cursor.onerror=()=>reject(Error('No se pudieron leer las imágenes y voces.'));
-   tx.oncomplete=()=>resolve(values);
-   tx.onerror=()=>reject(Error('No se pudieron recuperar los archivos locales.'));
-  })}finally{db.close()}
+   const items=new Map(),tx=database.transaction('sprites','readonly'),cursor=tx.objectStore('sprites').openCursor();
+   cursor.onsuccess=()=>{const item=cursor.result;if(item){
+    if(typeof item.key==='string'&&item.value instanceof Blob)items.set(item.key,item.value);
+    item.continue();
+   }};
+   cursor.onerror=()=>reject(Error('No se pudieron leer las imágenes.'));
+   tx.oncomplete=()=>resolve(items);tx.onerror=()=>reject(Error('No se pudieron leer las voces y fondos.'));
+  })}finally{database.close()}
  }
- async function writeAssets(files){
-  const db=await readDB();
-  try{
-   await new Promise((resolve,reject)=>{
-    const tx=db.transaction('sprites','readwrite'),store=tx.objectStore('sprites');
-    store.clear();
-    for(const {key,blob} of files)store.put(blob,key);
-    tx.oncomplete=resolve;tx.onerror=()=>reject(Error('No se pudo restaurar un archivo local.'));
-   });
-  }finally{db.close()}
+ async function restoreFiles(files){
+  const database=await db();
+  try{await new Promise((resolve,reject)=>{
+   const tx=database.transaction('sprites','readwrite'),store=tx.objectStore('sprites');
+   store.clear();for(const [key,blob] of files)store.put(blob,key);
+   tx.oncomplete=resolve;tx.onerror=()=>reject(Error('No se pudieron restaurar los archivos.'));
+  })}finally{database.close()}
  }
- function markAssetsDirty(){localStorage.setItem(DIRTY,'yes')}
- async function buildManifest(previous={}){
-  const result={};
-  const assets=await scanAssets();
-  let count=0;
-  for(const {key,blob} of assets){
-   if(blob.size>20000000)throw Error('El archivo '+key+' supera los 20 MB.');
-   const buffer=await blob.arrayBuffer(),hash=await digest(buffer);
-   result[key]={hash,type:blob.type||'application/octet-stream',size:blob.size};
-   if(previous[key]?.hash!==hash){
-    await call('/api/cloud/assets/'+hash,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:buffer});
-   }
-   count++;
-   if(count%5===0)status('Guardando imágenes y voces: '+count+' de '+assets.length+'…');
+ async function manifestFromFiles(files){
+  const manifest={},buffers=new Map();
+  for(const [key,blob] of files){
+   if(blob.size>20000000)throw Error('El archivo '+key+' excede 20 MB.');
+   const bytes=await blob.arrayBuffer(),sha=await hash(bytes);
+   manifest[key]={hash:sha,type:blob.type||'application/octet-stream',size:blob.size};
+   buffers.set(sha,bytes);
   }
+  return {manifest,buffers};
+ }
+ function remember(revision,state,kv){
+  base=JSON.parse(JSON.stringify(state));
+  lastRevision=revision;
+  set(LINK,'yes');set(REV,String(revision));
+  try{set(BASE,JSON.stringify({revision,state}))}catch{localStorage.removeItem(BASE)}
+  localStorage.removeItem(DIRTY);
+  return fingerprint(kv).then(fp=>{lastFingerprint=fp;set(FP,fp)});
+ }
+ async function publish(snapshot,revision,buffers,remoteAssets){
+  const remoteHashes=new Set(Object.values(remoteAssets||{}).map(a=>a.hash));
+  for(const info of Object.values(snapshot.assets||{})){
+   if(remoteHashes.has(info.hash))continue;
+   const bytes=buffers?.get(info.hash);
+   if(!bytes)throw Error('Falta el archivo local de '+info.hash.slice(0,10)+'; no se sobrescribió la nube.');
+   await request('/api/cloud/assets/'+info.hash,{method:'PUT',
+    headers:{'Content-Type':'application/octet-stream'},body:bytes});
+   remoteHashes.add(info.hash);
+  }
+  return (await request('/api/cloud/state',{method:'PUT',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({baseRevision:revision,state:snapshot})})).json();
+ }
+ async function apply(snapshot,revision,localFingerprint){
+  // Never overwrite changes made while the downloads/requests were running.
+  if(await fingerprint(values())!==localFingerprint)return false;
+  if(bridge()?.isBusy())return false;
+  const files=new Map();
+  const current=await localFiles();
+  const currentManifest=await manifestFromFiles(current);
+  const byHash=new Map();
+  for(const [key,meta] of Object.entries(currentManifest.manifest))byHash.set(meta.hash,current.get(key));
+  for(const [key,meta] of Object.entries(snapshot.assets||{})){
+   let file=byHash.get(meta.hash);
+   if(!file)file=new Blob([await(await request('/api/cloud/assets/'+meta.hash)).blob()],{type:meta.type||'application/octet-stream'});
+   files.set(key,file);
+  }
+  // A change may have happened while the images were downloading.
+  if(await fingerprint(values())!==localFingerprint||bridge()?.isBusy())return false;
+  await restoreFiles(files);
+  for(const key of keys){
+   if(Object.prototype.hasOwnProperty.call(snapshot.kv,key))set(key,snapshot.kv[key]);
+   else localStorage.removeItem(key);
+  }
+  await bridge().refresh();
+  return true;
+ }
+ function delta(baseState,localState){
+  // Only import the records actually edited on this device since its last sync.
+  // Unchanged profiles from an outdated device must not resurrect deleted cloud records.
+  if(!baseState)return localState;
+  const result={schema:1,kv:{},assets:{}},l=localState.kv||{},prev=baseState.kv||{};
+  const PRO='persona-studio-profiles-v3',IDX='persona-studio-profile-index-v3';
+  const BG='persona-studio-backgrounds-v1',D='persona-studio-duels-v1';
+  const p=parse(l,PRO,{}),bp=parse(prev,PRO,{}),idx=parse(l,IDX,[]);
+  const profileDelta={};const indexDelta=[];
+  const a=localState.assets||{},ba=baseState.assets||{};
+  for(const [id,item] of Object.entries(p)){
+   const keysForProfile=Object.keys(a).filter(k=>k.startsWith(id+':'));
+   const assetChanged=keysForProfile.some(k=>!same(a[k],ba[k]));
+   if(!same(item,bp[id])||assetChanged){
+    profileDelta[id]=item;
+    const label=idx.find(x=>x.id===id);if(label)indexDelta.push(label);
+   }
+  }
+  // Changes to the displayed names count too.
+  const bidx=parse(prev,IDX,[]);
+  for(const item of idx){
+   if(!same(item,bidx.find(x=>x.id===item.id))&&!indexDelta.some(x=>x.id===item.id))indexDelta.push(item);
+  }
+  result.kv[PRO]=JSON.stringify(profileDelta);
+  result.kv[IDX]=JSON.stringify(indexDelta);
+  const backgroundList=parse(l,BG,[]),oldBackgrounds=parse(prev,BG,[]);
+  result.kv[BG]=JSON.stringify(backgroundList.filter(item=>!same(item,oldBackgrounds.find(x=>x.id===item.id))||
+   !same(a['bg:'+item.id],ba['bg:'+item.id])));
+  const topics=parse(l,D,{topics:[],activeId:null}),oldTopics=parse(prev,D,{topics:[],activeId:null});
+  result.kv[D]=JSON.stringify({topics:(topics.topics||[]).filter(t=>!same(t,(oldTopics.topics||[]).find(x=>x.id===t.id))),activeId:topics.activeId});
+  for(const k of keys)if(![PRO,IDX,BG,D].includes(k)&&l[k]!==prev[k]&&l[k]!==undefined)result.kv[k]=l[k];
+  for(const [key,val] of Object.entries(a))if(!same(val,ba[key]))result.assets[key]=val;
   return result;
  }
- function saveLinked(revision,data){
-  linked=true;lastRev=revision;lastKV=serialized(data);
-  localStorage.setItem(LINK,'yes');localStorage.setItem(REV,String(revision));
-  localStorage.removeItem(DIRTY);
+ function changedSinceBase(localState){return !base||!same(localState.kv,base.kv)||persistent(DIRTY)==='yes'}
+ function markAssetsDirty(){set(DIRTY,'yes');schedule()}
+ function schedule(){
+  if(!initialized||!available)return;
+  if(timer)clearTimeout(timer);
+  timer=setTimeout(()=>{timer=null;sync()},1500);
  }
- async function finishLinked(revision,data){
-  saveLinked(revision,data);
-  lastFingerprint=await fingerprint(data);
-  localStorage.setItem(FP,lastFingerprint);
-  conflict=false;
- }
- function showError(e){announce('No se pudo sincronizar con la nube: '+e.message,true)}
- async function upload(force=false){
-  if(!available)return storageUnavailable();
-  if(busy)return status('Esperá a que termine el guardado anterior.');
-  // Guardar en segundo plano no interrumpe el audio ni el debate.
-  busy=true;
+ async function sync(){
+  if(!available||working||!merge())return;
+  working=true;
   try{
-   status('Preparando copia segura en la nube…');
-   const remote=await getRemote();lastRemote=remote;
-   if(!force&&linked&&remote.revision!==lastRev){
-    conflict=true;return status('La nube cambió en otro dispositivo. Elegí Guardar o Recuperar para resolverlo.',true);
+   const remote=await cloud();
+   const capturedKV=values(),capturedFingerprint=await fingerprint(capturedKV);
+   const linked=persistent(LINK)==='yes';
+   const rev=Number(persistent(REV)||0);
+   if(linked&&remote.state&&remote.revision!==rev&&bridge()?.isBusy()){
+    status('☁ Hay cambios para sincronizar cuando termine la intervención.');
+    return;
    }
-   const data=kv();
-   const assetsNeedUpload=force||localStorage.getItem(DIRTY)==='yes'||!remote.state;
-   const assets=assetsNeedUpload?await buildManifest(remote.state?.assets||{}):remote.state.assets;
-   const snapshot={schema:1,kv:data,assets};
-   const saved=(await call('/api/cloud/state',{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({baseRevision:remote.revision,state:snapshot})})).json();
-   const response=await saved;
-   lastRemote={revision:response.revision,state:snapshot,updatedAt:response.updatedAt};
-   await finishLinked(response.revision,data);
-   announce('✓ Guardado en la nube · versión '+response.revision);
-  }catch(e){if(e.status===409)conflict=true;showError(e)}
-  finally{busy=false}
- }
- async function pull(force=false){
-  if(!available)return storageUnavailable();
-  if(busy)return status('Esperá a que termine la operación anterior.');
-  if(b()?.isBusy())return status('Esperá a que termine el debate para recuperar la copia.');
-  busy=true;
-  try{
-   status('Descargando personajes, voces y fondos…');
-   const remote=await getRemote();
-   if(!remote.state)return status('Todavía no hay una copia en la nube.');
-   const manifest=remote.state.assets||{},files=[];
-   let n=0;
-   for(const [key,info] of Object.entries(manifest)){
-    const blob=await (await call('/api/cloud/assets/'+info.hash)).blob();
-    files.push({key,blob:new Blob([blob],{type:info.type||'application/octet-stream'})});
-    n++;if(n%5===0)status('Recuperando archivos: '+n+' de '+Object.keys(manifest).length+'…');
-   }
-   // Restaurar primero los archivos; después la metadata. Si falla la descarga, no se toca nada.
-   await writeAssets(files);
-   for(const key of keys){
-    if(Object.prototype.hasOwnProperty.call(remote.state.kv,key))localStorage.setItem(key,remote.state.kv[key]);
-    else localStorage.removeItem(key);
-   }
-   await finishLinked(remote.revision,remote.state.kv);
-   lastRemote=remote;
-   await b().refresh();
-   announce('✓ Recuperado desde la nube · versión '+remote.revision);
-  }catch(e){showError(e)}finally{busy=false}
- }
- async function downloadBackup(){
-  if(busy)return;
-  busy=true;try{
-   status('Preparando respaldo local…');
-   const assets=[];
-   for(const {key,blob} of await scanAssets()){
-    const raw=await blob.arrayBuffer(),bytes=new Uint8Array(raw);
-    // Generar base64 por fragmentos para evitar límites del stack.
-    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-    assets.push({key,type:blob.type,data:btoa(binary)});
-   }
-   const doc=JSON.stringify({schema:1,exportedAt:new Date().toISOString(),kv:kv(),assets});
-   const url=URL.createObjectURL(new Blob([doc],{type:'application/json'}));
-   const a=document.createElement('a');a.href=url;a.download='persona-studio-respaldo-local.json';
-   a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
-   status('Respaldo local descargado.');
-  }catch(e){showError(e)}finally{busy=false}
- }
- async function restoreLocalBackup(file){
-  if(busy||b()?.isBusy())return status('Detené el debate antes de importar un respaldo.',true);
-  if(!file||file.size>350000000)return status('Archivo de respaldo inválido o demasiado grande.',true);
-  if(!confirm('¿Importar este respaldo? Reemplazará los personajes, voces, fondos y debates LOCALES de este dispositivo.'))return;
-  busy=true;
-  try{
-   status('Leyendo el respaldo local…');
-   const backup=JSON.parse(await file.text());
-   if(backup?.schema!==1||!backup.kv||!Array.isArray(backup.assets)||
-      Object.keys(backup.kv).some(k=>!keys.includes(k))||backup.assets.length>750)
-    throw Error('Formato de respaldo inválido.');
-   const files=[];
-   for(const item of backup.assets){
-    if(typeof item.key!=='string'||item.key.length>220||typeof item.data!=='string'||
-       typeof item.type!=='string')throw Error('Archivo de respaldo inválido.');
-    const binary=atob(item.data);
-    if(binary.length>20000000)throw Error('Una imagen o voz supera el límite de 20 MB.');
-    const bytes=new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-    files.push({key:item.key,blob:new Blob([bytes],{type:item.type})});
-   }
-   await writeAssets(files);
-   for(const key of keys){
-    if(typeof backup.kv[key]==='string')localStorage.setItem(key,backup.kv[key]);
-    else localStorage.removeItem(key);
-   }
-   markAssetsDirty();
-   conflict=linked; // Nunca subir una importación accidentalmente si hay otra copia remota.
-   await b().refresh();
-   status('✓ Respaldo importado. Si querés compartirlo, tocá Guardar este dispositivo.');
-  }catch(e){showError(e)}
-  finally{busy=false}
- }
- function hasLocalWork(){
-  try{
-   const profiles=JSON.parse(localStorage.getItem(keys[1])||'[]');
-   const data=JSON.parse(localStorage.getItem(keys[0])||'{}');
-   const topics=JSON.parse(localStorage.getItem(keys[2])||'{}');
-   return profiles.length>1||Object.keys(data).length>1||Object.values(data).some(v=>v?.settings?.persona&&v.settings.persona.length>100)
-     ||topics.topics?.some(t=>t.messages?.length||t.left||t.right||t.theme);
-  }catch{return true}
- }
- async function tick(){
-  if(!available||busy||!linked||conflict)return;
-  try{
-   const remote=await getRemote();lastRemote=remote;
-   const now=kv(),fp=await fingerprint(now);
-   const dirty=fp!==lastFingerprint||localStorage.getItem(DIRTY)==='yes';
-   if(remote.revision!==lastRev){
+   const shouldScan=!linked||!base||persistent(DIRTY)==='yes';
+   const files=shouldScan?await localFiles():null;
+   const built=files?await manifestFromFiles(files):null;
+   const localState={schema:1,kv:capturedKV,assets:built?.manifest||base?.assets||{}};
+   let next,shouldApply=false;
+   if(!remote.state){
+    next=localState;
+    status('☁ Guardando tu biblioteca en Railway…');
+   }else if(!linked){
+    if(merge().meaningful(localState)){
+     next=merge().merge(remote.state,localState).state;
+     status('☁ Reuniendo los personajes de tus dispositivos…');
+    }else{next=remote.state;shouldApply=true}
+   }else if(remote.revision!==rev){
+    const dirty=changedSinceBase(localState)||capturedFingerprint!==lastFingerprint;
     if(dirty){
-     conflict=true;status('Cambios distintos en dos dispositivos. Elegí Guardar o Recuperar.',true);
-    }else if(!b()?.isBusy())await pull();
-    else status('Hay datos nuevos en la nube; se recuperarán al terminar el debate.');
-   }else if(dirty)await upload();
-  }catch(e){showError(e)}
+     const edits=delta(base,localState);
+     next=merge().merge(remote.state,edits).state;
+    }else{next=remote.state;shouldApply=true}
+   }else{
+    if(!changedSinceBase(localState)&&capturedFingerprint===lastFingerprint){
+     status('✓ Sincronizado · versión '+remote.revision);
+     return;
+    }
+    next=localState;
+   }
+   // If nothing new needs publishing, just download/reconcile the cloud copy.
+   if(same(next,remote.state)){
+    if(shouldApply||!same(localState,next)){
+     status('☁ Actualizando los personajes de este dispositivo…');
+     const applied=await apply(next,remote.revision,capturedFingerprint);
+     if(!applied){status('☁ Esperando un momento seguro para actualizar…');return}
+    }
+    await remember(remote.revision,next,values());
+    status('✓ Sincronizado · versión '+remote.revision);
+    return;
+   }
+   // The network may be slow; detect local edits that occurred during preparation.
+   if(await fingerprint(values())!==capturedFingerprint){
+    status('☁ Hay cambios nuevos; guardando la versión más reciente…');return;
+   }
+   let buffers=built?.buffers;
+   // Metadata may change without files changing. For a conflict from another
+   // device, hashes are already on the cloud; otherwise re-read local assets.
+   const requiredHashes=new Set(Object.values(next.assets||{}).filter(info=>
+    !Object.values(remote.state?.assets||{}).some(x=>x.hash===info.hash)).map(info=>info.hash));
+   if(requiredHashes.size&&(!buffers||[...requiredHashes].some(h=>!buffers.has(h)))){
+    const all=await manifestFromFiles(await localFiles());
+    buffers=new Map([...(buffers||new Map()),...all.buffers]);
+   }
+   const committed=await publish(next,remote.revision,buffers,remote.state?.assets);
+   if(bridge()?.isBusy()||await fingerprint(values())!==capturedFingerprint){
+    // Keep a correct base, but never replace the currently playing stage.
+    await remember(committed.revision,next,capturedKV);
+    status('✓ Guardado en Railway · versión '+committed.revision);
+    return;
+   }
+   if(!same(localState,next)){
+    const applied=await apply(next,committed.revision,capturedFingerprint);
+    if(!applied){
+     await remember(committed.revision,next,capturedKV);
+     status('☁ Guardado; pendiente de actualizar la pantalla.');
+     return;
+    }
+   }
+   await remember(committed.revision,next,values());
+   status('✓ Sincronizado en la nube · versión '+committed.revision);
+  }catch(e){
+   loadError=true;
+   notice('⚠ No se pudieron sincronizar los datos: '+e.message,true);
+  }finally{working=false}
+ }
+ async function localBackup(){
+  const assets=[];
+  status('Preparando respaldo independiente…');
+  try{
+   for(const [key,blob] of await localFiles()){
+    const bytes=new Uint8Array(await blob.arrayBuffer());let encoded='';
+    for(let i=0;i<bytes.length;i+=8192)encoded+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    assets.push({key,type:blob.type,data:btoa(encoded)});
+   }
+   const data=JSON.stringify({schema:1,exportedAt:new Date().toISOString(),kv:values(),assets});
+   const url=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+   const link=document.createElement('a');link.href=url;link.download='persona-studio-respaldo.json';link.click();
+   setTimeout(()=>URL.revokeObjectURL(url),60000);
+   status('✓ Respaldo descargado.');
+  }catch(e){notice('Error al crear respaldo: '+e.message,true)}
+ }
+ async function importBackup(file){
+  if(!file||file.size>350000000||bridge()?.isBusy())return;
+  if(!confirm('¿Importar este respaldo local? Se combinará con la nube sin eliminar los otros personajes.'))return;
+  try{
+   const data=JSON.parse(await file.text());
+   if(data.schema!==1||!data.kv||!Array.isArray(data.assets))throw Error('Respaldo inválido');
+   const files=new Map();
+   for(const item of data.assets){
+    if(typeof item.key!=='string'||item.key.length>220||typeof item.data!=='string'||
+     item.data.length>28000000)throw Error('Archivo inválido en el respaldo');
+    const bin=atob(item.data),bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    files.set(item.key,new Blob([bytes],{type:item.type||'application/octet-stream'}));
+   }
+   const current=await localFiles();
+   for(const [key,blob] of files)current.set(key,blob);
+   await restoreFiles(current);
+   for(const key of keys)if(typeof data.kv[key]==='string')set(key,data.kv[key]);
+   localStorage.removeItem(LINK);localStorage.removeItem(BASE);localStorage.removeItem(REV);
+   base=null;lastRevision=0;
+   set(DIRTY,'yes');
+   await bridge().refresh();
+   status('✓ Respaldo importado. Sincronizando automáticamente…');
+   sync();
+  }catch(e){notice('No se pudo importar el respaldo: '+e.message,true)}
  }
  async function init(){
-  if(new URLSearchParams(location.search).get('output')==='1')return;
-  if(!b()){status('No se pudo iniciar la sincronización.',true);return}
-  $('cloudPush').onclick=()=>{
-   if(b().isBusy())return status('Detené el debate antes de migrar.');
-   if(!confirm('¿Guardar los personajes, fondos, voces y debates DE ESTE dispositivo en la nube? Si existe otra copia, la reemplazará.'))return;
-   conflict=false;upload(true);
-  };
-  $('cloudPull').onclick=()=>{
-   if(b().isBusy())return status('Detené el debate antes de recuperar.');
-   if(!confirm('¿Recuperar desde la nube? Se reemplazarán los personajes, voces, fondos e historiales locales de ESTE dispositivo. Hacé primero un respaldo local si querés conservarlos.'))return;
-   conflict=false;pull(true);
-  };
-  $('cloudBackup').onclick=downloadBackup;
- $('cloudRestoreBackup').onclick=()=>$('cloudBackupFile').click();
- $('cloudBackupFile').onchange=e=>{
-  const file=e.target.files?.[0];if(file)restoreLocalBackup(file);
-  e.target.value='';
- };
+  if(!bridge()||!merge()){status('La sincronización no pudo iniciarse.',true);return}
+  const backup=$('cloudBackup'),restore=$('cloudRestoreBackup'),input=$('cloudBackupFile');
+  if(backup)backup.onclick=localBackup;
+  if(restore)restore.onclick=()=>input?.click();
+  if(input)input.onchange=e=>{const f=e.target.files?.[0];if(f)importBackup(f);e.target.value=''};
   try{
-   const cloudStatus=(await call('/api/cloud/status')).json();
-   const cloud=await cloudStatus;available=Boolean(cloud.available);
-   if(!available){status('⚠ Nube no activada: falta el volumen persistente de Railway. Los datos solo están en este dispositivo.',true);return}
-   const remote=await getRemote();lastRemote=remote;
-   status(remote.state?'☁ Hay una copia disponible en la nube. Para verla acá, pulsá Recuperar de la nube.':'Nube lista. Elegí Guardar este dispositivo para la primera copia.');
-   if(remote.state&&!linked)b()?.notify?.('☁ Tus personajes están en la nube. Abrí Perfiles y tocá Recuperar de la nube.');
-   if(linked&&remote.state){
-    const fp=await fingerprint(kv());
-    const dirty=fp!==lastFingerprint||localStorage.getItem(DIRTY)==='yes';
-    if(remote.revision!==lastRev){
-     if(dirty){conflict=true;status('Hay cambios locales y en la nube. Elegí cuál conservar.',true)}
-     else await pull();
-    }else if(dirty)await upload();
-    else status('✓ Sincronizado con la nube · versión '+lastRev);
-   }else if(linked&&!remote.state){
-    linked=false;localStorage.removeItem(LINK);
-    status('La copia de nube no existe. Guardá este dispositivo para crearla.',true);
-   }else if(!remote.state&&!hasLocalWork()){
-    status('Nube preparada. Guardá este dispositivo cuando termines de configurar tus personajes.');
+   const response=await(await request('/api/cloud/status')).json();
+   available=Boolean(response.available);
+   if(!available){
+    notice('⚠ No hay volumen permanente en Railway. Los datos siguen solamente en este dispositivo.',true);return;
    }
-  }catch(e){showError(e)}
-  setInterval(tick,12000);
+   const remembered=persistent(BASE);
+   try{
+    const parsed=JSON.parse(remembered||'null');
+    if(parsed?.state&&Number.isInteger(parsed.revision)){base=parsed.state;lastRevision=parsed.revision}
+   }catch{}
+   lastFingerprint=persistent(FP)||'';
+   initialized=true;
+   status('☁ Conectando automáticamente con la nube…');
+   await sync();
+   // Reconcile after tab switching and while the app stays open.
+   setInterval(sync,8000);
+   document.addEventListener('visibilitychange',()=>{if(!document.hidden)schedule()});
+   window.addEventListener('focus',schedule);
+  }catch(e){notice('⚠ Sin conexión al guardado en Railway: '+e.message,true)}
  }
- window.PERSONA_CLOUD={markAssetsDirty};
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+ window.PERSONA_CLOUD={markAssetsDirty,schedule};
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(init,500),{once:true});
+ else setTimeout(init,500);
 })();
