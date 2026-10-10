@@ -6,6 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const cloud=require('./cloud-store');
+const {setupLiveRelay}=require('./live-relay');
 const PORT = Number(process.env.PORT) || 3000;
 const FISH_ENDPOINT = 'https://api.fish.audio/v1/tts';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -15,6 +16,7 @@ const GEMINI_KEY = String(process.env.GEMINI_API_KEY || '').trim();
 const FISH_KEY = String(process.env.FISH_API_KEY || '').trim();
 const ready = TOKEN.length >= 24 && SESSION_SECRET.length >= 32;
 const signingKey = ready ? crypto.createHmac('sha256', SESSION_SECRET).update('persona-studio-session:' + TOKEN).digest() : null;
+const liveRelay=ready?setupLiveRelay(signingKey):null;
 const cookieName = 'persona_session';
 const ttlMs = 7 * 86400 * 1000;
 const attempts = new Map();
@@ -95,6 +97,25 @@ const server=http.createServer(async(req,res)=>{
  const route=(req.url||'/').split('?')[0];
  if(req.method==='GET'&&route==='/healthz')return respond(res,200,{ok:true});
  if(!ready)return page(res,503,'<!doctype html><html lang="es"><meta name="viewport" content="width=device-width"><h1>Configuración pendiente</h1><p>Agregá APP_ACCESS_TOKEN (24+ caracteres) y SESSION_SECRET (32+ caracteres) en Railway Variables.</p></html>');
+ // Enlace de solo lectura para la fuente web de TikTok. No utiliza cookies ni
+ // comparte los controles de producción; la URL contiene una clave aleatoria.
+ if(req.method==='GET'&&(route==='/live'||route==='/api/live/state'||route.startsWith('/api/live/asset/'))){
+  const query=new URL(req.url,'https://localhost').searchParams;
+  if(!liveRelay.valid(query.get('key')))return respond(res,403,{error:'Enlace LIVE no autorizado'});
+  if(route==='/live'){
+   const headers={...baseHeaders,'Content-Type':'text/html; charset=utf-8'};
+   delete headers['X-Frame-Options'];
+   headers['Content-Security-Policy']=headers['Content-Security-Policy'].replace("frame-ancestors 'none'","frame-ancestors *");
+   res.writeHead(200,headers);res.end(liveRelay.page);return;
+  }
+  if(route==='/api/live/state')try{return respond(res,200,liveRelay.getState())}catch(e){return cloudError(res,e)}
+  if(route.startsWith('/api/live/asset/'))try{
+   const resource=liveRelay.asset(route.slice('/api/live/asset/'.length));
+   if(!resource)return respond(res,404,{error:'Imagen no disponible para esta transmisión'});
+   res.writeHead(200,{...baseHeaders,'Content-Type':resource.type,'Content-Length':resource.data.length});
+   res.end(resource.data);return;
+  }catch(e){return cloudError(res,e)}
+ }
  if(req.method==='GET'&&route==='/login'){if(authenticated(req)){res.writeHead(302,{...baseHeaders,Location:'/'});res.end();return}return page(res,200,loginPage)}
  if(req.method==='POST'&&route==='/api/auth/login'){
   if(!csrfSafe(req))return respond(res,403,{error:'Origen no autorizado'});
@@ -113,6 +134,13 @@ const server=http.createServer(async(req,res)=>{
   res.end(route==='/cloud-sync.js'?cloudSyncScript:cloudMergeScript);return;
  }
  if(req.method==='GET'&&route==='/api/health')return respond(res,200,{ok:true,model:'s2.1-pro-free',fishKeyConfigured:!!FISH_KEY,geminiKeyConfigured:!!GEMINI_KEY,authenticated:true});
+ if(req.method==='GET'&&route==='/api/live/link')return respond(res,200,{path:'/live?key='+liveRelay.key});
+ // Las imágenes van por el almacenamiento permanente. Aquí llega solo el estado
+ // ligero de la escena (varias veces por segundo durante el LIVE).
+ if(req.method==='POST'&&route==='/api/live/scene'){
+  try{return respond(res,200,liveRelay.accept(await jsonBody(req,65000)))}
+  catch(e){return cloudError(res,e)}
+ }
  if(['POST','PUT'].includes(req.method)&&!quotaCheck(req,240))return respond(res,429,{error:'Demasiadas solicitudes. Esperá unos minutos.'});
  // Datos privados: solo se accede con la sesión autenticada del propietario.
  if(req.method==='GET'&&route==='/api/cloud/status')return respond(res,200,cloud.status());
