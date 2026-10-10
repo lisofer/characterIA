@@ -2067,6 +2067,7 @@ if(!microphoneEnvironment().holdToTalk){
 window.addEventListener('pagehide',()=>{S.abort?.abort();S.sttCtrl?.abort();S.micStream?.getTracks().forEach(t=>t.stop());if('speechSynthesis'in window)speechSynthesis.cancel();for(const url of S.urls.values())URL.revokeObjectURL(url)});
 window.PERSONA_CLOUD_BRIDGE={
  isBusy:()=>D.running,
+ notify:(message,error=false)=>toast(message,error),
  refresh:async()=>{
   if(D.running)throw Error('Detené el debate antes de recuperar datos de la nube.');
   clearCurrentSprites();
