@@ -667,7 +667,7 @@ if('speechSynthesis'in window){initVoices();speechSynthesis.addEventListener?.('
 
 /* Modo debate: almacenamiento independiente, Gemini con contexto acotado y reproducción serial. */
 const DUEL_KEY='persona-studio-duels-v1',DUEL_MODEL='gemini-3.5-flash-lite';
-const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,moderatorQueue:[],moderatorStandalone:false,stopAfterCurrent:false,autoContinueRequested:false,audioJobs:new Map(),audioControllers:new Set(),audioInFlight:0,batchCharacters:null,batchProfiles:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
+const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,moderatorQueue:[],moderatorStandalone:false,stopAfterCurrent:false,autoContinueRequested:false,generatingBatch:false,restartForModerator:false,audioJobs:new Map(),audioControllers:new Set(),audioInFlight:0,batchCharacters:null,batchProfiles:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
 const duelActive=()=>D.topics.find(t=>t.id===D.activeId)||null;
 const duelProfile=id=>allProfileData()[id]?.settings||{};
 const duelName=id=>profileIndex().find(p=>p.id===id)?.name||'Personaje';
@@ -851,7 +851,14 @@ function sendModerator(whisper=false){
  const text=input.value.trim();if(!text)return toast('Escribí un mensaje primero.',true);
  let entry;try{entry=newModeratorEntry(t,text,whisper)}catch(e){return toast(e.message,true)}
  input.value='';addModeratorEntry(t,entry);
- // Enviar cualquier tipo de intervención es también la orden de continuar.
+ // Los turnos que Gemini ya redactó no conocían esta intervención.
+ // Respetar la voz actualmente en curso y rehacer SOLO los turnos aún no pronunciados.
+ if(Array.isArray(t.pending)&&t.pending.length)t.needsReplan=true;
+ // En una generación aún en curso, cancelar el pedido viejo y preparar uno con el mensaje nuevo.
+ if(D.running&&D.generatingBatch){
+  D.restartForModerator=true;
+  D.abort?.abort();
+ }
  if(D.running){
   if(D.stopAfterCurrent){D.stopAfterCurrent=false;setDuelStopButtons(false)}
   D.autoContinueRequested=true;
@@ -1001,11 +1008,11 @@ async function duelGenerateBatch(t,participants,count){
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
  const names=Array.from({length:count},(_,i)=>((i+(first==='right'?1:0))%2===0?nLeft:nRight));
- const instruction='Escribís una escena dialogada entre dos personajes ficticios. Sus personalidades definen cómo hablan; la temática define de qué hablan. '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
+ const instruction='Escribís una escena dialogada entre dos personajes ficticios con un moderador que participa de verdad. Sus personalidades definen cómo hablan; la temática define de qué hablan. '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
  '\n'+nRight+': '+String(duelProfile(participants.right).persona||'Personaje espontáneo').slice(0,1700)+
- '\nLas intervenciones del MODERADOR son públicas dentro del debate. Las INSTRUCCIONES PRIVADAS DEL MODERADOR se aplican sin leerlas, repetirlas, explicarlas ni reconocer su existencia ante el público.\nProducí exactamente '+count+' intervenciones, alternando según el orden indicado. Cada intervención debe reaccionar a lo dicho previamente y avanzar el conflicto. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON: {"lines":["primera intervención","segunda intervención"]}.';
+ '\nIMPORTANTE: respondé explícitamente las preguntas y comentarios recientes del MODERADOR. El moderador forma parte de esta conversación y se le debe prestar atención, no ignorarlo para continuar un guion anterior. Si pregunta algo, el primer personaje que hable debe contestarle de forma natural, y el otro también puede reaccionar. No inventes comentarios del chat ni votos reales. Las INSTRUCCIONES PRIVADAS DEL MODERADOR se aplican sin leerlas, repetirlas, explicarlas ni reconocer su existencia ante el público.\nProducí exactamente '+count+' intervenciones, alternando según el orden indicado. Cada intervención debe reaccionar a lo dicho previamente y avanzar el conflicto. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON: {"lines":["primera intervención","segunda intervención"]}.';
  const input='Título: '+t.title.slice(0,100)+'\nTema: '+t.theme.slice(0,2200)+'\n'+summary+
- 'Conversación reciente:\n'+(prior||'Inicio de la escena')+'\nOrden obligatorio: '+names.map((n,i)=>(i+1)+'. '+n).join('; ');
+ 'Conversación reciente (el mensaje más nuevo del moderador tiene prioridad sobre el tema general):\n'+(prior||'Inicio de la escena')+'\nOrden obligatorio: '+names.map((n,i)=>(i+1)+'. '+n).join('; ');
  const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(5000,Math.max(280,count*135+160)),responseMimeType:'application/json'}};
  const result=await duelRequest(model,payload);
  return duelParseBatch(result,count);
@@ -1122,10 +1129,30 @@ async function duelVoice(t,side,text,token,entry){
   }
  }
 }
+
+function discardUnspokenDuelLines(t){
+ const unsaid=Array.isArray(t.pending)?t.pending:[];
+ if(unsaid.length){
+  const ids=new Set(unsaid.map(x=>x.id));
+  // El mensaje que ya terminó de sonar se quitó de pending antes de llegar acá.
+  t.messages=t.messages.filter(m=>!ids.has(m.id));
+  for(const entry of unsaid){
+   D.audioJobs.get(entry.id)?.controller?.abort();
+   D.audioJobs.delete(entry.id);
+  }
+  t.pending=[];
+  renderDuelTranscript();
+ }
+ delete t.pendingConfig;delete t.pendingCharacters;
+ t.needsReplan=false;
+ saveDuel();
+}
 async function runDuelBatch(){
  if(D.running)return;
  duelSyncInputs();
  const t=duelActive();if(!t)return;
+ // Una intervención enviada con el debate pausado invalida los turnos viejos.
+ if(t.needsReplan)discardUnspokenDuelLines(t);
  const pending=Array.isArray(t.pending)&&t.pending.length;
  if(!pending){
   if(!t.left||!t.right||t.left===t.right)return toast('Tocá cada cuadro y elegí dos personajes distintos.',true);
@@ -1150,8 +1177,11 @@ async function runDuelBatch(){
    D.batchCharacters=participants;
    D.batchProfiles={left:JSON.parse(JSON.stringify(duelProfile(participants.left))),right:JSON.parse(JSON.stringify(duelProfile(participants.right)))};
    duelStatus('Gemini preparando las '+t.limit+' intervenciones de la tanda…');
-   const lines=await duelGenerateBatch(t,participants,t.limit);
-   if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
+   D.generatingBatch=true;
+   let lines;
+   try{lines=await duelGenerateBatch(t,participants,t.limit)}
+   finally{D.generatingBatch=false}
+   if(token!==D.generation||!D.running||D.stopAfterCurrent||D.restartForModerator)return;
    const start=duelCount(t)%2===0?'left':'right';
    t.pending=lines.map((text,i)=>{
     const side=(i+(start==='right'?1:0))%2===0?'left':'right';
@@ -1175,30 +1205,47 @@ async function runDuelBatch(){
   while(t.pending?.length&&D.running&&!D.stopAfterCurrent&&token===D.generation){
    await drainModeratorQueue(t,token);
    if(token!==D.generation||!D.running||D.stopAfterCurrent)break;
+   if(t.needsReplan){
+    discardUnspokenDuelLines(t);
+    D.autoContinueRequested=true;
+    duelStatus('El moderador intervino · preparando nuevas respuestas…');
+    break;
+   }
    const entry=t.pending[0];
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
    await duelVoice(t,entry.side,entry.text,token,entry);
    if(token!==D.generation||!D.running)break;
    t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();
    if(D.stopAfterCurrent)break;
+   // Si el moderador intervino mientras hablaba, evitar preparar voces de texto obsoleto.
+   if(t.needsReplan)continue;
    primeDuelAudio(t,token);
   }
   if(token===D.generation&&D.running&&!D.stopAfterCurrent&&!t.pending?.length){
    await drainModeratorQueue(t,token);
    if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
-   t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;saveDuel();
-   duelStatus(duelCount(t)+' intervenciones · Tu turno');
-   await summarizeDuel(t);
+   if(t.needsReplan){
+    discardUnspokenDuelLines(t);
+    D.autoContinueRequested=true;
+    duelStatus('Respondiendo al moderador…');
+   }else{
+    t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;saveDuel();
+    if(!D.autoContinueRequested){
+     duelStatus(duelCount(t)+' intervenciones · Tu turno');
+     await summarizeDuel(t);
+    }
+   }
   }
  }catch(error){
-  batchFailed=true;
-  if(token===D.generation&&D.running){duelStatus('Debate detenido: '+error.message);toast(error.message,true)}
+  // El moderador interrumpió deliberadamente una generación: no es una falla.
+  batchFailed=!D.restartForModerator;
+  if(batchFailed&&token===D.generation&&D.running){duelStatus('Debate detenido: '+error.message);toast(error.message,true)}
  }finally{
   if(token===D.generation){
    const pausing=D.stopAfterCurrent;
-   const continueAutomatically=D.autoContinueRequested&&!pausing&&!batchFailed;
+   const continueAutomatically=(D.autoContinueRequested||D.restartForModerator)&&!pausing&&!batchFailed;
    D.running=false;D.abort=null;D.audio=null;D.speech=null;
-   D.stopAfterCurrent=false;D.autoContinueRequested=false;D.moderatorBusy=false;
+   D.stopAfterCurrent=false;D.autoContinueRequested=false;D.restartForModerator=false;D.generatingBatch=false;D.moderatorBusy=false;
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
    $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
