@@ -933,6 +933,7 @@ function setDuelStopButtons(waiting){
 }
 function stopDuelImmediately(){
  D.generation++;D.running=false;D.stopAfterCurrent=false;D.autoContinueRequested=false;
+ D.restartForModerator=false;D.generatingBatch=false;
  D.moderatorStandalone=false;D.abort?.abort();D.abort=null;
  for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
  D.audio?.pause();D.audio=null;
@@ -1160,7 +1161,7 @@ async function runDuelBatch(){
   if(!profileIndex().some(p=>p.id===t.left)||!profileIndex().some(p=>p.id===t.right))return toast('Seleccioná perfiles existentes.',true);
  }
  stopAll(); // Detener solo una voz individual anterior, nunca un debate en curso.
- D.running=true;D.stopAfterCurrent=false;const token=++D.generation;
+ D.running=true;D.stopAfterCurrent=false;D.restartForModerator=false;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
  $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;setDuelStopButtons(false);
