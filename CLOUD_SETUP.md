@@ -1,50 +1,43 @@
-# Respaldo persistente — Persona Studio en Railway
+# Persona Studio · almacenamiento compartido automático
 
-Este proyecto incluye sincronización opcional entre dispositivos para **perfiles, personalidades, voces de referencia, PNG, fondos, temáticas e historiales de debate**.
+Los archivos grandes y los datos privados se guardan en el volumen permanente de Railway. **GitHub almacena solamente el código fuente**: usar GitHub para guardar voces e imágenes de usuarios no es apropiado (el repositorio tiene límites de archivo, los commits no son una base de datos y expondría material privado a colaboradores).
 
-**Importante:** el servidor solo habilita esta función cuando encuentra un volumen realmente montado. Si no hay volumen, no escribe archivos en el disco temporal de Railway y la pestaña **Perfiles → Respaldo en la nube** muestra la advertencia. No confundas un deploy correcto con una copia de seguridad ya realizada.
+## Requisito del servidor (una única vez)
 
-## Activación en Railway
+En el proyecto Railway que publica `lisofer/characterIA`, rama `persona-studio-railway`, debe existir un volumen persistente montado en **`/data`** (o en la ruta indicada por `PERSISTENT_DATA_DIR`). **Un deploy NO es almacenamiento persistente.** El backend se niega a guardar en el disco temporal.
 
-1. Abrí el proyecto de Railway que despliega **lisofer/characterIA**, rama **persona-studio-railway**.
-2. Elegí el servicio web **Persona Studio** y agregale un **Volume** persistente.
-3. Usá como **Mount Path**: `/data`. No hace falta crear `PERSISTENT_DATA_DIR` cuando usás ese punto de montaje.
-4. Aplicá el cambio y esperá el nuevo despliegue. Un volumen de Railway es independiente del código y conserva los datos entre desplegues normales. No elimines el volumen: **borrar el volumen elimina los datos**.
-5. En la app: **Perfiles → Respaldo en la nube**. Tiene que decir que la nube está lista.
+El estado y los recursos quedan en `/data/persona-studio-cloud-v1/`, conservándose entre despliegues normales. No elimines ni desvincules el volumen sin crear antes un respaldo.
 
-Si ya usás un punto de montaje diferente, agregá la variable `PERSISTENT_DATA_DIR` con la ruta absoluta de ese volumen.
+## Sincronización (automática, no hay botón de guardar)
 
-## Primera migración sin perder información
+1. Abrí la aplicación en el celular con tu token habitual. Entrá a **Perfiles → Sincronización automática** y esperá el estado **✓ Sincronizado en la nube · versión N**.
+2. Abrí la **misma URL de Railway** en la computadora, iniciá sesión y esperá unos segundos. La app descargará automáticamente la versión del celular; los personajes, voces y fondos se cargan sin importar ni exportar nada.
+3. Cada edición en perfiles, temáticas, configuraciones, PNG, audios o fondos inicia una sincronización al cabo de aproximadamente 1,5 segundos; con la app abierta también se consulta el servidor cada 8 segundos.
+4. La ventana secundaria LIVE 9:16 no modifica los datos; sigue recibiendo la emisión de la ventana principal mediante BroadcastChannel.
 
-Los datos anteriores siguen en el almacenamiento **local del navegador**. Ningún deploy migrará automáticamente esos archivos para evitar sobrescribir los que están en otro dispositivo.
+Si la computadora y el celular tenían datos distintos antes de sincronizar, el software intenta conservar ambos. Los perfiles y las temáticas con el mismo ID pero diferente contenido se duplican cuando hay conflicto verdadero, en vez de sobrescribir silenciosamente los existentes. Cambios normales al mismo personaje se actualizan sin crear copias.
 
-1. En el dispositivo que tenga la versión más completa, ingresá a **Perfiles**. Se recomienda pulsar primero **↓ Respaldo local** para descargar un archivo completo.
-2. Pulsá **☁ Guardar este dispositivo** y confirmá. El sistema sube la metadata y luego los PNG, audios de referencia y fondos binarios al servidor.
-3. Esperá el mensaje **✓ Guardado en la nube · versión N** antes de cambiar de dispositivo.
-4. En el otro dispositivo, iniciá sesión, abrí **Perfiles** y, si tenía datos diferentes, descargá antes su respaldo local.
-5. Pulsá **↓ Recuperar de la nube** y confirmá. Se reemplazará la biblioteca local de ese navegador con la copia elegida.
+Los cambios entrantes se difieren mientras un debate está reproduciéndose. Las salidas de audio no se interrumpen para refrescar los avatares. Si se está transmitiendo sin pausas, puede tardar en verse un cambio llegado de otro dispositivo.
 
-Una vez vinculado, se comprueban actualizaciones cada 12 segundos y se guardan los cambios cuando el debate no está hablando. Si ambos dispositivos cambiaron cosas al mismo tiempo, **se detiene la sincronización y se muestra un conflicto**, sin sobrescribir ninguno de los dos silenciosamente. La selección manual Guardar/Recuperar resuelve el conflicto.
+## Verificar de verdad
 
-**Salida LIVE:** la ventana secundaria 9:16 usa los archivos locales del mismo navegador y no sincroniza datos directamente.
+- El estado en Perfiles debe decir **✓ Sincronizado** y una **versión numérica**. **No basta con tocar o ver los controles**.
+- La computadora y el celular deben entrar a la **misma URL y al mismo entorno Railway**; dos despliegues de Railway distintos no comparten automáticamente un volumen.
+- Sin volumen, aparece una advertencia clara y se conservan los datos locales. Para problemas de red se muestra un mensaje de error y se intenta de nuevo.
+- `GET /api/cloud/status` requiere sesión y devuelve `available:true` si existe el volumen montado.
+- `GET /api/cloud/state` requiere sesión y devuelve número de revisión, marca de tiempo y manifiesto de datos.
 
-## Respaldo adicional
+## Seguridad y copias
 
-**↓ Respaldo local** genera un archivo JSON con configuraciones y los binarios incluidos, para conservarlo fuera de Railway. **↑ Importar respaldo** permite recuperarlo sin conexión al volumen. No compartas esos archivos: pueden contener voces de referencia y conversaciones privadas.
+- Los endpoints necesitan la cookie privada y controles CSRF; el código no envía las claves secretas de Fish o Gemini.
+- Los binarios de PNG, fondos y voces van separados del JSON y se verifican con SHA-256. Cada subida usa control de revisión atómico.
+- **Un volumen permanente no es un backup externo**. Para una segunda copia independiente, en **Perfiles → Respaldo de seguridad (opcional)** usá **Descargar copia local**.
+- Los archivos ya existentes en el navegador no se borran por actualizar el código. No borres datos de Chrome ni el volumen hasta verificar la sincronización en ambos dispositivos.
 
-## Seguridad y límites
-
-- Todas las rutas `/api/cloud/...` requieren la sesión privada habitual y rechazan solicitudes de escritura de otros orígenes.
-- Se usan hashes SHA-256 para los archivos, y las copias JSON se guardan mediante escritura temporal y renombrado atómico.
-- Los cambios se protegen con un número de revisión: una copia hecha desde otro navegador no se reemplaza automáticamente cuando hay conflicto.
-- Tamaño máximo por archivo: 20 MB. La copia de configuraciones/historiales tiene límites de tamaño para proteger el servidor.
-- El volumen es persistente en los despliegues de Railway, **pero no equivale a una segunda copia independiente**. Conservá respaldos externos para protegerte ante borrado del volumen, problemas de cuenta o errores operativos.
-- La clave de Gemini y de Fish sigue en Variables del servidor, **no se guarda en las copias de perfiles**.
-
-## Pruebas
+## Pruebas de regresión
 
 ```bash
 npm test
 ```
 
-Incluye pruebas de archivos binarios, SHA-256, estados atómicos, control de versiones y validación de entradas.
+Incluye pruebas del almacenamiento permanente y de la fusión de perfiles e imágenes entre dispositivos.
