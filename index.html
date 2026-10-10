@@ -964,7 +964,10 @@ function duelParseBatch(response,count){
 }
 async function duelGenerateBatch(t,participants,count){
  const model=getConversationModel()||DUEL_MODEL;
- const prior=t.messages.slice(-12).map(m=>(m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR (no mencionar ni citar)':'MODERADOR'):duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
+ const recent=t.messages.slice(-12);
+ const notes=t.messages.filter(m=>m.side==='human').slice(-6);
+ const context=[...notes.filter(m=>!recent.includes(m)),...recent];
+ const prior=context.map(m=>(m.side==='human'?(m.kind==='whisper'?'INSTRUCCIÓN PRIVADA DEL MODERADOR (no mencionar ni citar)':'MODERADOR'):duelName(m.profileId))+': '+m.text.slice(0,380)).join('\\n');
  const summary=t.summary?'Resumen acumulado: '+t.summary.slice(0,1400)+'\n':'';
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
@@ -1107,13 +1110,12 @@ async function runDuelBatch(){
  $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
  if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
  try{
+  // «Continuar» también lee en voz alta el mensaje pendiente del moderador.
+  const human=$('duelHuman').value.trim();
+  if(human){const entry=newModeratorEntry(t,human,false);$('duelHuman').value='';addModeratorEntry(t,entry)}
+  await drainModeratorQueue(t,token);
+  if(token!==D.generation||!D.running)return;
   if(!pending){
-   const human=$('duelHuman').value.trim();
-   if(human){
-    $('duelHuman').value='';
-    const entry={side:'human',text:human.slice(0,1000),at:Date.now()};
-    t.messages.push(entry);appendDuelMessage(entry);saveDuel();
-   }
    const participants={left:t.left,right:t.right};
    D.batchCharacters=participants;
    D.batchProfiles={left:JSON.parse(JSON.stringify(duelProfile(participants.left))),right:JSON.parse(JSON.stringify(duelProfile(participants.right)))};
@@ -1141,6 +1143,8 @@ async function runDuelBatch(){
   if(token!==D.generation||!D.running)return;
   primeDuelAudio(t,token);
   while(t.pending?.length&&D.running&&token===D.generation){
+   await drainModeratorQueue(t,token);
+   if(token!==D.generation||!D.running)break;
    const entry=t.pending[0];
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
    await duelVoice(t,entry.side,entry.text,token,entry);
@@ -1149,6 +1153,8 @@ async function runDuelBatch(){
    primeDuelAudio(t,token);
   }
   if(token===D.generation&&D.running&&!t.pending?.length){
+   await drainModeratorQueue(t,token);
+   if(token!==D.generation||!D.running)return;
    t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;saveDuel();
    duelStatus(duelCount(t)+' intervenciones · Tu turno');
    await summarizeDuel(t);
@@ -1216,6 +1222,25 @@ function duelScaleForSide(side){
  return duelScaleForProfile(profileId);
 }
 function frameDuel(now){
+ // El moderador no anima a los dos personajes: solamente habla y aparece subtitulado.
+ const mod=D.speech?.side==='moderator'?D.speech:null;
+ if(mod){
+  const caption=$('duelGlobalText');
+  if(!mod.ready){if(caption.textContent)caption.textContent=''}
+  else{
+   const t=Math.max(0,(mod.audio?mod.audio.currentTime*1000:now-mod.started)+mod.delay);
+   const plan=mod.plan;let index=-1,completed=-1;
+   for(let i=0;i<plan.words.length;i++){
+    if(t>=plan.offsets[i]+plan.lengths[i])completed=i;
+    if(t>=plan.offsets[i]&&t<plan.offsets[i]+plan.lengths[i]){index=i;break}
+   }
+   const sentence=index>=0?plan.sentences.find(q=>index>=q.first&&index<=q.last):
+                                  plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
+   const wanted=sentence&&!(index<0&&completed===sentence.last)?sentence.text:'';
+   if(caption.textContent!==wanted)caption.textContent=wanted;
+  }
+  $('duelGlobalSpeaker').textContent='Moderador';
+ }
  for(const side of ['left','right']){
   const images=D.images[side],name=side==='left'?'Left':'Right',canvas=$('duel'+name+'Canvas');
   const ctx=canvas.getContext('2d');if(!ctx)continue;
