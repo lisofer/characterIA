@@ -86,7 +86,7 @@
  function showError(e){status('Nube: '+e.message,true)}
  async function upload(force=false){
   if(!available||busy)return;
-  if(b()?.isBusy())return status('Esperá a que termine la intervención antes de guardar.');
+  // Guardar en segundo plano no interrumpe el audio ni el debate.
   busy=true;
   try{
    status('Preparando copia segura en la nube…');
@@ -195,7 +195,7 @@
   }catch{return true}
  }
  async function tick(){
-  if(!available||busy||!linked||conflict||b()?.isBusy())return;
+  if(!available||busy||!linked||conflict)return;
   try{
    const remote=await getRemote();lastRemote=remote;
    const now=kv(),fp=await fingerprint(now);
@@ -203,7 +203,8 @@
    if(remote.revision!==lastRev){
     if(dirty){
      conflict=true;status('Cambios distintos en dos dispositivos. Elegí Guardar o Recuperar.',true);
-    }else await pull();
+    }else if(!b()?.isBusy())await pull();
+    else status('Hay datos nuevos en la nube; se recuperarán al terminar el debate.');
    }else if(dirty)await upload();
   }catch(e){showError(e)}
  }
