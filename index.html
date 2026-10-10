@@ -894,7 +894,7 @@ async function prepareModeratorAudio(entry,token){
  }
 }
 async function drainModeratorQueue(t,token){
- while(D.moderatorQueue.length&&D.running&&D.generation===token){
+ while(D.moderatorQueue.length&&D.running&&!D.stopAfterCurrent&&D.generation===token){
   const entry=D.moderatorQueue.shift();if(entry?.kind!=='spoken')continue;
   D.moderatorBusy=true;
   D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,token)});
@@ -917,16 +917,34 @@ async function playModeratorsStandalone(){
  }}
 }
 
-function stopDuel(){
- D.generation++;D.running=false;D.moderatorStandalone=false;D.moderatorQueue.length=0;D.abort?.abort();D.abort=null;
+function setDuelStopButtons(waiting){
+ for(const id of ['duelStop','duelStopFromSettings'])$(id).disabled=Boolean(waiting);
+}
+function stopDuelImmediately(){
+ D.generation++;D.running=false;D.stopAfterCurrent=false;D.autoContinueRequested=false;
+ D.moderatorStandalone=false;D.abort?.abort();D.abort=null;
  for(const c of D.audioControllers)c.abort();D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;
  D.audio?.pause();D.audio=null;
  if(D.resolveAudio){const resolve=D.resolveAudio;D.resolveAudio=null;resolve()}
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
  D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';$('duelGlobalCaption').classList.remove('moderator-speaking');
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
- $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
+ $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
+}
+function stopDuel(){
+ if(!D.running)return;
+ if(D.stopAfterCurrent)return;
+ if(D.speech?.ready){
+  // No cortar en seco: mantener el audio hasta onended y no iniciar otro turno.
+  D.stopAfterCurrent=true;D.autoContinueRequested=false;
+  setDuelStopButtons(true);
+  duelStatus('Se detendrá al terminar la intervención que está hablando…');
+  return;
+ }
+ // Si está esperando Gemini o Fish y todavía no se escucha ninguna voz,
+ // no hay una intervención audible que debamos dejar terminar.
+ stopDuelImmediately();
 }
 $('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
 $('duelNext').onclick=runDuelBatch;$('duelStartFromSettings').onclick=runDuelBatch;
@@ -1018,7 +1036,7 @@ async function duelSample(id){
 }
 
 function primeDuelAudio(t,token){
- if(!D.running||D.generation!==token||D.moderatorBusy)return;
+ if(!D.running||D.generation!==token||D.moderatorBusy||D.stopAfterCurrent)return;
  // Precalentar como máximo los siguientes cuatro turnos; solo dos peticiones Fish simultáneas.
  for(const entry of (t.pending||[]).slice(0,4)){
   if(D.audioInFlight>=2)break;
@@ -1113,24 +1131,24 @@ async function runDuelBatch(){
   if(!profileIndex().some(p=>p.id===t.left)||!profileIndex().some(p=>p.id===t.right))return toast('Seleccioná perfiles existentes.',true);
  }
  stopAll(); // Detener solo una voz individual anterior, nunca un debate en curso.
- D.running=true;const token=++D.generation;
+ D.running=true;D.stopAfterCurrent=false;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
- $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
+ $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;setDuelStopButtons(false);
  if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
  try{
   // «Continuar» también lee en voz alta el mensaje pendiente del moderador.
   const human=$('duelHuman').value.trim();
   if(human){const entry=newModeratorEntry(t,human,false);$('duelHuman').value='';addModeratorEntry(t,entry)}
   await drainModeratorQueue(t,token);
-  if(token!==D.generation||!D.running)return;
+  if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
   if(!pending){
    const participants={left:t.left,right:t.right};
    D.batchCharacters=participants;
    D.batchProfiles={left:JSON.parse(JSON.stringify(duelProfile(participants.left))),right:JSON.parse(JSON.stringify(duelProfile(participants.right)))};
    duelStatus('Gemini preparando las '+t.limit+' intervenciones de la tanda…');
    const lines=await duelGenerateBatch(t,participants,t.limit);
-   if(token!==D.generation||!D.running)return;
+   if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
    const start=duelCount(t)%2===0?'left':'right';
    t.pending=lines.map((text,i)=>{
     const side=(i+(start==='right'?1:0))%2===0?'left':'right';
@@ -1149,21 +1167,22 @@ async function runDuelBatch(){
    left:await duelSample(D.batchCharacters.left),
    right:await duelSample(D.batchCharacters.right)
   };
-  if(token!==D.generation||!D.running)return;
+  if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
   primeDuelAudio(t,token);
-  while(t.pending?.length&&D.running&&token===D.generation){
+  while(t.pending?.length&&D.running&&!D.stopAfterCurrent&&token===D.generation){
    await drainModeratorQueue(t,token);
-   if(token!==D.generation||!D.running)break;
+   if(token!==D.generation||!D.running||D.stopAfterCurrent)break;
    const entry=t.pending[0];
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
    await duelVoice(t,entry.side,entry.text,token,entry);
    if(token!==D.generation||!D.running)break;
    t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();
+   if(D.stopAfterCurrent)break;
    primeDuelAudio(t,token);
   }
-  if(token===D.generation&&D.running&&!t.pending?.length){
+  if(token===D.generation&&D.running&&!D.stopAfterCurrent&&!t.pending?.length){
    await drainModeratorQueue(t,token);
-   if(token!==D.generation||!D.running)return;
+   if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
    t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;saveDuel();
    duelStatus(duelCount(t)+' intervenciones · Tu turno');
    await summarizeDuel(t);
