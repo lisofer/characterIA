@@ -333,6 +333,12 @@ body.live-output #appShell .duel-broadcast{
 .tt-chat-messages{margin-top:7px;height:146px;overflow:auto;scrollbar-color:#40546b transparent;scrollbar-width:thin;border-radius:7px;background:#0b1521;padding:6px;display:flex;flex-direction:column;gap:6px}
 .tt-chat-line{font-size:11px;line-height:1.4;color:#d5e2ee;overflow-wrap:anywhere;white-space:pre-wrap}
 .tt-chat-line strong{display:block;color:#83e5c5;font-size:10px;font-weight:750}
+.tt-chat-comment{display:block;width:100%;border:1px solid transparent;background:transparent;box-sizing:border-box;color:#d5e2ee;font:inherit;text-align:left;padding:4px 6px;border-radius:7px;cursor:pointer;appearance:none;white-space:pre-wrap;overflow-wrap:anywhere;touch-action:manipulation}
+.tt-chat-comment:hover{background:#23344a;border-color:#3d6578}
+.tt-chat-comment:focus-visible{outline:2px solid #89eacb;outline-offset:-2px}
+.tt-chat-comment[data-sent="true"]{background:#17372e;border-color:#396c59;cursor:default}
+.tt-chat-sent{font-size:9px!important;color:#9cdbc1!important;margin-top:2px;font-weight:650}
+
 .tt-chat-line.gift{background:#173127;border:1px solid #366a50;border-radius:7px;padding:5px 7px}
 .tt-chat-line.gift strong{color:#a2f3b9}
 .tt-chat-line.gift span{font-weight:600;color:#e6f8e8}
@@ -1067,29 +1073,43 @@ function addModeratorEntry(t,entry){
  if(entry.kind==='spoken')D.moderatorQueue.push(entry);
  saveDuel();
 }
-function sendModerator(whisper=false){
- const t=duelActive(),input=$('duelHuman');if(!t)return;
- const text=input.value.trim();if(!text)return toast('Escribí un mensaje primero.',true);
- let entry;try{entry=newModeratorEntry(t,text,whisper)}catch(e){return toast(e.message,true)}
- input.value='';addModeratorEntry(t,entry);
- // Los turnos que Gemini ya redactó no conocían esta intervención.
- // Respetar la voz actualmente en curso y rehacer SOLO los turnos aún no pronunciados.
+function submitModeratorText(text,whisper=false,sourceInput=null){
+ const t=duelActive();if(!t)return {ok:false,error:'Elegí una temática antes de enviar comentarios.'};
+ const value=String(text||'').trim();
+ if(!value)return {ok:false,error:'Escribí un mensaje primero.'};
+ let entry;try{entry=newModeratorEntry(t,value,whisper)}
+ catch(e){return {ok:false,error:e.message}}
+ // El envío desde TikTok nunca modifica un borrador escrito por el moderador.
+ if(sourceInput)sourceInput.value='';
+ addModeratorEntry(t,entry);
  if(Array.isArray(t.pending)&&t.pending.length)t.needsReplan=true;
- // En una generación aún en curso, cancelar el pedido viejo y preparar uno con el mensaje nuevo.
- if(D.running&&D.generatingBatch){
-  D.restartForModerator=true;
-  D.abort?.abort();
- }
+ if(D.running&&D.generatingBatch){D.restartForModerator=true;D.abort?.abort()}
  if(D.running){
   if(D.stopAfterCurrent){D.stopAfterCurrent=false;setDuelStopButtons(false)}
   D.autoContinueRequested=true;
-  toast(whisper?'Susurro privado recibido. Las IA lo tendrán en cuenta al generar la próxima tanda.':'El moderador hablará entre intervenciones. El debate continuará.');
+  toast(whisper?'Susurro privado recibido. Las IA lo tendrán en cuenta al generar la próxima tanda.':
+   'El moderador hablará entre intervenciones. El debate continuará.');
  }else{
-  runDuelBatch();
+  runDuelBatch(!sourceInput); // No consumir borrador al iniciar desde TikTok.
  }
+ return {ok:true};
+}
+function sendModerator(whisper=false){
+ const input=$('duelHuman');
+ const result=submitModeratorText(input.value,whisper,input);
+ if(!result.ok)toast(result.error,true);
 }
 $('duelModeratorSend').onclick=()=>sendModerator(false);
 $('duelModeratorWhisper').onclick=()=>sendModerator(true);
+// Un mensaje de un espectador seleccionado por el humano entra como voz del moderador.
+// No se reproduce automáticamente el chat sin una selección.
+window.addEventListener('persona:tiktok-comment-selected',event=>{
+ const detail=event.detail;
+ if(!detail||typeof detail.message!=='string')return;
+ const result=submitModeratorText(detail.message.slice(0,950),false);
+ detail.accepted=Boolean(result.ok);
+ detail.error=result.error||'';
+});
 async function prepareModeratorAudio(entry,token){
  const cfg=duelProfile(entry.profileId);
  if(cfg.voiceProvider==='browser')return {browser:true};
@@ -1460,7 +1480,7 @@ function discardUnspokenDuelLines(t){
  t.needsReplan=false;
  saveDuel();
 }
-async function runDuelBatch(){
+async function runDuelBatch(skipModeratorDraft=false){
  if(D.running)return;
  duelSyncInputs();
  const t=duelActive();if(!t)return;
@@ -1481,7 +1501,7 @@ async function runDuelBatch(){
  let batchFailed=false;
  try{
   // Al comenzar o continuar, también se lee en voz alta el texto pendiente del moderador.
-  const human=$('duelHuman').value.trim();
+  const human=skipModeratorDraft===true?'':$('duelHuman').value.trim();
   if(human){const entry=newModeratorEntry(t,human,false);$('duelHuman').value='';addModeratorEntry(t,entry)}
   await drainModeratorQueue(t,token);
   if(token!==D.generation||!D.running||D.stopAfterCurrent)return;
@@ -1572,7 +1592,7 @@ async function runDuelBatch(){
    if(t.id===D.activeId){for(const side of ['left','right']){if(D.profiles[side]!==t[side])loadDuelSprites(side,t[side]);$('duel'+(side==='left'?'Left':'Right')+'Name').textContent=duelName(t[side])}}
    // Un envío durante la tanda autoriza exactamente una tanda más;
    // no repetir una llamada Gemini si la tanda anterior se interrumpió o falló.
-   if(continueAutomatically)Promise.resolve().then(()=>runDuelBatch());
+   if(continueAutomatically)Promise.resolve().then(()=>runDuelBatch(true));
   }
  }
 }

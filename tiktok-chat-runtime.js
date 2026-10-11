@@ -3,6 +3,18 @@
  'use strict';
  // Detección independiente de la UI: avisa una sola vez al finalizar un regalo
  // o una racha. Las actualizaciones intermedias solo actualizan la alerta visual.
+ function commentSpeaker(item){
+  const handle=String(item?.username||'').trim().replace(/^@/,'').slice(0,40);
+  const nickname=String(item?.name||'').trim().slice(0,50);
+  const hasHandle=item?.hasHandle===true||(item?.hasHandle!==false&&
+   /^[a-zA-Z0-9._]{2,30}$/.test(handle)&&handle.toLowerCase()!=='espectador');
+  return hasHandle?'@'+handle:(nickname||handle||'Espectador');
+ }
+ function commentToModerator(item){
+  const message=String(item?.text||'').trim().slice(0,420);
+  if(!message)return '';
+  return commentSpeaker(item)+' dice: «'+message+'»';
+ }
  function createGiftTracker(now=()=>Date.now()){
   let session=null,seen=new Map(),notified=new Set(),ready=false;
   function consume(state,armed=false){
@@ -38,13 +50,15 @@
   function reset(){session=null;seen.clear();notified.clear();ready=false}
   return {consume,reset};
  }
- if(typeof module!=='undefined'&&module.exports)module.exports={createGiftTracker};
+ if(typeof module!=='undefined'&&module.exports)module.exports={createGiftTracker,commentSpeaker,commentToModerator};
  if(typeof document==='undefined')return;
  const $=id=>document.getElementById(id);
  const GLOBAL='persona-studio-global-v3',DEFAULT_USER='peleasfalopa';
  const C={status:'idle',username:'',pending:false,renderKey:'',polling:false,edited:false,armed:false,lastGift:null};
  const giftTracker=createGiftTracker();
  const giftCallbacks=new Set();
+ const sentComments=new Set();
+ let commentSession='';
  let hideGiftTimeout=null;
  function displayGift(gift){
   const box=$('ttChatGiftAlert');
@@ -109,15 +123,50 @@
   if(s.status==='error')return 'Error de conexión';
   return '● Desconectado';
  }
- function textLine(name,body,isGift=false,pending=false){
-  const div=document.createElement('div');div.className='tt-chat-line'+(isGift?' gift':'')+(pending?' streak':'');
+ function textLine(name,body,isGift=false,pending=false,selectable=false){
+  const div=document.createElement(selectable?'button':'div');
+  div.className='tt-chat-line'+(isGift?' gift':'')+(pending?' streak':'')+(selectable?' tt-chat-comment':'');
+  if(selectable)div.type='button';
   const strong=document.createElement('strong');strong.textContent=name;
   const content=document.createElement('span');content.textContent=body;
   div.append(strong,content);return div;
  }
+ function markCommentSent(element){
+  element.dataset.sent='true';
+  element.title='Comentario ya enviado al moderador';
+  const note=document.createElement('span');
+  note.className='tt-chat-sent';
+  note.textContent='✓ enviado al moderador';
+  element.append(note);
+ }
+ function addClickableComment(item,name){
+  const element=textLine(name,item.text||'',false,false,true);
+  const selected=sentComments.has(item.id);
+  element.title=selected?'Comentario ya enviado al moderador':'Enviar este comentario al moderador';
+  element.setAttribute('aria-label',element.title+': '+name+' dice '+String(item.text||'').slice(0,130));
+  if(selected)markCommentSent(element);
+  element.addEventListener('click',()=>{
+   if(sentComments.has(item.id))return;
+   const message=commentToModerator(item);
+   if(!message)return;
+   const detail={id:item.id,username:item.username||'',name:item.name||'',hasHandle:item.hasHandle,
+    text:item.text||'',message,accepted:false,error:''};
+   // El control del debate decide si acepta el mensaje; no es un envío automático.
+   window.dispatchEvent(new CustomEvent('persona:tiktok-comment-selected',{detail}));
+   if(detail.accepted){
+    sentComments.add(item.id);
+    if(sentComments.size>120)sentComments.delete(sentComments.values().next().value);
+    markCommentSent(element);
+    $('ttChatError').textContent='';
+   }else $('ttChatError').textContent=detail.error||'No se pudo enviar el comentario al moderador.';
+  });
+  return element;
+ }
  function paint(state){
   if(!state)return;
   C.status=state.status||'idle';C.username=state.username||'';
+  const roomKey=[state.username||'',state.roomId||'',state.connectedAt||0].join('|');
+  if(roomKey!==commentSession){commentSession=roomKey;sentComments.clear()}
   $('ttChatStatus').textContent=statusText(state);
   $('ttChatStatus').dataset.state=state.warning?'warning':C.status;
   if(state.username&&!C.edited&&document.activeElement!==$('ttChatUser'))
@@ -141,10 +190,11 @@
     const isGift=item.kind==='gift';
     const handle=String(item.username||'').trim();
     const nickname=String(item.name||'').trim();
-    const name=handle&&handle.toLowerCase()!=='espectador'?
-      (nickname&&nickname!==handle?nickname+' (@'+handle+')':'@'+handle):
-      (nickname||'Espectador');
-    if(!isGift){list.append(textLine(name,item.text||''));continue}
+    const name=item.hasHandle===false?(nickname||handle||'Espectador'):
+      handle&&handle.toLowerCase()!=='espectador'?
+       (nickname&&nickname!==handle?nickname+' (@'+handle+')':'@'+handle):
+       (nickname||'Espectador');
+    if(!isGift){list.append(addClickableComment(item,name));continue}
     const giftName=/^rose$/i.test(item.giftName||'')?'Rosa':String(item.giftName||'Regalo');
     const count=item.count>1?' ×'+item.count:'';
     const msg=(item.emoji||'🎁')+' '+(item.pending?'está enviando ':'envió ')+giftName+count;
@@ -170,7 +220,7 @@
    $('ttChatError').textContent='Poné el @usuario de la cuenta que está transmitiendo (sin enlaces).';
    $('ttChatUserRow').hidden=false;$('ttChatUser').focus();return;
   }
-  C.pending=true;C.armed=true;C.lastGift=null;giftTracker.reset();updateButton();$('ttChatError').textContent='';
+  C.pending=true;C.armed=true;C.lastGift=null;giftTracker.reset();sentComments.clear();updateButton();$('ttChatError').textContent='';
   try{
    const data=await request('/connect',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:name,force})});
@@ -180,7 +230,7 @@
  }
  async function disconnect(){
   if(C.pending)return;
-  C.pending=true;C.armed=false;C.lastGift=null;giftTracker.reset();$('ttChatGiftAlert').hidden=true;updateButton();
+  C.pending=true;C.armed=false;C.lastGift=null;giftTracker.reset();sentComments.clear();$('ttChatGiftAlert').hidden=true;updateButton();
   try{C.renderKey='';paint(await request('/disconnect',{method:'POST'}))}
   catch(e){$('ttChatError').textContent=e.message}
   finally{C.pending=false;updateButton()}

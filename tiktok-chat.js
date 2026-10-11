@@ -31,7 +31,7 @@ function actorOf(source){
   asString(source.username)||asString(source.handle);
  const name=asString(u.nickname)||asString(u.nickName)||asString(source.nickname)||
   asString(source.nickName)||username||'Espectador';
- return {username:(username||name).slice(0,40),name:name.slice(0,50)};
+ return {username:(username||name).slice(0,40),name:name.slice(0,50),hasHandle:Boolean(username)};
 }
 function normalizeComment(event,id,now=Date.now()){
  const source=eventPayload(event);

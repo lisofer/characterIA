@@ -8,7 +8,7 @@ test('Valida el @usuario y filtra datos del comentario',()=>{
  assert.equal(normalizeUsername('@peleasfalopa'),'peleasfalopa');
  assert.equal(normalizeUsername('https://tiktok.com/@algo/live'),null);
  assert.equal(normalizeUsername('hola espacio'),null);
- assert.deepEqual(normalizeComment({user:{uniqueId:'usuario',nickname:'Alias'},comment:' Hola '},7,123),{id:7,username:'usuario',name:'Alias',text:'Hola',at:123});
+ assert.deepEqual(normalizeComment({user:{uniqueId:'usuario',nickname:'Alias'},comment:' Hola '},7,123),{id:7,username:'usuario',name:'Alias',hasHandle:true,text:'Hola',at:123});
 });
 test('Conexión, comentarios en tiempo real y desconexión manual',async()=>{
  class FakeConnection extends EventEmitter{
@@ -368,4 +368,14 @@ test('No expone conversaciones ni usuarios dentro del diagnóstico de métodos',
  const summary=JSON.stringify(c.snapshot().methods);
  assert.equal(summary.includes('texto_privado'),false);
  assert.equal(summary.includes('persona'),false);
+});
+
+test('Si TikTok no envía @usuario, conserva el apodo sin inventar un arroba',()=>{
+ const result=normalizeComment({user:{nickname:'Una persona de México'},comment:'saludos de mexico'},9,123);
+ assert.equal(result.hasHandle,false);
+ assert.equal(result.name,'Una persona de México');
+ assert.equal(result.username,'Una persona de México');
+ const handle=normalizeComment({user:{displayId:'juanma98',nickname:'Juanma'},comment:'Hola'},10,123);
+ assert.equal(handle.hasHandle,true);
+ assert.equal(handle.username,'juanma98');
 });
