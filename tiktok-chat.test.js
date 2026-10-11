@@ -2,7 +2,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {EventEmitter}=require('node:events');
-const {normalizeUsername,normalizeComment,normalizeGift,createTikTokChat}=require('./tiktok-chat');
+const {normalizeUsername,normalizeComment,normalizeGift,eventPayload,decodedMessage,createTikTokChat}=require('./tiktok-chat');
 const tick=async()=>{for(let i=0;i<10;i++)await Promise.resolve()};
 test('Valida el @usuario y filtra datos del comentario',()=>{
  assert.equal(normalizeUsername('@peleasfalopa'),'peleasfalopa');
@@ -240,4 +240,68 @@ test('Al desconectar también se borran los regalos de la transmisión anterior'
  c.stop();
  assert.equal(c.snapshot().events.length,0);
  assert.equal(c.snapshot().giftEvents,0);
+});
+
+test('Reconoce user.displayId y nickname en eventos protobuf crudos de TikTok v2.5',()=>{
+ const data={user:{displayId:'mariposa_liv',nickname:'Mariposa',idStr:'19823'},comment:'Hola a todos',common:{msgId:'754'}};
+ const actual=normalizeComment(data,12,100);
+ assert.equal(actual.username,'mariposa_liv');
+ assert.equal(actual.name,'Mariposa');
+ assert.equal(actual.text,'Hola a todos');
+ const fromEnvelope=normalizeComment({type:'WebcastChatMessage',data},15,110);
+ assert.equal(fromEnvelope.username,'mariposa_liv');
+ assert.equal(fromEnvelope.text,'Hola a todos');
+ const flat=normalizeComment({uniqueId:'flat_user',nickname:'Nombre',comment:'Hola'},16,120);
+ assert.equal(flat.username,'flat_user');
+});
+test('Reconoce una rosa y una racha según el formato protobuf real v2.5',()=>{
+ const data={user:{displayId:'donante123',nickname:'Donante'},
+  giftId:5655,giftDetails:{giftName:'Rose',giftType:1},
+  repeatCount:3,repeatEnd:false,common:{msgId:'7'}};
+ const gift=normalizeGift(data,17,100);
+ assert.equal(gift.username,'donante123');
+ assert.equal(gift.name,'Donante');
+ assert.equal(gift.emoji,'🌹');
+ assert.equal(gift.giftName,'Rose');
+ assert.equal(gift.count,3);
+ assert.equal(gift.pending,true);
+ assert.equal(gift.msgId,'7');
+ assert.equal(normalizeGift({...data,repeatEnd:true},19,200).pending,false);
+});
+test('El regalo toma el nombre desde extendedGiftInfo si la información común falta',()=>{
+ const gift=normalizeGift({user:{displayId:'julia'},giftId:1,extendedGiftInfo:{name:'Rosa'},repeatCount:1},20,100);
+ assert.equal(gift.giftName,'Rosa');
+ assert.equal(gift.username,'julia');
+ assert.equal(gift.emoji,'🌹');
+});
+test('decodedData de la nueva biblioteca usa {type,data}, no el mensaje directamente',async()=>{
+ let conn;
+ class Proto extends EventEmitter{
+  constructor(username,settings){
+   super();conn=this;
+   assert.equal(settings.processInitialData,true);
+   assert.equal(settings.enableExtendedGiftInfo,true);
+  }
+  async connect(){return {roomId:'1'}}
+  disconnect(){}
+ }
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Proto,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ const giftData={user:{displayId:'regalador'},giftDetails:{giftName:'Rose',giftType:0},giftId:5655,repeatCount:1};
+ const chatData={user:{displayId:'comentador'},comment:'Buenas!'};
+ conn.emit('decodedData','WebcastGiftMessage',{type:'WebcastGiftMessage',data:giftData});
+ conn.emit('decodedData','WebcastChatMessage',{type:'WebcastChatMessage',data:chatData});
+ assert.deepEqual(c.snapshot().events.map(x=>x.kind),['gift','comment']);
+ assert.equal(c.snapshot().events[0].username,'regalador');
+ assert.equal(c.snapshot().events[0].giftName,'Rose');
+ assert.equal(c.snapshot().events[1].username,'comentador');
+ // No duplicar si después la biblioteca emite también el evento de alto nivel.
+ conn.emit('gift',giftData);conn.emit('chat',chatData);
+ assert.equal(c.snapshot().events.length,2);
+});
+test('decodedMessage admite formato moderno y heredado de eventos',()=>{
+ const e={user:{displayId:'tiktok'},giftId:1};
+ assert.equal(decodedMessage('WebcastGiftMessage',{type:'WebcastGiftMessage',data:e}).data.user.displayId,'tiktok');
+ assert.equal(decodedMessage({type:'WebcastGiftMessage',data:e}).type,'WebcastGiftMessage');
+ assert.equal(eventPayload({type:'WebcastGiftMessage',data:e}),e);
 });

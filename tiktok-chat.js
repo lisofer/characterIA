@@ -5,32 +5,65 @@ function normalizeUsername(value){
  const input=String(value||'').trim().replace(/^@/,'');
  return /^[a-zA-Z0-9._]{2,30}$/.test(input)?input:null;
 }
-function normalizeComment(event,id,now=Date.now()){
- const source=event?.chatMessage||event?.data||event?.message||event;
- const text=String(source?.comment??source?.content??'').trim().slice(0,420);
- if(!text)return null;
- const user=source?.user||{};
- const uniqueId=String(user.uniqueId||source?.uniqueId||'espectador').slice(0,40);
- const nickname=String(user.nickname||user.nickName||source?.nickname||uniqueId).slice(0,50);
- return {id,username:uniqueId,name:nickname,text,at:now};
+// v2.5 emite protobufs crudos ({user:{displayId,...}}). Las versiones
+// anteriores emitían atributos aplanados ({uniqueId,...}). decodedData puede
+// envolverlos como {type:'WebcastChatMessage',data:{...}}.
+function eventPayload(raw){
+ let value=raw;
+ for(let i=0;i<4&&value&&typeof value==='object';i++){
+  if(value.chatMessage&&typeof value.chatMessage==='object'){value=value.chatMessage;continue}
+  if(value.giftMessage&&typeof value.giftMessage==='object'){value=value.giftMessage;continue}
+  if(value.data&&typeof value.data==='object'&&!Array.isArray(value.data)&&
+     (value.type||!value.user&&!value.comment&&!value.giftId)){value=value.data;continue}
+  if(value.message&&typeof value.message==='object'&&!Array.isArray(value.message)){
+   value=value.message;continue
+  }
+  break;
+ }
+ return value&&typeof value==='object'?value:{};
 }
-function normalizeGift(e,id,at=Date.now()){
- const x=e?.giftMessage||e?.data||e?.message||e;
+function actorOf(source){
+ const u=source.user&&typeof source.user==='object'?source.user:{};
+ const asString=v=>typeof v==='string'?v.trim():'';
+ const username=asString(u.uniqueId)||asString(u.displayId)||asString(u.username)||
+  asString(u.handle)||asString(source.uniqueId)||asString(source.displayId)||
+  asString(source.username)||asString(source.handle);
+ const name=asString(u.nickname)||asString(u.nickName)||asString(source.nickname)||
+  asString(source.nickName)||username||'Espectador';
+ return {username:(username||name).slice(0,40),name:name.slice(0,50)};
+}
+function normalizeComment(event,id,now=Date.now()){
+ const source=eventPayload(event);
+ const text=String(source.comment??source.content??source.text??'').trim().slice(0,420);
+ if(!text)return null;
+ return {id,...actorOf(source),text,at:now};
+}
+function normalizeGift(event,id,at=Date.now()){
+ const x=eventPayload(event);
  if(!x||typeof x!=='object')return null;
- const d=x.giftDetails||x.gift||{},u=x.user||{};
+ const d=x.giftDetails&&typeof x.giftDetails==='object'?x.giftDetails:
+  x.gift&&typeof x.gift==='object'?x.gift:{};
+ const info=x.extendedGiftInfo&&typeof x.extendedGiftInfo==='object'?x.extendedGiftInfo:{};
  const giftId=String(x.giftId??d.giftId??d.gift_id??'').slice(0,45);
- const giftName=String(d.giftName||x.giftName||x.extendedGiftInfo?.name||x.extendedGiftInfo?.giftName||d.name||(giftId?'Regalo #'+giftId:'Regalo')).trim().slice(0,70);
- const username=String(u.uniqueId||x.uniqueId||'espectador').slice(0,40);
- const name=String(u.nickname||x.nickname||username).slice(0,50);
- const n=Number(x.repeatCount??d.repeatCount??d.repeat_count??1);
- const count=Number.isFinite(n)?Math.max(1,Math.min(100000,Math.floor(n))):1;
+ const giftName=String(d.giftName||x.giftName||info.name||info.giftName||d.name||
+  (giftId?'Regalo #'+giftId:'Regalo')).trim().slice(0,70);
+ const amount=Number(x.repeatCount??d.repeatCount??d.repeat_count??1);
+ const count=Number.isFinite(amount)?Math.max(1,Math.min(100000,Math.floor(amount))):1;
  const streak=Number(d.giftType??d.gift_type??x.giftType)===1;
- const end=x.repeatEnd??d.repeatEnd??d.repeat_end;
- const pending=streak&&(end===undefined||end===false||end===0);
+ const repeatEnd=x.repeatEnd??d.repeatEnd??d.repeat_end;
+ const pending=streak&&(repeatEnd===undefined||repeatEnd===false||repeatEnd===0);
  const groupId=String(x.groupId||x.group_id||'').slice(0,90);
  const msgId=String(x.msgId||x.messageId||x.common?.msgId||'').slice(0,90);
- const emoji=/rose|rosa/i.test(giftName)?'🌹':/lion|le[oó]n/i.test(giftName)?'🦁':/heart|coraz[oó]n/i.test(giftName)?'❤️':'🎁';
- return {id,kind:'gift',username,name,giftName,giftId,count,emoji,streak,pending,groupId,msgId,at};
+ const emoji=/rose|rosa/i.test(giftName)?'🌹':/lion|le[oó]n/i.test(giftName)?'🦁':
+  /heart|coraz[oó]n/i.test(giftName)?'❤️':'🎁';
+ return {id,kind:'gift',...actorOf(x),giftName,giftId,count,emoji,streak,pending,groupId,msgId,at};
+}
+function decodedMessage(type,event){
+ // decodedData en v2.5: (tipo, {type, data}, bytes).
+ // Otros conectores pueden enviar un único objeto {type, data}.
+ const envelope=typeof type==='string'?event:type;
+ const name=typeof type==='string'?type:envelope?.type;
+ return {type:String(name||''),data:eventPayload(envelope)};
 }
 function createTikTokChat(options={}){
  const load=options.loadConnector||(()=>import('tiktok-live-connector'));
@@ -72,7 +105,7 @@ function createTikTokChat(options={}){
   const addComment=event=>{
    const entry=normalizeComment(event,++nextId,fresh());
    if(!entry)return;
-   const source=event?.chatMessage||event?.data||event?.message||event;
+   const source=eventPayload(event);
    const rawId=source?.msgId||source?.messageId||source?.common?.msgId;
    const fingerprint=rawId?'id:'+rawId:
     'text:'+entry.username+':'+entry.text;
@@ -96,7 +129,7 @@ function createTikTokChat(options={}){
    const fingerprint=gift.msgId?'id:'+gift.msgId+':'+gift.count+':'+gift.pending:
     'gift:'+gift.username+':'+gift.giftId+':'+gift.count+':'+gift.pending;
    const last=giftFingerprints.get(fingerprint);
-   if(last!==undefined&&stamp-last<(gift.msgId?60000:900))return;
+   if(last!==undefined&&stamp-last<(gift.msgId?60000:250))return;
    giftFingerprints.set(fingerprint,stamp);
    if(giftFingerprints.size>200){
     for(const [key,at] of giftFingerprints)if(stamp-at>60000)giftFingerprints.delete(key);
@@ -124,7 +157,7 @@ function createTikTokChat(options={}){
     if(current!==generation)return;
     const Connection=library.TikTokLiveConnection||library.default?.TikTokLiveConnection;
     if(typeof Connection!=='function')throw Error('No se pudo cargar el lector de TikTok.');
-    connection=new Connection(username,{processInitialData:true});
+    connection=new Connection(username,{processInitialData:true,enableExtendedGiftInfo:true});
     active=connection;
     const chatEvent=library.WebcastEvent?.CHAT||'chat';
     const giftEvent=library.WebcastEvent?.GIFT||'gift';
@@ -140,8 +173,9 @@ function createTikTokChat(options={}){
     connection.on('decodedData',(type,event)=>{
      if(current!==generation)return;
      data.decodedEvents++;data.lastEventAt=fresh();data.updatedAt=fresh();
-     if(/^(WebcastChatMessage|chat)$/i.test(String(type||'')))addComment(event);
-     if(/^(WebcastGiftMessage|gift)$/i.test(String(type||'')))addGift(event);
+     const decoded=decodedMessage(type,event);
+     if(/^(WebcastChatMessage|chat)$/i.test(decoded.type))addComment(decoded.data);
+     if(/^(WebcastGiftMessage|gift)$/i.test(decoded.type))addGift(decoded.data);
     });
     connection.on('websocketConnected',()=>{
      if(current!==generation)return;
@@ -194,4 +228,4 @@ function createTikTokChat(options={}){
  }
  return {start,stop,snapshot};
 }
-module.exports={createTikTokChat,normalizeUsername,normalizeComment,normalizeGift};
+module.exports={createTikTokChat,normalizeUsername,normalizeComment,normalizeGift,eventPayload,decodedMessage};

@@ -64,7 +64,7 @@
    bits.push((state.wsFrames||0)+' paquetes');
    bits.push((state.decodedEvents||0)+' eventos');
    bits.push((state.chatEvents||0)+' chats');
-   if(state.giftEvents)bits.push((state.events||[]).filter(e=>e.kind==='gift').length+' regalos');
+   bits.push((state.giftEvents||0)+' regalos recibidos');
   }
   diag.textContent=bits.join(' · ');
   diag.hidden=!bits.length;
@@ -82,7 +82,11 @@
    if(!latest.length)list.append(textLine('TikTok LIVE',note));
    else for(const item of latest){
     const isGift=item.kind==='gift';
-    const name='@'+(item.username||'usuario');
+    const handle=String(item.username||'').trim();
+    const nickname=String(item.name||'').trim();
+    const name=handle&&handle.toLowerCase()!=='espectador'?
+      (nickname&&nickname!==handle?nickname+' (@'+handle+')':'@'+handle):
+      (nickname||'Espectador');
     if(!isGift){list.append(textLine(name,item.text||''));continue}
     const giftName=/^rose$/i.test(item.giftName||'')?'Rosa':String(item.giftName||'Regalo');
     const count=item.count>1?' ×'+item.count:'';
