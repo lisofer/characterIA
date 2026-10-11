@@ -45,14 +45,14 @@ test('La primera frase comienza su TTS sin esperar el JSON final de Gemini',asyn
  let finish;
  const warming=[];
  const make=new Function('D','duelGenerateBatch','warmFirstDuelVoice','duelCount',
-  'duelLimitBounds','cancelEarlyDuelBatch',code+'\nreturn {createEarlyDuelBatch,prepareNextDuelBatch,useEarlyDuelBatch};')(
+  'duelLimitBounds','cancelEarlyDuelBatch','stripSpeech',code+'\nreturn {createEarlyDuelBatch,prepareNextDuelBatch,useEarlyDuelBatch};')(
   D,(_t,_p,_min,_max,_ctrl,onPartial)=>{
    onPartial('{"lines":["Hola desde el vivo",');
    return new Promise(resolve=>{finish=resolve});
   },
   (job,entry)=>{warming.push(entry);job.firstAudioPromise=Promise.resolve({blob:'audio'});},
   t=>t.messages.filter(m=>m.side==='left'||m.side==='right').length,
-  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}});
+  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}},text=>text);
  const topic={id:'tema',messages:[],pending:[],left:'a',right:'b'};
  const job=make.createEarlyDuelBatch(topic,{left:'a',right:'b'},{min:1,max:12});
  assert.equal(warming.length,1,'No se precalentó Fish con la primera frase');
@@ -69,10 +69,10 @@ test('Susurrar vacío puede anticipar la siguiente tanda mientras hablan',async(
   speech:{ready:true,side:'left'},nextPrepared:null};
  const calls=[];
  const run=new Function('D','duelGenerateBatch','warmFirstDuelVoice','duelCount',
-  'duelLimitBounds','cancelEarlyDuelBatch',code+'\nreturn {prepareNextDuelBatch,useEarlyDuelBatch};')(
+  'duelLimitBounds','cancelEarlyDuelBatch','stripSpeech',code+'\nreturn {prepareNextDuelBatch,useEarlyDuelBatch};')(
   D,(t)=>{calls.push(t.messages.map(m=>m.text));return Promise.resolve(['A continuación'])},
   ()=>{},t=>t.messages.filter(m=>m.side==='left'||m.side==='right').length,
-  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}});
+  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}},text=>text);
  const m1={id:'1',side:'left',text:'Primero'},m2={id:'2',side:'right',text:'Segundo'};
  const t={id:'debate',left:'a',right:'b',messages:[m1,m2],pending:[m1,m2]};
  run.prepareNextDuelBatch(t,false);
@@ -89,10 +89,10 @@ test('Una interrupción del moderador no incluye intervenciones futuras aún no 
   speech:{ready:true,side:'left'},nextPrepared:null};
  let captured;
  const run=new Function('D','duelGenerateBatch','warmFirstDuelVoice','duelCount',
-  'duelLimitBounds','cancelEarlyDuelBatch',code+'\nreturn {prepareNextDuelBatch};')(
+  'duelLimitBounds','cancelEarlyDuelBatch','stripSpeech',code+'\nreturn {prepareNextDuelBatch};')(
   D,t=>{captured=t.messages.map(x=>x.text);return Promise.resolve(['Nueva réplica'])},
   ()=>{},t=>t.messages.filter(m=>m.side==='left'||m.side==='right').length,
-  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}});
+  ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}},text=>text);
  const current={id:'a',side:'left',text:'Estoy hablando'};
  const future={id:'b',side:'right',text:'Respuesta vieja no dicha'};
  const moderator={id:'c',side:'human',text:'Pregunta del moderador'};
