@@ -12,6 +12,7 @@ const KEYS=new Set([
  'persona-studio-backgrounds-v1',
  'persona-studio-global-v3',
  'persona-studio-stage-share-v1',
+ 'persona-studio-duel-general-prompt-v1',
 ]);
 // Railway permite montar un volumen en /data sin otra configuración.
 const dir=path.resolve(process.env.PERSISTENT_DATA_DIR||'/data');
