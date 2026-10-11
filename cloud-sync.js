@@ -4,7 +4,8 @@
  'use strict';
  if(new URLSearchParams(location.search).get('output')==='1')return;
  const keys=['persona-studio-profiles-v3','persona-studio-profile-index-v3','persona-studio-duels-v1',
-  'persona-studio-backgrounds-v1','persona-studio-global-v3','persona-studio-stage-share-v1'];
+  'persona-studio-backgrounds-v1','persona-studio-global-v3','persona-studio-stage-share-v1',
+  'persona-studio-duel-general-prompt-v1'];
  const LINK='persona-studio-cloud-linked-v1',REV='persona-studio-cloud-revision-v1',
        BASE='persona-studio-cloud-base-v2',FP='persona-studio-cloud-fingerprint-v1',
        DIRTY='persona-studio-cloud-assets-dirty-v1',PENDING='persona-studio-cloud-pending-apply-v1';
