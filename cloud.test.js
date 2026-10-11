@@ -71,3 +71,20 @@ test('archivos de música de la biblioteca mantienen el límite de 100 MB',()=>{
  assert.throws(()=>cloud.updateState({baseRevision:start+1,
   state:{schema:1,kv:{},assets:{'p1:voiceSample':{hash,type:'audio/mpeg',size:data.length}}}}),/Manifiesto/);
 });
+
+
+test('sincroniza el prompt general del debate sin perder otros datos',()=>{
+ const old=cloud.readState();
+ const prior=old.state||{schema:1,kv:{},assets:{}};
+ const key='persona-studio-duel-general-prompt-v1';
+ const prompt='Escuchá al moderador, reaccioná al chat y entretené al público.';
+ const next={schema:1,kv:{...prior.kv,[key]:prompt},assets:{...prior.assets}};
+ const updated=cloud.updateState({baseRevision:old.revision,state:next});
+ const stored=cloud.readState();
+ assert.equal(stored.revision,updated.revision);
+ assert.equal(stored.state.kv[key],prompt);
+ for(const [k,v] of Object.entries(prior.kv))assert.equal(stored.state.kv[k],v);
+ assert.deepEqual(stored.state.assets,prior.assets);
+ assert.throws(()=>cloud.updateState({baseRevision:updated.revision,
+   state:{...next,kv:{...next.kv,'clave-desconocida':'no'}}}),e=>e.status===400);
+});
