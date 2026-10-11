@@ -430,7 +430,6 @@ body.live-output #appShell .duel-broadcast{
         </details>
         <div class="field" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px"><label for="duelLimitRange">Intervenciones por tanda</label><input id="duelLimitRange" type="text" value="1-12" placeholder="1-12" inputmode="text" maxlength="5" title="Rango mínimo-máximo, por ejemplo 1-12 o 6-12" aria-label="Intervenciones por tanda: rango mínimo y máximo" style="width:88px;flex:0 0 88px;padding:8px;text-align:center"></div>
         <div class="hint">Gemini decide cuántas intervenciones necesita la historia dentro de ese rango.</div>
-        <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
 
         <section class="tt-chat-panel" id="ttChatPanel" aria-label="Chat de TikTok LIVE">
           <div class="tt-chat-head">
@@ -569,8 +568,9 @@ body.live-output #appShell .duel-broadcast{
       <div class="duel-messages" id="duelMessages" aria-live="polite"></div>
       <div class="composer">
         <div class="field" style="margin:0 0 8px"><label for="duelModeratorVoice">Voz del moderador</label><select id="duelModeratorVoice" aria-label="Elegir la voz del moderador"></select></div>
-        <textarea id="duelHuman" rows="2" maxlength="1000" placeholder="Escribí algo como moderador o susurrá a las IA…"></textarea>
-        <div class="button-row" style="margin-top:8px"><button type="button" id="duelModeratorSend" class="btn primary small">🎙 Intervenir con voz</button><button type="button" id="duelModeratorWhisper" class="btn small ghost">🤫 Susurrar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
+        <textarea id="duelHuman" rows="2" maxlength="1000" aria-describedby="duelKeyboardHint" placeholder="Escribí algo como moderador o susurrá a las IA…"></textarea>
+        <div id="duelKeyboardHint" class="hint">Enter: intervenir con voz · Shift+Enter: nueva línea · Susurrar vacío: comenzar / continuar.</div>
+        <div class="button-row" style="margin-top:8px"><button type="button" id="duelModeratorSend" class="btn primary small">🎙 Intervenir con voz</button><button type="button" id="duelModeratorWhisper" class="btn small ghost" title="Susurrar una indicación privada o comenzar/continuar si el cuadro está vacío">🤫 Susurrar</button><button type="button" id="duelStop" class="btn small danger">■ Detener</button></div>
         <button type="button" id="duelNext" style="display:none" aria-hidden="true" tabindex="-1">▶ Continuar</button>
         <div id="duelStatus" class="hint" style="margin-top:8px" aria-live="polite">Elegí dos personajes y una temática.</div>
       </div>
@@ -1121,11 +1121,28 @@ function submitModeratorText(text,whisper=false,sourceInput=null){
 }
 function sendModerator(whisper=false){
  const input=$('duelHuman');
+ // El mismo botón sirve para susurrar o continuar si no escribiste nada.
+ if(whisper&&!input.value.trim()){
+  if(D.running){
+   if(D.stopAfterCurrent)return toast('El debate se está deteniendo. Volvé a pulsar Susurrar cuando termine.');
+   D.autoContinueRequested=true;
+   return toast('El debate continuará con otra tanda cuando termine la actual.');
+  }
+  runDuelBatch(true);
+  return;
+ }
  const result=submitModeratorText(input.value,whisper,input);
  if(!result.ok)toast(result.error,true);
 }
 $('duelModeratorSend').onclick=()=>sendModerator(false);
 $('duelModeratorWhisper').onclick=()=>sendModerator(true);
+// Enter: intervenir con voz. Shift+Enter: salto de línea.
+$('duelHuman').onkeydown=e=>{
+ if(e.key!=='Enter'||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||
+    e.isComposing||e.keyCode===229)return;
+ e.preventDefault();
+ if(!e.repeat)sendModerator(false);
+};
 // Un mensaje de un espectador seleccionado por el humano entra como voz del moderador.
 // No se reproduce automáticamente el chat sin una selección.
 window.addEventListener('persona:tiktok-comment-selected',event=>{
@@ -1186,17 +1203,17 @@ async function playModeratorsStandalone(){
  if(D.running||!D.moderatorQueue.length)return;
  stopAll();D.running=true;D.moderatorStandalone=true;
  const token=++D.generation;$('appShell').dataset.duelMode='true';
- $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;
+ $('duelNext').disabled=true;
  try{await drainModeratorQueue(duelActive(),token)}
  finally{if(token===D.generation){
   D.running=false;D.moderatorStandalone=false;D.speech=null;
-  $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;
+  $('duelNext').disabled=false;
   const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · Tu turno');
  }}
 }
 
 function setDuelStopButtons(waiting){
- for(const id of ['duelStop','duelStopFromSettings'])$(id).disabled=Boolean(waiting);
+ for(const id of ['duelStop'])$(id).disabled=Boolean(waiting);
 }
 function stopDuelImmediately(){
  D.generation++;D.running=false;D.stopAfterCurrent=false;D.autoContinueRequested=false;
@@ -1208,7 +1225,7 @@ function stopDuelImmediately(){
  if('speechSynthesis'in window)try{speechSynthesis.cancel()}catch{}
  D.speech=null;$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
  for(const side of ['left','right']){$('duel'+(side==='left'?'Left':'Right')+'Box').classList.remove('is-speaking');$('duel'+(side==='left'?'Left':'Right')+'Caption').textContent=''}
- $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
+ $('duelNext').disabled=false;setDuelStopButtons(false);
  const t=duelActive();if(t)duelStatus(duelCount(t)+' intervenciones · En pausa');
 }
 function stopDuel(){
@@ -1225,8 +1242,8 @@ function stopDuel(){
  // no hay una intervención audible que debamos dejar terminar.
  stopDuelImmediately();
 }
-$('duelStop').onclick=stopDuel;$('duelStopFromSettings').onclick=stopDuel;
-$('duelNext').onclick=runDuelBatch;$('duelStartFromSettings').onclick=runDuelBatch;
+$('duelStop').onclick=stopDuel;
+$('duelNext').onclick=runDuelBatch;
 function duelText(t,side){
  const nextId=t[side];
  // Esta vista de contexto, igual que la generación por tandas, no convierte susurros en diálogo.
@@ -1521,7 +1538,7 @@ async function runDuelBatch(skipModeratorDraft=false){
  D.running=true;D.stopAfterCurrent=false;D.restartForModerator=false;const token=++D.generation;
  $('appShell').dataset.duelMode='true';
  $('mobileChat').textContent='📜 Historial';
- $('duelNext').disabled=true;$('duelStartFromSettings').disabled=true;setDuelStopButtons(false);
+ $('duelNext').disabled=true;setDuelStopButtons(false);
  if(window.matchMedia('(max-width:960px)').matches)switchMobilePane('live');
  let batchFailed=false;
  try{
@@ -1606,7 +1623,7 @@ async function runDuelBatch(skipModeratorDraft=false){
    D.stopAfterCurrent=false;D.autoContinueRequested=false;D.restartForModerator=false;D.generatingBatch=false;D.moderatorBusy=false;
    for(const controller of D.audioControllers)controller.abort();
    D.audioControllers.clear();D.audioJobs.clear();D.audioInFlight=0;D.batchSamples=null;
-   $('duelNext').disabled=false;$('duelStartFromSettings').disabled=false;setDuelStopButtons(false);
+   $('duelNext').disabled=false;setDuelStopButtons(false);
    if(pausing){
     if(Array.isArray(t.pending)&&!t.pending.length){
      t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;
