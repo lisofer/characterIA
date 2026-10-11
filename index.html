@@ -1099,6 +1099,16 @@ function addModeratorEntry(t,entry){
  if(entry.kind==='spoken')D.moderatorQueue.push(entry);
  saveDuel();
 }
+// Audio del moderador: precalentar mientras termina de hablar quien tiene la palabra.
+function prewarmModeratorIntervention(entry){
+ if(entry.kind!=='spoken'||!D.running||!D.speech?.ready||D.audioJobs.has(entry.id))return;
+ const t=duelActive();
+ for(const future of (t?.pending||[]).slice(D.speech?.side==='moderator'?0:1)){
+  const job=D.audioJobs.get(future.id);
+  job?.controller?.abort();D.audioJobs.delete(future.id);
+ }
+ D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,D.generation)});
+}
 function submitModeratorText(text,whisper=false,sourceInput=null){
  const t=duelActive();if(!t)return {ok:false,error:'Elegí una temática antes de enviar comentarios.'};
  const value=String(text||'').trim();
@@ -1109,6 +1119,7 @@ function submitModeratorText(text,whisper=false,sourceInput=null){
  if(sourceInput)sourceInput.value='';
  addModeratorEntry(t,entry);
  if(Array.isArray(t.pending)&&t.pending.length)t.needsReplan=true;
+ prewarmModeratorIntervention(entry);
  D.contextSerial++;
  cancelEarlyDuelBatch(D.nextPrepared);D.nextPrepared=null;
  if(D.running&&D.generatingBatch){D.restartForModerator=true;D.abort?.abort();cancelEarlyDuelBatch(D.activePrepared)}
@@ -1189,7 +1200,7 @@ async function drainModeratorQueue(t,token){
  while(D.moderatorQueue.length&&D.running&&!D.stopAfterCurrent&&D.generation===token){
   const entry=D.moderatorQueue.shift();if(entry?.kind!=='spoken')continue;
   D.moderatorBusy=true;
-  D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,token)});
+  if(!D.audioJobs.has(entry.id))D.audioJobs.set(entry.id,{promise:prepareModeratorAudio(entry,token)});
   duelStatus('Moderador · voz de '+duelName(entry.profileId));
   let completed=false;
   try{
@@ -1558,8 +1569,10 @@ function prepareNextDuelBatch(t,interrupted=false){
  if(!t||!D.running||D.generatingBatch||D.stopAfterCurrent)return;
  const current=D.speech?.ready&&D.speech.side!=='moderator'?t.pending?.[0]:null;
  if(interrupted&&!current)return;
- if(!interrupted&&(!D.autoContinueRequested||t.pending?.length!==1||!current))return;
- const hide=new Set((t.pending||[]).filter(m=>m!==current).map(m=>m.id));
+ if(!interrupted&&(!D.autoContinueRequested||!t.pending?.length))return;
+ // La continuación normal usa la tanda ya planificada; una intervención nueva
+ // elimina las líneas aún no pronunciadas para no inventar hechos posteriores.
+ const hide=new Set(interrupted?(t.pending||[]).filter(m=>m!==current).map(m=>m.id):[]);
  const hypothetical={...t,messages:t.messages.filter(m=>!hide.has(m.id)),pending:[]};
  const people={left:t.left,right:t.right};if(!people.left||!people.right||people.left===people.right)return;
  cancelEarlyDuelBatch(D.nextPrepared);
@@ -1661,8 +1674,11 @@ async function runDuelBatch(skipModeratorDraft=false){
    }
    const entry=t.pending[0];
    duelStatus('Hablando: '+duelName(entry.profileId)+' · '+t.pending.length+' por reproducir');
-   D.onDuelSpeechStart=D.autoContinueRequested&&t.pending.length===1?
-    ()=>{if(token===D.generation&&D.running)prepareNextDuelBatch(t,false)}:null;
+   if(D.autoContinueRequested&&!t.needsReplan&&!D.nextPrepared)prepareNextDuelBatch(t,false);
+   D.onDuelSpeechStart=()=>{if(token===D.generation&&D.running){
+    if(t.needsReplan)prepareNextDuelBatch(t,true);
+    else if(D.autoContinueRequested&&!D.nextPrepared)prepareNextDuelBatch(t,false);
+   }};
    await duelVoice(t,entry.side,entry.text,token,entry);
    D.onDuelSpeechStart=null;
    if(token!==D.generation||!D.running)break;
