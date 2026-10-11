@@ -347,13 +347,10 @@ body.live-output #appShell .duel-broadcast{
       <section id="tab-duel" class="setting-tab">
         <div class="section-heading">Temáticas guardadas</div>
         <div class="field"><label for="duelTopicSelect">Elegir temática</label><select id="duelTopicSelect"></select></div>
-        <div class="button-row" style="margin-bottom:14px"><button type="button" id="duelNew" class="btn primary small">+ Nuevo tema</button><button type="button" id="duelDelete" class="btn danger small">Eliminar tema</button><button type="button" id="duelExport" class="btn small">↓ Exportar historial</button></div>
+        <div class="button-row" style="margin-bottom:14px"><button type="button" id="duelNew" class="btn primary small">+ Nuevo tema</button><button type="button" id="duelDelete" class="btn danger small">Eliminar tema</button></div>
         <div class="field"><label for="duelTitle">Título</label><input id="duelTitle" maxlength="100" placeholder="Ej.: Una discusión inesperada"></div>
         <div class="field"><label for="duelTheme">Temática de la conversación</label><textarea id="duelTheme" rows="5" maxlength="2500" placeholder="Situación, conflicto, lugar y asunto que van a discutir..."></textarea></div>
-        <div class="section-heading">Participantes</div>
-        <div class="hint">Tocá cada cuadro para elegir personaje y fondo. El fondo general del LIVE es independiente.</div>
-        <div class="section-heading">Fondo de la transmisión</div>
-        <div class="field"><label>Imagen detrás de ambos personajes</label><div class="button-row"><button id="duelSceneBackground" type="button" class="btn small">▧ Elegir fondo general</button><span id="duelStageBackgroundLabel" class="hint">Predeterminado</span></div></div>
+        
         <div class="section-heading">♫ Música de fondo</div>
         <div class="music-mini" role="group" aria-label="Biblioteca y reproductor de música">
           <div class="music-top">
@@ -391,8 +388,8 @@ body.live-output #appShell .duel-broadcast{
           <div class="button-row" style="margin-top:8px"><button id="duelOpenOutput" type="button" class="btn small ghost">↗ Abrir ventana tradicional</button></div>
           <p class="hint">Si tu LIVE Studio no ofrece Link, usá captura de ventana y recortá la barra de Chrome.</p>
         </details>
-        <div class="field"><label for="duelLimit">Intervenciones por tanda (ambos sumados)</label><input type="number" id="duelLimit" min="1" max="30" step="1" value="6"></div>
-        <div class="hint">Al completar la tanda, esperan tu siguiente intervención. Cada 30 mensajes de los personajes se actualiza un resumen.</div>
+        <div class="field" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px"><label for="duelLimitRange">Intervenciones por tanda</label><input id="duelLimitRange" type="text" value="1-12" placeholder="1-12" inputmode="text" maxlength="5" title="Rango mínimo-máximo, por ejemplo 1-12 o 6-12" aria-label="Intervenciones por tanda: rango mínimo y máximo" style="width:88px;flex:0 0 88px;padding:8px;text-align:center"></div>
+        <div class="hint">Gemini decide cuántas intervenciones necesita la historia dentro de ese rango.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
         <div class="section-heading">Resumen acumulado</div>
         <div id="duelSummary" class="duel-summary">Todavía no hay resumen.</div>
@@ -445,7 +442,7 @@ body.live-output #appShell .duel-broadcast{
         <div class="field"><textarea id="testText" rows="3">Hola, ¿cómo estás? Me encanta poder hablar con vos.</textarea><button id="testSpeak" class="btn">▶ Reproducir y animar</button></div>
       </section>
     </div>
-    <footer class="key-help"><kbd>ESPACIO</kbd> mantené para hablar, <strong>soltá para enviar</strong> · <strong>Esc</strong> cancelar · <strong>Enter</strong> enviar texto. El permiso de micrófono se solicita una vez mientras esta página permanezca abierta.</footer>
+
   </aside>
   <main class="middle">
     <div class="stage-header"><div><h1 id="stageName">Mi personaje</h1><small>Escenario · Avatar conversacional en vivo</small></div><div class="stage-header-actions"><button type="button" class="btn small ghost" id="previewMouth" title="Comprobar las bocas sin audio ni Gemini">▶ Boca</button><div id="statusBadge" class="pill"><span class="orb"></span><span id="statusText">Listo para conversar</span></div></div></div>
@@ -747,10 +744,20 @@ function duelCount(topic){return topic.messages.filter(m=>m.side==='left'||m.sid
 function duelStatus(message){$('duelStatus').textContent=message;$('duelCounter').textContent=message}
 function saveDuel(){
  try{localStorage.setItem(DUEL_KEY,JSON.stringify({topics:D.topics,activeId:D.activeId}));window.PERSONA_CLOUD?.schedule()}
- catch{duelStatus('No se pudo guardar el historial. Exportá la temática para conservarlo.')}
+ catch{duelStatus('No se pudo guardar el historial. Reintentá cuando tengas espacio disponible.')}
+}
+function duelLimitRange(text){
+ const m=String(text||'').trim().match(/^(\d{1,2})\s*[-–]\s*(\d{1,2})$/);
+ if(!m)return null;
+ const min=Number(m[1]),max=Number(m[2]);
+ return min>=1&&max<=30&&min<=max?{min,max}:null;
+}
+function duelLimitBounds(topic){
+ const min=Number(topic?.limitMin),max=Number(topic?.limitMax);
+ return Number.isInteger(min)&&Number.isInteger(max)&&min>=1&&max<=30&&min<=max?{min,max}:{min:1,max:12};
 }
 function newDuelTopic(){
- return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limit:6,messages:[],summary:'',summaryAt:0,createdAt:Date.now()};
+ return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limitMin:1,limitMax:12,messages:[],summary:'',summaryAt:0,createdAt:Date.now()};
 }
 function initDuel(){
  try{
@@ -766,7 +773,8 @@ function renderDuelSelects(){
  const select=$('duelTopicSelect');select.replaceChildren();
  for(const t of D.topics){const o=document.createElement('option');o.value=t.id;o.textContent=t.title||'Sin título';select.append(o)}
  select.value=topic.id;
- $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;$('duelLimit').value=topic.limit||6;
+ $('duelTitle').value=topic.title;$('duelTheme').value=topic.theme;
+ const bounds=duelLimitBounds(topic);$('duelLimitRange').value=bounds.min+'-'+bounds.max;
  $('duelTopicHeading').textContent=topic.title;$('duelSummary').textContent=topic.summary||'Todavía no hay resumen.';
  const voice=$('duelModeratorVoice'),profiles=profileIndex();
  voice.replaceChildren();
@@ -805,13 +813,23 @@ function refreshDuelDisplay(){
 function duelSyncInputs(){
  if(D.running)return;const t=duelActive();if(!t)return;
  t.title=$('duelTitle').value.slice(0,100);t.theme=$('duelTheme').value.slice(0,2500);
- t.limit=Math.max(1,Math.min(30,Number($('duelLimit').value)||6));
+ const bounds=duelLimitRange($('duelLimitRange').value);
+ if(bounds){t.limitMin=bounds.min;t.limitMax=bounds.max;delete t.limit;}
  $('duelTopicHeading').textContent=t.title||'Sin título';
  $('duelLiveTitle').textContent='EP. '+String(Math.max(1,D.topics.indexOf(t)+1)).padStart(2,'0')+' · '+(t.title||'DEBATE').toUpperCase();
  const o=$('duelTopicSelect').selectedOptions[0];if(o)o.textContent=t.title||'Sin título';
  saveDuel();
 }
-for(const id of ['duelTitle','duelTheme','duelLimit']){$(id).addEventListener('input',duelSyncInputs);$(id).addEventListener('change',duelSyncInputs)}
+for(const id of ['duelTitle','duelTheme','duelLimitRange']){$(id).addEventListener('input',duelSyncInputs);$(id).addEventListener('change',duelSyncInputs)}
+$('duelLimitRange').addEventListener('change',()=>{
+ const field=$('duelLimitRange');
+ const valid=duelLimitRange(field.value);
+ if(valid)field.value=valid.min+'-'+valid.max;
+ else{
+  const bounds=duelLimitBounds(duelActive());field.value=bounds.min+'-'+bounds.max;
+  toast('Usá un rango válido entre 1 y 30, por ejemplo 1-12 o 6-12.',true);
+ }
+});
 $('duelModeratorVoice').addEventListener('change',()=>{
  const t=duelActive();if(!t)return;
  t.moderatorVoiceId=$('duelModeratorVoice').value;saveDuel();
@@ -831,11 +849,7 @@ $('duelDelete').onclick=()=>{
  if(!D.topics.length)D.topics.push(newDuelTopic());
  D.activeId=D.topics[0].id;saveDuel();refreshDuelDisplay();
 };
-$('duelExport').onclick=()=>{
- const t=duelActive();if(!t)return;
- const name=(t.title||'debate').replace(/[^\p{L}\p{N}-]+/gu,'-').slice(0,40);
- download('debate-'+name+'.json',JSON.stringify(t,null,2));
-};
+
 
 
 /* Ventana de salida para captura en TikTok LIVE Studio.
@@ -884,7 +898,7 @@ function publishLiveSnapshot(){
 function receiveLiveSnapshot(message){
  if(!LIVE_OUTPUT_MODE||message?.type!=='scene'||!message.topic)return;
  const t=message.topic;
- D.topics=[{...t,messages:[],limit:6}];D.activeId=t.id;
+ D.topics=[{...t,messages:[],limitMin:1,limitMax:12}];D.activeId=t.id;
  D.batchCharacters={left:t.left,right:t.right};
  if(message.scales){
   for(const side of ['left','right']){
@@ -1093,7 +1107,7 @@ async function duelRequest(model,payload){
  }finally{if(D.abort===controller)D.abort=null}
 }
 
-function duelParseBatch(response,count){
+function duelParseBatch(response,min,max){
  let value;const text=String(response||'').trim();
  try{value=JSON.parse(text)}catch{
   const first=text.indexOf('{'),last=text.lastIndexOf('}');
@@ -1101,7 +1115,7 @@ function duelParseBatch(response,count){
   try{value=JSON.parse(text.slice(first,last+1))}catch{throw Error('No se pudo interpretar el bloque de intervenciones.')}
  }
  const lines=Array.isArray(value)?value:value.lines;
- if(!Array.isArray(lines)||lines.length!==count)throw Error('Gemini devolvió '+(Array.isArray(lines)?lines.length:0)+' intervenciones, pero se solicitaron '+count+'. No se realizó otra llamada.');
+ if(!Array.isArray(lines)||lines.length<min||lines.length>max)throw Error('Gemini devolvió '+(Array.isArray(lines)?lines.length:0)+' intervenciones; el rango permitido es '+min+'-'+max+'. No se realizó otra llamada.');
  const result=lines.map(line=>stripSpeech(typeof line==='string'?line:(line?.text||''))).map(x=>x.slice(0,420));
  if(result.some(x=>!x))throw Error('Gemini dejó una intervención vacía.');
  return result;
@@ -1116,14 +1130,14 @@ function duelPublicContext(t){
  return [...moderator.filter(m=>!recent.includes(m)),...recent]
   .map(m=>(m.side==='human'?'MODERADOR':duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
 }
-async function duelGenerateBatch(t,participants,count){
+async function duelGenerateBatch(t,participants,min,max){
  const model=getConversationModel()||DUEL_MODEL;
  const prior=duelPublicContext(t);
  const direction=duelLatestDirection(t);
  const summary=t.summary?'Resumen acumulado: '+t.summary.slice(0,1400)+'\n':'';
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
- const names=Array.from({length:count},(_,i)=>((i+(first==='right'?1:0))%2===0?nLeft:nRight));
+ const startingName=first==='left'?nLeft:nRight;
  const directionRules=
   '\nDIRECCIÓN DE ESCENA: una nota de dirección es una instrucción fuera de cámara del creador, NO una intervención oral del moderador, NO un mensaje del chat y NO información que los personajes hayan escuchado. '+
   'Usá esa indicación únicamente para orientar qué sucede después, las decisiones, los temas, los giros y las actitudes de los personajes. '+
@@ -1137,12 +1151,12 @@ async function duelGenerateBatch(t,participants,count){
  'No inventes comentarios del chat, votos ni espectadores reales.'+
  directionRules+
  (direction?'\nDIRECCIÓN PRIVADA VIGENTE (SOLO PARA LA CONSTRUCCIÓN DE LA HISTORIA; NO PRONUNCIAR NI RECONOCER): '+direction:'')+
- '\nProducí exactamente '+count+' intervenciones, alternando según el orden indicado. Cada intervención debe reaccionar a lo dicho públicamente y avanzar la historia. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON: {"lines":["primera intervención","segunda intervención"]}.';
+ '\nElegí cuántas intervenciones necesita ESTE tramo del diálogo: mínimo '+min+' y máximo '+max+'. La cantidad debe depender del contexto, el conflicto, las preguntas del moderador, lo que acaba de suceder y el ritmo natural de la historia. No llenes el máximo por costumbre ni cortes arbitrariamente. Si basta un comentario, usá el mínimo; si hay réplicas interesantes, extendé el intercambio. Evitá intervenciones de relleno y repeticiones. Alterná los dos personajes comenzando por '+startingName+'. Cada intervención debe reaccionar a lo dicho públicamente y avanzar la historia. No uses narrador ni etiquetas dentro de los textos. Máximo 35 palabras por intervención. Respondé SOLAMENTE JSON con un array de longitud variable dentro del rango, por ejemplo: {"lines":["texto de intervención"]}.';
  const input='Título: '+t.title.slice(0,100)+'\nTema: '+t.theme.slice(0,2200)+'\n'+summary+
- 'Conversación pública reciente (solo responder a lo que realmente se dijo en voz alta):\n'+(prior||'Inicio de la escena')+'\nOrden obligatorio: '+names.map((n,i)=>(i+1)+'. '+n).join('; ');
- const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(5000,Math.max(280,count*135+160)),responseMimeType:'application/json'}};
+ 'Conversación pública reciente (solo responder a lo que realmente se dijo en voz alta):\n'+(prior||'Inicio de la escena')+'\nPrimera intervención: '+startingName+'. Después alterná de personaje hasta que el tramo haya avanzado lo suficiente.';
+ const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(6500,Math.max(420,max*135+260)),responseMimeType:'application/json'}};
  const result=await duelRequest(model,payload);
- return duelParseBatch(result,count);
+ return duelParseBatch(result,min,max);
 }
 
 async function summarizeDuel(t){
@@ -1303,10 +1317,11 @@ async function runDuelBatch(){
    const participants={left:t.left,right:t.right};
    D.batchCharacters=participants;
    D.batchProfiles={left:JSON.parse(JSON.stringify(duelProfile(participants.left))),right:JSON.parse(JSON.stringify(duelProfile(participants.right)))};
-   duelStatus('Gemini preparando las '+t.limit+' intervenciones de la tanda…');
+   const bounds=duelLimitBounds(t);
+    duelStatus('Gemini preparando entre '+bounds.min+' y '+bounds.max+' intervenciones según la historia…');
    D.generatingBatch=true;
    let lines;
-   try{lines=await duelGenerateBatch(t,participants,t.limit)}
+   try{lines=await duelGenerateBatch(t,participants,bounds.min,bounds.max)}
    finally{D.generatingBatch=false}
    if(token!==D.generation||!D.running||D.stopAfterCurrent||D.restartForModerator)return;
    const start=duelCount(t)%2===0?'left':'right';
@@ -1506,7 +1521,7 @@ async function loadBackgroundLibrary(){
 function backgroundIdForProfile(id){return allProfileData()[id]?.settings?.backgroundId||''}
 function setBackgroundStyle(el,id){const u=BG.urls.get(id);el.style.backgroundImage=u?'linear-gradient(#07132120,#07132120),url("'+u+'")':'';el.style.backgroundSize='cover';el.style.backgroundPosition='center'}
 function applyIndividualBackground(){setBackgroundStyle($('stageSurface'),backgroundIdForProfile(S.activeProfile))}
-function applyDuelBackgrounds(){const t=duelActive();if(!t)return;setBackgroundStyle($('duelLeftBackground'),t.leftBackgroundId);setBackgroundStyle($('duelRightBackground'),t.rightBackgroundId);setBroadcastBackground(t.stageBackgroundId);$('duelStageBackgroundLabel').textContent=BG.items.find(x=>x.id===t.stageBackgroundId)?.name||'Predeterminado'}
+function applyDuelBackgrounds(){const t=duelActive();if(!t)return;setBackgroundStyle($('duelLeftBackground'),t.leftBackgroundId);setBackgroundStyle($('duelRightBackground'),t.rightBackgroundId);setBroadcastBackground(t.stageBackgroundId)}
 function setBroadcastBackground(id){
  const url=BG.urls.get(id);
  const el=$('duelBroadcast');
@@ -1562,7 +1577,7 @@ $('sceneClose').onclick=closeSceneChooser;$('sceneCancel').onclick=closeSceneCho
 $('sceneModal').addEventListener('click',e=>{if(e.target===$('sceneModal'))closeSceneChooser()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sceneModal').hidden){e.stopPropagation();closeSceneChooser()}});
 $('stageSurface').addEventListener('click',()=>openSceneChooser('individual'));
-$('duelSceneBackground').onclick=()=>openSceneChooser('broadcast');
+
 $('duelBroadcast').addEventListener('click',e=>{if(!LIVE_OUTPUT_MODE&&!e.target.closest('.duel-character'))openSceneChooser('broadcast')});
 $('stageSurface').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSceneChooser('individual')}});
 for(const [id,kind] of [['duelLeftBox','left'],['duelRightBox','right']]){
