@@ -116,6 +116,10 @@
 .duel-line.human{border-left:3px solid #f1c387;background:#293126}
 .duel-line.whisper{border-left:3px solid #ab96d2;background:#1c192e;color:#d9ceec}
 .duel-line.whisper strong{color:#c9b5f7}
+.duel-topic-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.duel-topic-actions .btn{min-width:0;white-space:normal;text-align:center;font-size:10px;padding:6px 3px;line-height:1.25}
+.duel-line.memory{border-left:3px solid #93d7db;background:#15272d;color:#d0e7e8}
+.duel-line.memory strong{color:#97e5df}
 .duel-line strong{display:block;margin-bottom:3px;color:#d4f4e9}
 .duel-summary{border:1px solid #304459;border-radius:12px;background:#132232;padding:11px;font-size:12px;white-space:pre-wrap;min-height:42px;overflow-wrap:anywhere}
 .shell[data-duel-mode="true"] .middle .stage-body,.shell[data-duel-mode="true"] .middle .stage-foot{display:none}
@@ -347,7 +351,7 @@ body.live-output #appShell .duel-broadcast{
       <section id="tab-duel" class="setting-tab">
         <div class="section-heading">Temáticas guardadas</div>
         <div class="field"><label for="duelTopicSelect">Elegir temática</label><select id="duelTopicSelect"></select></div>
-        <div class="button-row" style="margin-bottom:14px"><button type="button" id="duelNew" class="btn primary small">+ Nuevo tema</button><button type="button" id="duelDelete" class="btn danger small">Eliminar tema</button></div>
+        <div class="button-row duel-topic-actions" style="margin-bottom:10px"><button type="button" id="duelNew" class="btn primary small">+ Nuevo tema</button><button type="button" id="duelReset" class="btn small ghost" title="Limpiar la conversación y conservar la temática">↻ Reiniciar tema</button><button type="button" id="duelDelete" class="btn danger small">Eliminar tema</button></div>
         <div class="field"><label for="duelTitle">Título</label><input id="duelTitle" maxlength="100" placeholder="Ej.: Una discusión inesperada"></div>
         <div class="field"><label for="duelTheme">Temática de la conversación</label><textarea id="duelTheme" rows="5" maxlength="2500" placeholder="Situación, conflicto, lugar y asunto que van a discutir..."></textarea></div>
         
@@ -391,7 +395,7 @@ body.live-output #appShell .duel-broadcast{
         <div class="field" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px"><label for="duelLimitRange">Intervenciones por tanda</label><input id="duelLimitRange" type="text" value="1-12" placeholder="1-12" inputmode="text" maxlength="5" title="Rango mínimo-máximo, por ejemplo 1-12 o 6-12" aria-label="Intervenciones por tanda: rango mínimo y máximo" style="width:88px;flex:0 0 88px;padding:8px;text-align:center"></div>
         <div class="hint">Gemini decide cuántas intervenciones necesita la historia dentro de ese rango.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
-        <div class="section-heading">Resumen acumulado</div>
+        <div class="section-heading">Memoria de la historia · resumen cada 60 mensajes</div>
         <div id="duelSummary" class="duel-summary">Todavía no hay resumen.</div>
       </section>
       <section id="tab-brain" class="setting-tab active">
@@ -740,7 +744,33 @@ const duelActive=()=>D.topics.find(t=>t.id===D.activeId)||null;
 const duelProfile=id=>allProfileData()[id]?.settings||{};
 const duelName=id=>profileIndex().find(p=>p.id===id)?.name||'Personaje';
 const duelMessageLabel=m=>m.side==='human'?(m.kind==='whisper'?'Susurro · privado':'Moderador'):duelName(m.profileId);
-function duelCount(topic){return topic.messages.filter(m=>m.side==='left'||m.side==='right').length}
+function duelCount(topic){return (Number(topic.compactedTurns)||0)+topic.messages.filter(m=>m.side==='left'||m.side==='right').length}
+function duelMemoryMigrate(t){
+ if(!Array.isArray(t.messages))t.messages=[];
+ if(!Number.isInteger(t.compactedTurns)||t.compactedTurns<0)t.compactedTurns=0;
+ if(!Number.isInteger(t.compactedPublicCount)||t.compactedPublicCount<0)t.compactedPublicCount=0;
+ if(!Number.isInteger(t.summaryPublicAt)||t.summaryPublicAt<0){
+  // Las temáticas anteriores contaban resúmenes cada 30 turnos de personajes.
+  // Convertimos ese punto a mensajes públicos sin volver a resumir lo ya cubierto.
+  const old=Number(t.summaryAt)||0;let chars=0,publicCount=0;
+  for(const m of t.messages){
+   if(m.kind==='whisper')continue;
+   publicCount++;
+   if(m.side==='left'||m.side==='right')chars++;
+   if(old>0&&chars>=old)break;
+  }
+  t.summaryPublicAt=old>0?publicCount:0;
+ }
+}
+function duelCompletedPublic(t){
+ const pending=new Set((t.pending||[]).map(x=>x.id));
+ const moderators=new Set(D.moderatorQueue.map(x=>x.id));
+ return t.messages.filter(m=>m.kind!=='whisper'&&!pending.has(m.id)&&!moderators.has(m.id));
+}
+function duelSummaryAvailable(t){
+ duelMemoryMigrate(t);
+ return Math.max(0,(Number(t.compactedPublicCount)||0)+duelCompletedPublic(t).length-t.summaryPublicAt);
+}
 function duelStatus(message){$('duelStatus').textContent=message;$('duelCounter').textContent=message}
 function saveDuel(){
  try{localStorage.setItem(DUEL_KEY,JSON.stringify({topics:D.topics,activeId:D.activeId}));window.PERSONA_CLOUD?.schedule()}
@@ -757,12 +787,12 @@ function duelLimitBounds(topic){
  return Number.isInteger(min)&&Number.isInteger(max)&&min>=1&&max<=30&&min<=max?{min,max}:{min:1,max:12};
 }
 function newDuelTopic(){
- return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limitMin:1,limitMax:12,messages:[],summary:'',summaryAt:0,createdAt:Date.now()};
+ return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limitMin:1,limitMax:12,messages:[],summary:'',summaryAt:0,summaryPublicAt:0,compactedTurns:0,compactedPublicCount:0,memoryVersion:0,createdAt:Date.now()};
 }
 function initDuel(){
  try{
   const stored=JSON.parse(localStorage.getItem(DUEL_KEY)||'null');
-  if(stored&&Array.isArray(stored.topics)){D.topics=stored.topics;D.activeId=stored.activeId}
+  if(stored&&Array.isArray(stored.topics)){D.topics=stored.topics;D.activeId=stored.activeId;for(const t of D.topics)duelMemoryMigrate(t)}
  }catch{}
  if(!D.topics.length){const t=newDuelTopic();D.topics=[t];D.activeId=t.id;saveDuel()}
  if(!duelActive())D.activeId=D.topics[0].id;
@@ -787,6 +817,12 @@ function renderDuelSelects(){
 function renderDuelTranscript(){
  const topic=duelActive(),container=$('duelMessages');container.replaceChildren();
  if(!topic)return;
+ if(topic.summary){
+  const memory=document.createElement('div');memory.className='duel-line memory';
+  const heading=document.createElement('strong');heading.textContent='Memoria acumulada de la historia';
+  const content=document.createElement('span');content.textContent=topic.summary;
+  memory.append(heading,content);container.append(memory);
+ }
  for(const message of topic.messages){
   const line=document.createElement('div');line.className='duel-line '+(message.kind==='whisper'?'whisper':(message.side||'human'));
   const who=document.createElement('strong');who.textContent=duelMessageLabel(message);
@@ -849,8 +885,20 @@ $('duelDelete').onclick=()=>{
  if(!D.topics.length)D.topics.push(newDuelTopic());
  D.activeId=D.topics[0].id;saveDuel();refreshDuelDisplay();
 };
-
-
+$('duelReset').onclick=()=>{
+ const t=duelActive();if(!t)return;
+ if(!confirm('¿Reiniciar esta temática? Se borrarán los mensajes, las intervenciones pendientes y la memoria anterior, pero se conservarán la historia, el título y los participantes.'))return;
+ if(D.running)stopDuelImmediately();
+ D.moderatorQueue.length=0;D.batchCharacters=null;D.batchProfiles=null;
+ for(const key of ['pending','pendingConfig','pendingCharacters','needsReplan'])delete t[key];
+ t.messages=[];t.summary='';t.summaryAt=0;t.summaryPublicAt=0;
+ t.compactedTurns=0;t.compactedPublicCount=0;t.memoryVersion=(Number(t.memoryVersion)||0)+1;
+ $('duelHuman').value='';
+ $('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent='';
+ for(const side of ['Left','Right'])$('duel'+side+'Caption').textContent='';
+ saveDuel();refreshDuelDisplay();
+ duelStatus('Tema reiniciado · Historia y participantes conservados.');
+};
 
 /* Ventana de salida para captura en TikTok LIVE Studio.
    Usa BroadcastChannel ENTRE VENTANAS del mismo origen y navegador.
@@ -1030,6 +1078,7 @@ async function drainModeratorQueue(t,token){
   try{
    await duelVoice(t,'moderator',entry.text,token,entry);
    completed=D.generation===token&&D.running;
+   if(completed)queueDuelSummary(t);
   }catch(e){if(D.generation===token&&D.running)toast('Falló la voz del moderador: '+e.message,true)}
   finally{
    // Si se canceló antes de comenzar a hablar, conservar el texto para el próximo intento.
@@ -1087,7 +1136,7 @@ function duelText(t,side){
  const nextId=t[side];
  // Esta vista de contexto, igual que la generación por tandas, no convierte susurros en diálogo.
  const recent=duelPublicContext(t);
- const summary=t.summary?'Resumen anterior: '+t.summary.slice(0,1400)+'\n':'';
+ const summary=t.summary?'Memoria anterior de la historia: '+t.summary.slice(0,2300)+'\n':'';
  return 'TEMA: '+t.title.slice(0,100)+'\nSITUACIÓN: '+t.theme.slice(0,1800)+'\n'+summary+
   'Personaje a la izquierda: '+duelName(t.left)+'\nPersonaje a la derecha: '+duelName(t.right)+
   '\nINTERCAMBIO PÚBLICO RECIENTE:\n'+(recent||'Todavía no hablaron.')+
@@ -1126,7 +1175,7 @@ function duelLatestDirection(t){
 }
 function duelPublicContext(t){
  const spoken=t.messages.filter(m=>m.kind!=='whisper');
- const recent=spoken.slice(-12),moderator=spoken.filter(m=>m.side==='human').slice(-4);
+ const recent=spoken.slice(-16),moderator=spoken.filter(m=>m.side==='human').slice(-4);
  return [...moderator.filter(m=>!recent.includes(m)),...recent]
   .map(m=>(m.side==='human'?'MODERADOR':duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
 }
@@ -1134,7 +1183,7 @@ async function duelGenerateBatch(t,participants,min,max){
  const model=getConversationModel()||DUEL_MODEL;
  const prior=duelPublicContext(t);
  const direction=duelLatestDirection(t);
- const summary=t.summary?'Resumen acumulado: '+t.summary.slice(0,1400)+'\n':'';
+ const summary=t.summary?'MEMORIA DE TODA LA HISTORIA (hechos ya ocurridos, no repetirlos como noticias):\n'+t.summary.slice(0,2300)+'\n':'';
  const first=duelCount(t)%2===0?'left':'right';
  const nLeft=duelName(participants.left),nRight=duelName(participants.right);
  const startingName=first==='left'?nLeft:nRight;
@@ -1159,24 +1208,97 @@ async function duelGenerateBatch(t,participants,min,max){
  return duelParseBatch(result,min,max);
 }
 
-async function summarizeDuel(t){
- const count=duelCount(t);
- while(count-(t.summaryAt||0)>=30){
-  const target=(t.summaryAt||0)+30,segment=[];let spoken=0;
-  for(const m of t.messages){
-   if(spoken>=target)break;
-   if(m.side==='left'||m.side==='right')spoken++;
-   if(spoken>=(t.summaryAt||0)&&spoken<=target)segment.push(m);
-  }
-  const previous=t.summary?'Resumen previo:\n'+t.summary.slice(0,1500)+'\n':'';
-  const lines=segment.filter(m=>m.kind!=='whisper').map(m=>duelMessageLabel(m)+': '+m.text.slice(0,250)).join('\n');
-  const payload={contents:[{role:'user',parts:[{text:'Actualizá el resumen del diálogo público de esta historia ficticia. Conservá hechos, conflictos, decisiones y sus consecuencias observables; no menciones ni inventes indicaciones externas de producción. Máximo 190 palabras.\n'+previous+'Últimas 30 intervenciones con contexto humano:\n'+lines}]}],generationConfig:{temperature:.2,maxOutputTokens:320}};
-  try{
-   t.summary=(await duelRequest(DUEL_MODEL,payload)).slice(0,1800);
-   t.summaryAt=target;saveDuel();$('duelSummary').textContent=t.summary;
-  }catch(e){if(D.running)duelStatus('No se pudo actualizar el resumen: '+e.message);break}
- }
+// Una memoria compacta y acumulativa, escrita en segundo plano y sin intervenir
+// en D.abort: un resumen nunca frena Gemini, Fish ni la conversación en vivo.
+const DUEL_MEMORY_STEP=60,DUEL_RECENT_CONTEXT=16,duelSummaryTasks=new Map(),duelSummaryCooldown=new Map();
+function duelSummaryWindow(t){
+ duelMemoryMigrate(t);
+ const publicMessages=duelCompletedPublic(t),offset=Number(t.compactedPublicCount)||0;
+ const start=Math.max(0,t.summaryPublicAt-offset);
+ return publicMessages.slice(start,start+DUEL_MEMORY_STEP);
 }
+async function duelMemoryRequest(payload){
+ const response=await fetch('/api/gemini/stream',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({model:DUEL_MODEL,payload})
+ });
+ if(!response.ok){
+  const details=await response.json().catch(()=>({}));
+  throw Error('Gemini ('+response.status+'): '+(details.error?.message||response.statusText));
+ }
+ const text=parseSSE(await response.text()).trim();
+ if(!text)throw Error('Gemini no produjo el resumen.');
+ return text;
+}
+function duelCompactMemory(t){
+ const publicMessages=duelCompletedPublic(t);
+ const keepStart=Math.max(0,t.summaryPublicAt-(Number(t.compactedPublicCount)||0)-DUEL_RECENT_CONTEXT);
+ if(!keepStart)return;
+ const compactedSet=new Set(publicMessages.slice(0,keepStart).map(m=>m.id));
+ const keptWhisper=[...t.messages].reverse().find(m=>m.kind==='whisper');
+ let removedPublic=0,removedCharacters=0;
+ t.messages=t.messages.filter(m=>{
+  if(m.kind==='whisper')return m===keptWhisper;
+  if(!compactedSet.has(m.id))return true;
+  removedPublic++;
+  if(m.side==='left'||m.side==='right')removedCharacters++;
+  return false;
+ });
+ t.compactedPublicCount=(Number(t.compactedPublicCount)||0)+removedPublic;
+ t.compactedTurns=(Number(t.compactedTurns)||0)+removedCharacters;
+ if(t.id===D.activeId)renderDuelTranscript();
+}
+function queueDuelSummary(t){
+ if(!t||!D.topics.includes(t)||duelSummaryTasks.has(t.id)||
+    Date.now()<(duelSummaryCooldown.get(t.id)||0)||duelSummaryAvailable(t)<DUEL_MEMORY_STEP)return;
+ const segment=duelSummaryWindow(t);
+ if(segment.length<DUEL_MEMORY_STEP)return;
+ const version=t.memoryVersion||0;
+ // Se resume el bloque ya pronunciado; los turnos preparados pero no hablados
+ // jamás aparecen en el resumen.
+ const previous=String(t.summary||'').slice(0,2300);
+ const publicDialogue=segment.map(m=>duelMessageLabel(m)+': '+String(m.text||'').slice(0,350)).join('\n');
+ const input='Actualizá la MEMORIA ACUMULADA de esta historia en un LIVE ficticio. '+
+  'El resumen previo es lo que pasó antes, y el nuevo bloque continúa esos hechos. '+
+  'En español, máximo 250 palabras. Conservá nombres, relaciones entre los personajes, '+
+  'hechos establecidos, conflictos y su origen, secretos revelados PÚBLICAMENTE, '+
+  'decisiones, promesas, consecuencias, cambios de opinión, tono de la relación, '+
+  'objetivos actuales, preguntas pendientes y hacia dónde se dirige la conversación. '+
+  'Orden cronológico coherente, sin repetir detalles irrelevantes ni inventar nada. '+
+  'El resumen será el contexto inicial de la siguiente conversación: debe permitir '+
+  'continuar como si los personajes recordaran toda la historia. '+
+  'No uses indicaciones de dirección privada ni las atribuyas a los participantes. '+
+  'No incluyas diálogos literalmente salvo frases muy relevantes.\n'+
+  (previous?'MEMORIA ANTERIOR:\n'+previous+'\n':'')+
+  'SIGUIENTES 60 MENSAJES PÚBLICOS:\n'+publicDialogue;
+ const payload={contents:[{role:'user',parts:[{text:input}]}],
+  generationConfig:{temperature:.15,maxOutputTokens:640}};
+ const task=(async()=>{
+  try{
+   const text=(await duelMemoryRequest(payload)).slice(0,2300);
+   if(!D.topics.includes(t)||(t.memoryVersion||0)!==version)return;
+   t.summary=text;
+   t.summaryPublicAt+=DUEL_MEMORY_STEP;
+   // Quedan las últimas 16 réplicas intactas y la memoria anterior al principio.
+   duelCompactMemory(t);
+   saveDuel();
+   if(t.id===D.activeId)$('duelSummary').textContent=t.summary;
+   duelSummaryCooldown.delete(t.id);
+  }catch(error){
+   // El LIVE no se corta si falla Gemini; reintenta en el próximo tramo.
+   duelSummaryCooldown.set(t.id,Date.now()+25000);
+   console.warn('Resumen de debate pendiente:',error);
+  }finally{
+   duelSummaryTasks.delete(t.id);
+   // Las historias importadas pueden tener varios bloques sin resumir.
+   if(duelSummaryAvailable(t)>=DUEL_MEMORY_STEP&&
+      Date.now()>=(duelSummaryCooldown.get(t.id)||0))queueDuelSummary(t);
+  }
+ })();
+ duelSummaryTasks.set(t.id,task);
+}
+function summarizeDuel(t){queueDuelSummary(t)}
+
 async function duelSample(id){
  if(!S.db)S.db=await openDB();if(!S.db)return null;
  return await new Promise(resolve=>{
@@ -1358,6 +1480,7 @@ async function runDuelBatch(){
    await duelVoice(t,entry.side,entry.text,token,entry);
    if(token!==D.generation||!D.running)break;
    t.pending.shift();D.audioJobs.delete(entry.id);saveDuel();
+    queueDuelSummary(t);
    if(D.stopAfterCurrent)break;
    // Si el moderador intervino mientras hablaba, evitar preparar voces de texto obsoleto.
    if(t.needsReplan)continue;
@@ -1372,10 +1495,8 @@ async function runDuelBatch(){
     duelStatus('Respondiendo al moderador…');
    }else{
     t.pending=[];delete t.pendingConfig;delete t.pendingCharacters;saveDuel();
-    if(!D.autoContinueRequested){
-     duelStatus(duelCount(t)+' intervenciones · Tu turno');
-     await summarizeDuel(t);
-    }
+    if(!D.autoContinueRequested)duelStatus(duelCount(t)+' intervenciones · Tu turno');
+    queueDuelSummary(t);
    }
   }
  }catch(error){
