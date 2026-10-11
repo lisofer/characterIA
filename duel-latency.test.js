@@ -50,7 +50,7 @@ test('La primera frase comienza su TTS sin esperar el JSON final de Gemini',asyn
    onPartial('{"lines":["Hola desde el vivo",');
    return new Promise(resolve=>{finish=resolve});
   },
-  (_job,entry)=>warming.push(entry),
+  (job,entry)=>{warming.push(entry);job.firstAudioPromise=Promise.resolve({blob:'audio'});},
   t=>t.messages.filter(m=>m.side==='left'||m.side==='right').length,
   ()=>({min:1,max:12}),job=>{if(job){job.cancelled=true;job.controller.abort()}});
  const topic={id:'tema',messages:[],pending:[],left:'a',right:'b'};
