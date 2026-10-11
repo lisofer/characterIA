@@ -1182,8 +1182,7 @@ async function prepareModeratorAudio(entry,token){
   if(sample){
    const transcript=String(cfg.fishTranscript||'').trim();
    if(!transcript)throw Error('Falta transcribir la muestra de '+duelName(entry.profileId));
-   const data=await readBlob(sample);
-   body.reference_audio=data.split(',')[1];body.reference_mime=sample.type||'audio/mpeg';body.reference_text=transcript;
+   body.reference_audio=await duelEncodedSample(sample);body.reference_mime=sample.type||'audio/mpeg';body.reference_text=transcript;
   }
   if(ctrl.signal.aborted)throw Error('Audio cancelado');
   const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
@@ -1452,6 +1451,12 @@ function queueDuelSummary(t){
 }
 function summarizeDuel(t){queueDuelSummary(t)}
 
+const duelEncodedSamples=new WeakMap();
+function duelEncodedSample(sample){
+ let promise=duelEncodedSamples.get(sample);
+ if(!promise){promise=readBlob(sample).then(value=>value.split(',')[1]);duelEncodedSamples.set(sample,promise)}
+ return promise;
+}
 async function duelSample(id){
  if(!S.db)S.db=await openDB();if(!S.db)return null;
  return await new Promise(resolve=>{
@@ -1477,7 +1482,7 @@ function primeDuelAudio(t,token){
    if(sample){
     const words=String(cfg.fishTranscript||'').trim();
     if(!words)throw Error('Falta la transcripción de la muestra de '+duelName(entry.profileId));
-    const encoded=await readBlob(sample);body.reference_audio=encoded.split(',')[1];body.reference_mime=sample.type||'audio/mpeg';body.reference_text=words;
+    body.reference_audio=await duelEncodedSample(sample);body.reference_mime=sample.type||'audio/mpeg';body.reference_text=words;
    }
    if(ctrl.signal.aborted)throw Error('Síntesis cancelada');
    const res=await fetch('/api/fish/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
@@ -1558,7 +1563,7 @@ function warmFirstDuelVoice(j,e){
    const sample=await duelSample(e.profileId);
    if(sample){
     const words=String(cfg.fishTranscript||'').trim();if(!words)throw Error('Falta la transcripción de '+duelName(e.profileId));
-    body.reference_audio=(await readBlob(sample)).split(',')[1];
+    body.reference_audio=await duelEncodedSample(sample);
     body.reference_mime=sample.type||'audio/mpeg';body.reference_text=words;
    }
    while(D.audioInFlight>=2&&!ctrl.signal.aborted)await new Promise(r=>setTimeout(r,35));
