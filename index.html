@@ -1272,7 +1272,7 @@ function duelText(t,side){
   '\nINTERCAMBIO PÚBLICO RECIENTE:\n'+(recent||'Todavía no hablaron.')+
   '\nAhora le toca a '+duelName(nextId)+'. Respondé solo con su intervención, nunca con la del otro.';
 }
-async function duelRequest(model,payload,external=null){
+async function duelRequest(model,payload,external=null,onPartial=null){
  const controller=external||new AbortController();if(!external)D.abort=controller;
  try{
   const response=await fetch('/api/gemini/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,payload}),signal:controller.signal});
@@ -1280,7 +1280,30 @@ async function duelRequest(model,payload,external=null){
    const details=await response.json().catch(()=>({}));
    throw Error('Gemini ('+response.status+'): '+(details.error?.message||response.statusText));
   }
-  const result=parseSSE(await response.text()).trim();
+  let result='';
+  if(onPartial&&response.body?.getReader){
+   // No esperar el JSON completo: cada evento SSE agrega texto utilizable.
+   const reader=response.body.getReader(),decoder=new TextDecoder();
+   let carry='';
+   const consume=line=>{
+    const raw=line.trim();if(!raw.startsWith('data:'))return;
+    const data=raw.slice(5).trim();if(!data||data==='[DONE]')return;
+    try{
+     const event=JSON.parse(data);
+     if(event.error)throw Error(event.error.message||'Gemini devolvió un error');
+     for(const part of event.candidates?.[0]?.content?.parts||[])
+      if(typeof part.text==='string'&&!part.thought){result+=part.text;onPartial(result)}
+    }catch(error){if(!(error instanceof SyntaxError))throw error}
+   };
+   for(;;){
+    const {value,done}=await reader.read();if(done)break;
+    carry+=decoder.decode(value,{stream:true});
+    const lines=carry.split('\n');carry=lines.pop();
+    for(const line of lines)consume(line);
+   }
+   carry+=decoder.decode();if(carry)consume(carry);
+  }else result=parseSSE(await response.text());
+  result=result.trim();
   if(!result)throw Error('Gemini no generó texto.');
   return result;
  }finally{if(D.abort===controller)D.abort=null}
@@ -1309,7 +1332,7 @@ function duelPublicContext(t){
  return [...moderator.filter(m=>!recent.includes(m)),...recent]
   .map(m=>(m.side==='human'?'MODERADOR':duelName(m.profileId))+': '+m.text.slice(0,380)).join('\n');
 }
-async function duelGenerateBatch(t,participants,min,max,controller=null){
+async function duelGenerateBatch(t,participants,min,max,controller=null,onPartial=null){
  const model=getConversationModel()||DUEL_MODEL;
  const prior=duelPublicContext(t);
  const direction=duelLatestDirection(t);
@@ -1334,7 +1357,7 @@ async function duelGenerateBatch(t,participants,min,max,controller=null){
  const input='Título: '+t.title.slice(0,100)+'\nTema: '+t.theme.slice(0,2200)+'\n'+summary+
  'Conversación pública reciente (solo responder a lo que realmente se dijo en voz alta):\n'+(prior||'Inicio de la escena')+'\nPrimera intervención: '+startingName+'. Después alterná de personaje hasta que el tramo haya avanzado lo suficiente.';
  const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(6500,Math.max(420,max*135+260)),responseMimeType:'application/json'}};
- const result=await duelRequest(model,payload,controller);
+ const result=await duelRequest(model,payload,controller,onPartial);
  return duelParseBatch(result,min,max);
 }
 
@@ -1553,15 +1576,31 @@ function createEarlyDuelBatch(t,participants,bounds){
  const controller=new AbortController(),first=duelCount(t)%2===0?'left':'right';
  const j={topicId:t.id,turnCount:duelCount(t),contextSerial:D.contextSerial,
   participants:{...participants},controller,cancelled:false};
- j.promise=duelGenerateBatch(t,participants,bounds.min,bounds.max,controller).then(lines=>{
+ const firstPiece=partial=>{
+  if(j.cancelled||j.firstAudioPromise)return;
+  // Esperar la primera cadena JSON completa para no sintetizar una frase truncada.
+  const matched=/"lines"\s*:\s*\[\s*("(?:\\.|[^"\\])*")/.exec(partial);
+  if(!matched)return;
+  let text;
+  try{text=stripSpeech(JSON.parse(matched[1])).slice(0,420)}catch{return}
+  if(!text)return;
+  j.firstAudioText=text;
+  warmFirstDuelVoice(j,{side:first,profileId:participants[first],text});
+ };
+ j.promise=duelGenerateBatch(t,participants,bounds.min,bounds.max,controller,firstPiece).then(lines=>{
   if(j.cancelled||controller.signal.aborted)throw Error('Preparación obsoleta');
   j.entries=lines.map((text,i)=>{
    const side=(i+(first==='right'?1:0))%2===0?'left':'right';
    return {id:'line_'+Date.now()+'_'+i+'_'+Math.random().toString(36).slice(2,6),
     side,profileId:participants[side],text,at:Date.now()};
   });
-  if(j.entries.length)warmFirstDuelVoice(j,j.entries[0]);return j.entries;
- });
+  // Si Gemini no emitió la primera frase por partes, precalentar al recibir el JSON final.
+  if(j.entries.length&&(!j.firstAudioPromise||j.firstAudioText!==j.entries[0].text)){
+   j.firstAudioController?.abort();j.firstAudioPromise=null;
+   warmFirstDuelVoice(j,j.entries[0]);
+  }
+  return j.entries;
+ }).catch(error=>{j.firstAudioController?.abort();throw error});
  j.promise.catch(()=>{});
  return j;
 }
