@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const cloud=require('./cloud-store');
 const {setupLiveRelay}=require('./live-relay');
+const {createTikTokChat}=require('./tiktok-chat');
 const PORT = Number(process.env.PORT) || 3000;
 const FISH_ENDPOINT = 'https://api.fish.audio/v1/tts';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -17,6 +18,7 @@ const FISH_KEY = String(process.env.FISH_API_KEY || '').trim();
 const ready = TOKEN.length >= 24 && SESSION_SECRET.length >= 32;
 const signingKey = ready ? crypto.createHmac('sha256', SESSION_SECRET).update('persona-studio-session:' + TOKEN).digest() : null;
 const liveRelay=ready?setupLiveRelay(signingKey):null;
+const tiktokChat=createTikTokChat();
 const cookieName = 'persona_session';
 const ttlMs = 7 * 86400 * 1000;
 const attempts = new Map();
@@ -54,6 +56,8 @@ const appHtml=fs.readFileSync(path.join(__dirname,'index.html'));
 const cloudSyncScript=fs.readFileSync(path.join(__dirname,'cloud-sync.js'));
 const cloudMergeScript=fs.readFileSync(path.join(__dirname,'cloud-merge.js'));
 const musicRuntimeScript=fs.readFileSync(path.join(__dirname,'music-runtime.js'));
+const tiktokChatRuntimeScript=fs.readFileSync(path.join(__dirname,'tiktok-chat-runtime.js'));
+
 function pack(value){
  const out=[];const put=n=>out.push(n&255);const bytes=b=>{for(const v of b)put(v)};const uint=(n,len)=>{for(let i=len-1;i>=0;i--)put(Math.floor(n/256**i))};
  function enc(v){
@@ -130,12 +134,22 @@ const server=http.createServer(async(req,res)=>{
  if(['POST','PUT','DELETE'].includes(req.method)&&!csrfSafe(req))return respond(res,403,{error:'Origen no autorizado'});
  if(req.method==='POST'&&route==='/api/auth/logout')return respond(res,200,{ok:true},{'Set-Cookie':cookie(req,'',0)});
  if(req.method==='GET'&&(route==='/'||route==='/index.html'))return page(res,200,appHtml);
- if(req.method==='GET'&&(route==='/cloud-sync.js'||route==='/cloud-merge.js'||route==='/music-runtime.js')){
+ if(req.method==='GET'&&(route==='/cloud-sync.js'||route==='/cloud-merge.js'||route==='/music-runtime.js'||route==='/tiktok-chat-runtime.js')){
   res.writeHead(200,{...baseHeaders,'Content-Type':'text/javascript; charset=utf-8'});
-  res.end(route==='/cloud-sync.js'?cloudSyncScript:route==='/cloud-merge.js'?cloudMergeScript:musicRuntimeScript);return;
+  res.end(route==='/cloud-sync.js'?cloudSyncScript:route==='/cloud-merge.js'?cloudMergeScript:route==='/music-runtime.js'?musicRuntimeScript:tiktokChatRuntimeScript);return;
  }
  if(req.method==='GET'&&route==='/api/health')return respond(res,200,{ok:true,model:'s2.1-pro-free',fishKeyConfigured:!!FISH_KEY,geminiKeyConfigured:!!GEMINI_KEY,authenticated:true});
  if(req.method==='GET'&&route==='/api/live/link')return respond(res,200,{path:'/live?key='+liveRelay.key});
+  // Solo el panel privado puede leer o controlar el puente del chat de TikTok.
+  if(req.method==='GET'&&route==='/api/tiktok/chat')return respond(res,200,tiktokChat.snapshot());
+  if(req.method==='POST'&&route==='/api/tiktok/chat/connect'){
+   if(!quotaCheck(req,60))return respond(res,429,{error:'Demasiadas conexiones. Esperá unos minutos.'});
+   try{
+    const body=await jsonBody(req,1500);
+    return respond(res,202,tiktokChat.start(body.username));
+   }catch(e){return respond(res,e.status||400,{error:e.message})}
+  }
+  if(req.method==='POST'&&route==='/api/tiktok/chat/disconnect')return respond(res,200,tiktokChat.stop());
  // Las imágenes van por el almacenamiento permanente. Aquí llega solo el estado
  // ligero de la escena (varias veces por segundo durante el LIVE).
  if(req.method==='POST'&&route==='/api/live/scene'){

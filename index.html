@@ -316,6 +316,27 @@ body.live-output #appShell .duel-broadcast{
 .music-level-controls output{color:var(--mint);font-variant-numeric:tabular-nums}
 .music-status{margin:0!important;font-size:11px;line-height:1.25;overflow-wrap:anywhere}
 
+
+/* Chat privado y compacto del público de TikTok LIVE. */
+.tt-chat-panel{margin:12px 0 8px;border:1px solid #324459;background:#111d2a;border-radius:12px;padding:8px;min-width:0}
+.tt-chat-head{display:flex;align-items:center;gap:5px;min-width:0}
+.tt-chat-head>strong{font-size:12px;color:#d5f2e7;white-space:nowrap}
+.tt-chat-state{font-size:10px;color:#a8b8c7;min-width:0;flex:1;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tt-chat-state[data-state="connected"]{color:#8cf2c8}
+.tt-chat-state[data-state="connecting"]{color:#f1d392}
+.tt-chat-state[data-state="error"],.tt-chat-state[data-state="disconnected"]{color:#ffb7bb}
+.tt-chat-head>.btn{min-width:27px;width:27px;height:27px;flex:0 0 27px;padding:0;display:grid;place-items:center;border-radius:7px;font-size:13px}
+.tt-chat-user-row{margin-top:7px;display:flex;align-items:center;gap:8px}
+.tt-chat-user-row[hidden]{display:none}
+.tt-chat-user-row label{font-size:10px;color:#9eafc0;white-space:nowrap}
+.tt-chat-user-row input{flex:1;min-width:0;max-width:100%;padding:6px 8px;font-size:11px}
+.tt-chat-messages{margin-top:7px;height:146px;overflow:auto;scrollbar-color:#40546b transparent;scrollbar-width:thin;border-radius:7px;background:#0b1521;padding:6px;display:flex;flex-direction:column;gap:6px}
+.tt-chat-line{font-size:11px;line-height:1.4;color:#d5e2ee;overflow-wrap:anywhere;white-space:pre-wrap}
+.tt-chat-line strong{display:block;color:#83e5c5;font-size:10px;font-weight:750}
+.tt-chat-line span{display:block}
+.tt-chat-error{font-size:10px;line-height:1.3;color:#ffb8b8;overflow-wrap:anywhere}
+.tt-chat-error:empty{display:none}
+
 </style>
 </head>
 <body>
@@ -395,6 +416,23 @@ body.live-output #appShell .duel-broadcast{
         <div class="field" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px"><label for="duelLimitRange">Intervenciones por tanda</label><input id="duelLimitRange" type="text" value="1-12" placeholder="1-12" inputmode="text" maxlength="5" title="Rango mínimo-máximo, por ejemplo 1-12 o 6-12" aria-label="Intervenciones por tanda: rango mínimo y máximo" style="width:88px;flex:0 0 88px;padding:8px;text-align:center"></div>
         <div class="hint">Gemini decide cuántas intervenciones necesita la historia dentro de ese rango.</div>
         <div class="button-row" style="margin-top:14px"><button type="button" id="duelStartFromSettings" class="btn primary">▶ Comenzar / continuar</button><button type="button" id="duelStopFromSettings" class="btn danger">■ Detener</button></div>
+
+        <section class="tt-chat-panel" id="ttChatPanel" aria-label="Chat de TikTok LIVE">
+          <div class="tt-chat-head">
+            <strong>💬 Chat del LIVE</strong>
+            <span id="ttChatStatus" class="tt-chat-state" data-state="idle">● Desconectado</span>
+            <button type="button" id="ttChatSettings" class="btn small ghost" title="Configurar usuario" aria-label="Configurar usuario">⚙</button>
+            <button type="button" id="ttChatConnect" class="btn small" title="Conectar chat" aria-label="Conectar chat">▶</button>
+          </div>
+          <div id="ttChatUserRow" class="tt-chat-user-row" hidden>
+            <label for="ttChatUser">@ de tu cuenta</label>
+            <input id="ttChatUser" type="text" autocomplete="off" spellcheck="false" maxlength="31" placeholder="@peleasfalopa" value="@peleasfalopa">
+          </div>
+          <div id="ttChatMessages" class="tt-chat-messages" aria-live="off">
+            <div class="tt-chat-line"><strong>TikTok LIVE</strong><span>Conectá para ver lo que escriben los espectadores.</span></div>
+          </div>
+          <div id="ttChatError" class="tt-chat-error" role="status" aria-live="polite"></div>
+        </section>
         <div class="section-heading">Memoria de la historia · resumen cada 60 mensajes</div>
         <div id="duelSummary" class="duel-summary">Todavía no hay resumen.</div>
       </section>
@@ -538,6 +576,7 @@ body.live-output #appShell .duel-broadcast{
 <script src="/cloud-merge.js" defer></script>
 <script src="/cloud-sync.js" defer></script>
 <script src="/music-runtime.js" defer></script>
+<script src="/tiktok-chat-runtime.js" defer></script>
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);

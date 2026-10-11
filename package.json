@@ -8,6 +8,9 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests.test.js cloud.test.js cloud-merge.test.js music.test.js duel-range.test.js duel-memory.test.js"
+    "test": "node --test tests.test.js cloud.test.js cloud-merge.test.js music.test.js duel-range.test.js duel-memory.test.js tiktok-chat.test.js"
+  },
+  "dependencies": {
+    "tiktok-live-connector": "^2.5.0"
   }
 }
