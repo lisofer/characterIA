@@ -39,7 +39,8 @@ function setupLiveRelay(secret){
    names:{left:next.names.left,right:next.names.right},
    episode:next.episode||'',scales:{left:Number(next.scales?.left)||1.1,right:Number(next.scales?.right)||1.1},
    speech:speech?{side:speech.side,elapsed:speech.elapsed,plan:speech.plan,
-    delay:Number(speech.delay)||0,intensity:Number(speech.intensity)||45,ready:!!speech.ready}:null};
+    delay:Number(speech.delay)||0,intensity:Number(speech.intensity)||45,ready:!!speech.ready,
+    sampledAt:Number.isFinite(speech.sampledAt)?speech.sampledAt:0}:null};
   lastAcceptedAt=updatedAt=Date.now();
   return {ok:true};
  }
