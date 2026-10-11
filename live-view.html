@@ -85,12 +85,26 @@ body{display:grid;place-items:center;font-family:Inter,system-ui,sans-serif}
   }catch(e){$('waiting').textContent='Esperando conexión con Persona Studio…';$('waiting').hidden=false}
   finally{fetching=false}
  }
+
+ function gestureForWord(word){
+  const clean=String(word||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const vowels=[...clean.matchAll(/[aeiou]+/g)].map(match=>{
+   const str=match[0];return str.includes('a')?'A':/[ou]/.test(str)?'O':'E';
+  });
+  return vowels[Math.max(0,Math.floor((vowels.length-1)*.55))]||'A';
+ }
  function render(now){
   const scene=state.scene;
   if(scene){
    const speech=scene.speech?.ready&&scene.speech.side!=='moderator'?scene.speech:null;
-   const elapsed=speech?(speech.elapsed+Math.max(0,now-state.receivedAt)+speech.delay):0;
+   // El retraso de red/sondeo se suma al instante de la muestra de audio original.
+   const networkAge=speech?.sampledAt&&Date.now()-speech.sampledAt>=0&&Date.now()-speech.sampledAt<2500?
+    Date.now()-speech.sampledAt:Math.max(0,now-state.receivedAt);
+   const elapsed=speech?(speech.elapsed+networkAge+speech.delay):0;
    const plan=speech?.plan||null;
+   const activityIndex=Math.floor(elapsed/(plan?.activityStep||25));
+   const voiceActive=typeof plan?.activity==='string'&&plan.activity.length?
+     plan.activity[activityIndex]==='1':null;
    let wordIndex=-1,completed=-1,subtitle='';
    if(plan){
     for(let i=0;i<plan.words.length;i++){
@@ -103,21 +117,20 @@ body{display:grid;place-items:center;font-family:Inter,system-ui,sans-serif}
    }
    if($('words').textContent!==subtitle)$('words').textContent=subtitle;
    for(const side of ['left','right']){
-    const active=speech?.side===side&&wordIndex>=0;
+    const active=speech?.side===side&&(wordIndex>=0||(voiceActive===true&&completed>=0));
     $(side+'Box').classList.toggle('talking',Boolean(active));
     if(!state.blink[side])state.blink[side]=now+2500+Math.random()*4000;
     let blink=now<state.blinkUntil[side];
     if(now>=state.blink[side]){state.blinkUntil[side]=now+115;state.blink[side]=now+2600+Math.random()*3700;blink=true}
     let mouth='closed';
     if(active&&plan){
-     const word=plan.words[wordIndex]?.text||'';
-     const dur=plan.lengths[wordIndex],age=elapsed-plan.offsets[wordIndex];
+     const index=wordIndex>=0?wordIndex:completed;
+     const word=plan.words[index]?.text||'';
+     const dur=plan.lengths[index],age=elapsed-plan.offsets[index];
      const attack=Math.min(62,Math.max(20,dur*.11));
      const hold=Math.min(dur-attack-18,Math.max(95,Math.min(240,dur*(.32+(speech.intensity||45)/100*.2))));
-     if(age>=attack&&age<attack+hold){
-      const vowel=(word.match(/[aoe]/i)||[])[0]?.toUpperCase()||'A';
-      mouth=vowel==='O'?'O':vowel==='E'?'E':'A';
-     }
+     if(voiceActive===null?(age>=attack&&age<attack+hold):voiceActive)
+      mouth=gestureForWord(word);
     }
     const m=images[side],preferred=map[mouth]?.[blink?'closed':'open'];
     const alternate=map[mouth]?.[blink?'open':'closed'];
