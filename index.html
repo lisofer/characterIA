@@ -998,7 +998,8 @@ function publishLiveSnapshot(){
  let speech=null;
  if(p?.ready){
   const elapsed=p.audio?p.audio.currentTime*1000:performance.now()-p.started;
-  speech={side:p.side,ready:true,plan:p.plan,delay:p.delay,intensity:p.intensity,elapsed:Math.max(0,elapsed)};
+  speech={side:p.side,ready:true,plan:p.plan,delay:p.delay,intensity:p.intensity,
+   elapsed:Math.max(0,elapsed),sampledAt:Date.now()};
  }
  const snapshot={type:'scene',
   topic:{id:t.id,title:t.title,left:characters.left,right:characters.right,
@@ -1046,7 +1047,9 @@ function receiveLiveSnapshot(message){
   loadBackgroundLibrary().finally(()=>{liveBackgroundLoading=false;applyDuelBackgrounds()});
  }
  const speech=message.speech;
- D.speech=speech?.ready?{...speech,audio:null,started:performance.now()-speech.elapsed}:null;
+ const sampleAge=Number.isFinite(speech?.sampledAt)&&Date.now()-speech.sampledAt>=0&&Date.now()-speech.sampledAt<2500?
+   Date.now()-speech.sampledAt:0;
+ D.speech=speech?.ready?{...speech,audio:null,started:performance.now()-speech.elapsed-sampleAge}:null;
  for(const side of ['left','right'])$('duel'+(side==='left'?'Left':'Right')+'Box').classList.toggle('is-speaking',speech?.side===side&&speech?.ready);
  if(!speech?.ready||speech.side==='moderator'){$('duelGlobalText').textContent='';$('duelGlobalSpeaker').textContent=''}
 }
@@ -1496,6 +1499,44 @@ function primeDuelAudio(t,token){
   D.audioJobs.set(entry.id,{promise:task,controller:ctrl});
  }
 }
+
+// Usar las pausas del MP3 real para los labios (análisis opcional, no retrasa la reproducción).
+async function duelAnalyzeAudioActivity(blob,plan){
+ const AudioCtx=window.AudioContext||window.webkitAudioContext;
+ if(!AudioCtx||!blob||!plan)return;
+ let ctx=null;
+ try{
+  ctx=new AudioCtx();
+  const pcm=await ctx.decodeAudioData(await blob.arrayBuffer());
+  const channel=pcm.getChannelData(0),sampleRate=pcm.sampleRate;
+  const stepMs=25,step=Math.max(1,Math.round(sampleRate*stepMs/1000));
+  const count=Math.ceil(channel.length/step),energy=new Float32Array(count);
+  for(let i=0;i<count;i++){
+   let sum=0,samples=0;
+   for(let j=i*step;j<Math.min((i+1)*step,channel.length);j+=4){
+    sum+=channel[j]*channel[j];samples++;
+   }
+   energy[i]=Math.sqrt(sum/Math.max(1,samples));
+  }
+  const ranked=Array.from(energy).sort((a,b)=>a-b);
+  const reference=ranked[Math.floor(ranked.length*.92)]||0;
+  if(reference<.002)return;
+  const threshold=Math.max(.0018,reference*.14);
+  const cells=Array.from(energy,x=>x>=threshold?'1':'0');
+  // Las micro-pausas de 25 ms entre fonemas no deben provocar parpadeos.
+  for(let i=1;i<cells.length-1;i++)
+   if(cells[i-1]==='1'&&cells[i]==='0'&&cells[i+1]==='1')cells[i]='1';
+  plan.activity=cells.join('');
+  plan.activityStep=stepMs;
+ }catch{/* Si no se puede decodificar, se conserva el cálculo temporal anterior. */}
+ finally{if(ctx)try{await ctx.close()}catch{}}
+}
+function duelActivityAt(plan,time){
+ if(typeof plan.activity!=='string'||!plan.activity.length)return null;
+ const index=Math.floor(time/(plan.activityStep||25));
+ return index>=0&&index<plan.activity.length?plan.activity[index]==='1':false;
+}
+
 async function duelVoice(t,side,text,token,entry){
  const cfg=D.batchProfiles?.[side]||duelProfile(entry.profileId),rate=Number(cfg.rate)||1;
  const speech={side,text,plan:duelSpeechPlan(text,rate),ready:false,started:0,audio:null,rate,delay:Number(cfg.voiceDelay)||0,intensity:Number(cfg.mouthIntensity||45)};
@@ -1522,6 +1563,7 @@ async function duelVoice(t,side,text,token,entry){
   if(out.error)throw out.error;
   if(!out.blob)throw Error('Fish todavía no preparó esta frase.');
   url=URL.createObjectURL(out.blob);const audio=new Audio(url);D.audio=audio;speech.audio=audio;
+  duelAnalyzeAudioActivity(out.blob,speech.plan); // Sin await: Fish empieza a sonar de inmediato.
   await new Promise((resolve,reject)=>{
    let finished=false;const done=()=>{if(finished)return;finished=true;resolve()};
    D.resolveAudio=done;
@@ -1849,14 +1891,17 @@ function frameDuel(now){
   let mouth='closed';
   if(p?.ready){
    const t=Math.max(0,(p.audio?p.audio.currentTime*1000:now-p.started)+p.delay);
-   const plan=p.plan;let index=-1,completed=-1;
+   const plan=p.plan,voiced=duelActivityAt(plan,t);let index=-1,completed=-1;
    for(let i=0;i<plan.words.length;i++){
     if(t>=plan.offsets[i]+plan.lengths[i])completed=i;
     if(t>=plan.offsets[i]&&t<plan.offsets[i]+plan.lengths[i]){index=i;break}
    }
    if(index>=0){
     const word=plan.words[index],age=t-plan.offsets[index],dur=plan.lengths[index],attack=Math.min(62,Math.max(20,dur*.11)),hold=Math.min(dur-attack-18,Math.max(95,Math.min(240,dur*(.32+p.intensity/100*.2))));
-    if(age>=attack&&age<attack+hold)mouth=wordGestures(word.text)[0]||'A';
+    if(voiced===null?(age>=attack&&age<attack+hold):voiced)
+     mouth=wordGestures(word.text)[0]||'A';
+   }else if(voiced&&completed>=0){
+    mouth=wordGestures(plan.words[completed].text)[0]||'A';
    }
    const sentence=index>=0?plan.sentences.find(q=>index>=q.first&&index<=q.last):plan.sentences.find(q=>completed>=q.first&&completed<=q.last);
    const caption=$('duelGlobalText');
