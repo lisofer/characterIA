@@ -339,14 +339,9 @@ body.live-output #appShell .duel-broadcast{
 .tt-chat-line.gift.streak{border-color:#6b9651}
 .tt-gift-alert{margin-top:7px;padding:8px 10px;background:#24432c;border:1px solid #66b980;border-radius:8px;color:#efffed;font-size:12px;font-weight:700;line-height:1.35;overflow-wrap:anywhere;animation:tt-gift-in .22s ease-out}
 .tt-gift-alert[hidden]{display:none}
-.tt-gift-debug{color:#9cadc2;font-size:10px;line-height:1.4;margin-top:3px}
-.tt-gift-debug:empty{display:none}
-.tt-chat-user-row #ttChatTestGift{padding:5px 6px;white-space:nowrap;font-size:10px;flex-shrink:0}
 @keyframes tt-gift-in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
 
 .tt-chat-line span{display:block}
-.tt-chat-diag{margin-top:5px;font-size:9px;line-height:1.3;color:#91abc0;overflow-wrap:anywhere}
-.tt-chat-diag[hidden]{display:none}
 .tt-chat-state[data-state="warning"]{color:#f1d392}
 .tt-chat-error{font-size:10px;line-height:1.3;color:#ffb8b8;overflow-wrap:anywhere}
 .tt-chat-error:empty{display:none}
@@ -442,11 +437,8 @@ body.live-output #appShell .duel-broadcast{
           <div id="ttChatUserRow" class="tt-chat-user-row" hidden>
             <label for="ttChatUser">@ en vivo</label>
             <input id="ttChatUser" type="text" autocomplete="off" spellcheck="false" maxlength="31" placeholder="@peleasfalopa" value="@peleasfalopa">
-            <button type="button" id="ttChatTestGift" class="btn small ghost" title="Probar solamente el aspecto visual de un regalo">🌹 Prueba</button>
           </div>
           <div id="ttChatGiftAlert" class="tt-gift-alert" role="status" aria-live="polite" hidden></div>
-          <div id="ttChatGiftDebug" class="tt-gift-debug"></div>
-          <div id="ttChatDiagnostics" class="tt-chat-diag" hidden></div>
           <div id="ttChatMessages" class="tt-chat-messages" aria-live="off">
             <div class="tt-chat-line"><strong>TikTok LIVE</strong><span>Conectá para ver lo que escriben los espectadores.</span></div>
           </div>

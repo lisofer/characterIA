@@ -123,43 +123,8 @@
   if(state.username&&!C.edited&&document.activeElement!==$('ttChatUser'))
    $('ttChatUser').value='@'+state.username;
   updateButton();
-  const diag=$('ttChatDiagnostics');
-  const bits=[];
-  if(state.roomId)bits.push('Sala #'+state.roomId);
-  if(state.status==='connected'){
-   bits.push(state.socketConnected?'WebSocket abierto':'WebSocket sin confirmar');
-   bits.push((state.wsFrames||0)+' paquetes');
-   bits.push((state.decodedEvents||0)+' eventos');
-   bits.push((state.chatEvents||0)+' chats');
-   bits.push('🎁 '+(state.giftEvents||0)+' regalos');
-   bits.push('gift '+(state.giftSignals||0)+' / datos '+(state.giftDecoded||0));
-  }
+  // Los eventos siguen activos; los detalles técnicos no se muestran.
   processGifts(state);
-  const py=state.python||{status:'disabled'};
-  const pythonText=py.status==='connected'?'Python: conectado':
-   py.status==='starting'?'Python: conectando…':
-   py.status==='error'?'Python: error':
-   py.status==='disconnected'?'Python: desconectado':
-   'Python: no habilitado';
-  bits.push(pythonText);
-  if(state.pythonGiftEvents)bits.push('Python: '+state.pythonGiftEvents+' regalos');
-  diag.textContent=bits.join(' · ');
-  diag.hidden=!bits.length;
-  const giftDebug=$('ttChatGiftDebug');
-  const seen=(state.giftSignals||0)+(state.giftDecoded||0);
-  if(giftDebug){
-   const methods=Object.entries(state.methods||{}).filter(([key])=>/gift|chat/i.test(key))
-    .map(([key,n])=>key+': '+n).slice(-5).join(' · ');
-   const py=state.python||{};
-   const pythonProblem=py.status==='error'&&py.error?' · Python: '+String(py.error).slice(0,180):'';
-   const nodeHint=state.status!=='connected'&&py.status!=='connected'?
-     'Los lectores aún no están conectados.':
-     state.giftEvents>0?'Regalos recibidos por el servidor.':
-     seen?'Node detectó un evento de regalo, pero no lo registró.':
-     py.status==='connected'?'Python está conectado. Esperando un regalo de TikTok…':
-     'Sin regalos detectados todavía.';
-   giftDebug.textContent=nodeHint+(methods?' · '+methods:'')+pythonProblem;
-  }
   const latest=(Array.isArray(state.events)?state.events:state.comments||[]).slice(-45);
   const note=state.warning||(
    state.status==='connecting'?'Conectando con el LIVE de @'+state.username+'…':
@@ -231,10 +196,6 @@
   $('ttChatUser').addEventListener('input',()=>{C.edited=true;updateButton()});
   $('ttChatConnect').addEventListener('click',toggle);
   $('ttChatRetry').addEventListener('click',()=>connect(true));
-  $('ttChatTestGift').addEventListener('click',()=>{
-   displayGift({name:'Juanma',giftName:'Rosa',emoji:'🌹',count:1});
-   $('ttChatGiftDebug').textContent='Prueba visual: el recuadro funciona. No llegó un regalo real y no se enviará ningún agradecimiento.';
-  });
   $('ttChatSettings').addEventListener('click',()=>{
    const row=$('ttChatUserRow');
    row.hidden=!row.hidden;
