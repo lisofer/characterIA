@@ -452,6 +452,16 @@ body.live-output #appShell .duel-broadcast{
         </section>
         <div class="section-heading">Memoria de la historia · resumen cada 60 mensajes</div>
         <div id="duelSummary" class="duel-summary">Todavía no hay resumen.</div>
+        <div class="section-heading">Prompt general del debate</div>
+        <div class="field">
+          <label for="duelGeneralPrompt">Instrucciones generales para el LIVE</label>
+          <textarea id="duelGeneralPrompt" rows="12" maxlength="10000" spellcheck="true" aria-describedby="duelPromptHelp"></textarea>
+          <div id="duelPromptHelp" class="hint">Editable para todos los debates. Se guarda automáticamente y se sincroniza con la nube. Las personalidades, la historia y las reglas técnicas se agregan aparte. Se aplica a partir de la próxima tanda.</div>
+        </div>
+        <div class="button-row" style="align-items:center; margin-bottom:6px">
+          <button type="button" id="duelPromptReset" class="btn small ghost">↺ Restaurar prompt original</button>
+          <span id="duelPromptStatus" class="hint" role="status" aria-live="polite"></span>
+        </div>
       </section>
       <section id="tab-brain" class="setting-tab active">
         <div class="section-heading">Conexión a Gemini</div>
@@ -795,6 +805,20 @@ if('speechSynthesis'in window){initVoices();speechSynthesis.addEventListener?.('
 
 /* Modo debate: almacenamiento independiente, Gemini con contexto acotado y reproducción serial. */
 const DUEL_KEY='persona-studio-duels-v1',DUEL_MODEL='gemini-3.5-flash-lite';
+const DUEL_PROMPT_KEY='persona-studio-duel-general-prompt-v1';
+const DEFAULT_DUEL_GENERAL_PROMPT="Los personajes están participando en un TikTok Live frente a una audiencia. No es una conversación privada ni un guion: es un show que se construye espontáneamente con lo que ocurre en vivo. Cada uno conserva su personalidad, su criterio y su iniciativa.\n\nEl moderador humano conduce el programa. Sus preguntas, intervenciones e indicaciones públicas tienen prioridad. Cuando habla, escuchalo y respondé a lo que realmente dijo sin esquivar el asunto. Respetá sus decisiones sobre la dinámica, sin necesidad de darle siempre la razón.\n\nLos espectadores pueden comentar y participar. Cuando el moderador selecciona o lee un comentario, incorporalo a la conversación: prestá atención a las palabras concretas y a quién las dijo. Podés mencionar al espectador, responderle y comentar el tema con el otro participante. Si un comentario está en otro idioma, interpretalo si podés o pedí aclaración. No inventes comentarios, espectadores ni votaciones.\n\nEl objetivo es entretener con naturalidad. Podés opinar, bromear, discutir, provocar, reaccionar, hacer preguntas incómodas o sorprender a los demás cuando tenga sentido. Involucrá al público sin convertir cada frase en una presentación. No busques ser gracioso todo el tiempo, ni actúes de forma excesivamente complaciente.\n\nAprovechá cada conflicto, pregunta o revelación antes de cambiar de tema. Profundizá lo que está ocurriendo, reaccioná a los argumentos del otro y dejá que surjan consecuencias interesantes. Evitá respuestas genéricas, repeticiones y cambios de tema repentinos. La historia avanza por las decisiones de los participantes, no por giros aleatorios.\n\nNo escribas un guion ni anticipes finales. Mantené la conversación ágil, auténtica e impredecible.";
+function duelGeneralPrompt(){return String($('duelGeneralPrompt').value||'').trim()||DEFAULT_DUEL_GENERAL_PROMPT}
+function restoreDuelGeneralPrompt(){
+ try{const saved=localStorage.getItem(DUEL_PROMPT_KEY);$('duelGeneralPrompt').value=saved===null?DEFAULT_DUEL_GENERAL_PROMPT:saved}
+ catch{$('duelGeneralPrompt').value=DEFAULT_DUEL_GENERAL_PROMPT}
+ $('duelPromptStatus').textContent='Guardado automático';
+}
+function saveDuelGeneralPrompt(){
+ try{localStorage.setItem(DUEL_PROMPT_KEY,$('duelGeneralPrompt').value);window.PERSONA_CLOUD?.schedule();$('duelPromptStatus').textContent='Guardado automático'}
+ catch{$('duelPromptStatus').textContent='No se pudo guardar';toast('No se pudo guardar el prompt general.',true)}
+}
+$('duelGeneralPrompt').addEventListener('input',saveDuelGeneralPrompt);
+$('duelPromptReset').onclick=()=>{$('duelGeneralPrompt').value=DEFAULT_DUEL_GENERAL_PROMPT;saveDuelGeneralPrompt();toast('Prompt general original restaurado.')};
 const D={topics:[],activeId:null,running:false,generation:0,abort:null,audio:null,resolveAudio:null,speech:null,moderatorQueue:[],moderatorStandalone:false,stopAfterCurrent:false,autoContinueRequested:false,generatingBatch:false,restartForModerator:false,audioJobs:new Map(),audioControllers:new Set(),audioInFlight:0,batchCharacters:null,batchProfiles:null,images:{left:new Map(),right:new Map()},urls:{left:[],right:[]},profiles:{left:null,right:null},blink:{left:0,right:0},blinkUntil:{left:0,right:0},pose:{left:'',right:''}};
 const duelActive=()=>D.topics.find(t=>t.id===D.activeId)||null;
 const duelProfile=id=>allProfileData()[id]?.settings||{};
@@ -846,6 +870,7 @@ function newDuelTopic(){
  return {id:'tema_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),title:'Nueva temática',theme:'',left:'',right:'',limitMin:1,limitMax:12,messages:[],summary:'',summaryAt:0,summaryPublicAt:0,compactedTurns:0,compactedPublicCount:0,memoryVersion:0,createdAt:Date.now()};
 }
 function initDuel(){
+ restoreDuelGeneralPrompt();
  try{
   const stored=JSON.parse(localStorage.getItem(DUEL_KEY)||'null');
   if(stored&&Array.isArray(stored.topics)){D.topics=stored.topics;D.activeId=stored.activeId;for(const t of D.topics)duelMemoryMigrate(t)}
@@ -1264,18 +1289,13 @@ async function duelGenerateBatch(t,participants,min,max){
   'NUNCA respondas a la dirección, ni la reconozcas, ni la agradezcas, ni la cites, ni la reformules, ni preguntes por ella. '+
   'No digas "tenés razón, moderador", "como dijiste", "lo que me pediste", "voy a obedecer", ni otras referencias a la existencia de la nota. '+
   'Los personajes NO SABEN que hubo un susurro. Si la sugerencia ya produjo un cambio, continuá sus consecuencias sin repetir la orden.';
- const instruction='Generás las próximas intervenciones de dos participantes de un TikTok Live en curso. Esto es un SHOW espontáneo frente a espectadores, no una conversación privada ni un guion teatral. Cada personaje debe sonar como una persona con criterio, humor e iniciativa propios. '+
-  '\nPERSONALIDADES: respetá los rasgos de cada uno incluso cuando discutan o interpreten papeles en la historia. '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
-  '\n'+nRight+': '+String(duelProfile(participants.right).persona||'Personaje espontáneo').slice(0,1700)+
-  '\nEL MODERADOR HUMANO CONDUCE EL LIVE: sus intervenciones públicas, preguntas, indicaciones y decisiones tienen prioridad sobre cualquier tema que los personajes quisieran seguir. Escuchalo de verdad: no lo ignores, no cambies de asunto para esquivarlo y no confundas responder con darle siempre la razón. Si lo último que se dijo públicamente fue una intervención suya, la primera respuesta debe ocuparse concretamente de eso; si preguntó al otro participante, podés pedirle que conteste. '+
-  '\nESPECTADORES: cuando el moderador lea o seleccione un comentario del chat, es porque quiere incorporarlo al show. Prestá atención a las palabras y a quién las dijo; reaccioná al contenido específico, no a una idea vagamente relacionada. Podés nombrar al espectador y conversar sobre su comentario con el otro personaje, especialmente si genera polémica, gracia o una pregunta interesante. Si está en otro idioma, interpretalo si podés o pedí aclaración. No inventes espectadores, comentarios ni votos. '+
-  '\nENTRETENIMIENTO: el público está mirando. Aprovechá lo que pasa para crear momentos interesantes: posiciones encontradas, preguntas incómodas, humor oportuno, tensión, sorpresa, complicidad y reacciones genuinas. No hagas chistes por obligación ni hables constantemente de estar en TikTok; hacé que la situación sea entretenida por cómo la viven los participantes. '+
-  '\nCONTINUIDAD: desarrollá la cuestión que está en juego. Si aparece una acusación, revelación, pregunta o comentario polémico, profundizá las consecuencias, respondé a los argumentos y dejá espacio para réplicas antes de saltar a otra cosa. Evitá discursos genéricos, respuestas que desvían el asunto y cambios de tema sin conexión. La historia avanza por lo que dicen y deciden, no por introducir novedades al azar. '+
-  '\nLIBERTAD: pueden discrepar, interrogarse, burlarse, defenderse, cambiar de opinión, hablar al público o introducir un giro cuando surja naturalmente. No tienen que ser amables, complacientes ni graciosos todo el tiempo. No repitas fórmulas ni frases típicas de presentador. '+
-  '\nIMPORTANTE: lo que el MODERADOR dice en voz alta es parte de la conversación y puede citarse y responderse. Una DIRECCIÓN PRIVADA es una orientación externa: no se escucha, no se agradece y no se menciona. '+
-  directionRules+
-  (direction?'\nDIRECCIÓN PRIVADA VIGENTE (SOLO PARA LA CONSTRUCCIÓN DE LA HISTORIA; NO PRONUNCIAR NI RECONOCER): '+direction:'')+
-  '\nGenerá entre '+min+' y '+max+' intervenciones según lo que necesite este momento; no llenes el máximo por costumbre. Alterná los personajes empezando por '+startingName+'. Cada intervención reacciona a lo que acaba de ocurrir, sostiene el foco cuando hay algo interesante y puede dejarle al otro un motivo para replicar. Evitá relleno. No uses narrador ni etiquetas dentro del diálogo. Máximo 45 palabras por intervención. Respondé SOLAMENTE JSON con un array de longitud variable dentro del rango, por ejemplo: {"lines":["texto de intervención"]}.';
+ const instruction=duelGeneralPrompt()+
+ '\n\nPERSONALIDADES (conservar sus rasgos en todo momento): '+nLeft+': '+String(duelProfile(participants.left).persona||'Personaje espontáneo').slice(0,1700)+
+ '\n'+nRight+': '+String(duelProfile(participants.right).persona||'Personaje espontáneo').slice(0,1700)+
+ '\nIMPORTANTE: lo que el MODERADOR dice en voz alta es parte de la conversación y puede citarse y responderse. Una DIRECCIÓN PRIVADA es una orientación externa: no se escucha, no se agradece y no se menciona. '+
+ directionRules+
+ (direction?'\nDIRECCIÓN PRIVADA VIGENTE (SOLO PARA LA CONSTRUCCIÓN DE LA HISTORIA; NO PRONUNCIAR NI RECONOCER): '+direction:'')+
+ '\nGenerá entre '+min+' y '+max+' intervenciones según lo que necesite este momento; no llenes el máximo por costumbre. Alterná los personajes empezando por '+startingName+'. Cada intervención reacciona a lo que acaba de ocurrir y puede dejarle al otro un motivo para replicar. No uses narrador ni etiquetas dentro del diálogo. Máximo 45 palabras por intervención. Respondé SOLAMENTE JSON con un array de longitud variable dentro del rango, por ejemplo: {"lines":["texto de intervención"]}.';
  const input='Título: '+t.title.slice(0,100)+'\nTema: '+t.theme.slice(0,2200)+'\n'+summary+
  'Conversación pública reciente (solo responder a lo que realmente se dijo en voz alta):\n'+(prior||'Inicio de la escena')+'\nPrimera intervención: '+startingName+'. Después alterná de personaje hasta que el tramo haya avanzado lo suficiente.';
  const payload={systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{temperature:.85,maxOutputTokens:Math.min(6500,Math.max(420,max*135+260)),responseMimeType:'application/json'}};
