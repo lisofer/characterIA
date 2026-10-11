@@ -28,6 +28,7 @@
   const duels=parse(kv,TOPICS,{topics:[]});
   if(duels.topics?.some(t=>t.theme||t.messages?.length||t.left||t.right||(t.title&&t.title!=='Nueva temática')))return true;
   if(parse(kv,BACKGROUNDS,[]).length)return true;
+   if(typeof kv['persona-studio-duel-general-prompt-v1']==='string')return true;
   const music=parse(kv,GLOBAL,{}).music;
   if(music?.name||music?.tracks?.some(t=>!t.deletedAt))return true;
   return false;
