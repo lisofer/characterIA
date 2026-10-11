@@ -67,7 +67,7 @@
   for(const fn of giftCallbacks)try{fn({...detail})}catch(error){console.warn('Receptor de regalos:',error)}
  }
  function processGifts(state){
-  if(C.pending||(state.status!=='connected'&&state.status!=='connecting'))return;
+  if(C.pending||(state.status!=='connected'&&state.status!=='connecting'&&state.python?.status!=='connected'))return;
   const batch=giftTracker.consume(state,C.armed);
   for(const gift of batch.changes)displayGift(gift);
   for(const gift of batch.completed)emitGift(gift,state);
@@ -135,6 +135,14 @@
    bits.push('gift '+(state.giftSignals||0)+' / datos '+(state.giftDecoded||0));
   }
   processGifts(state);
+  const py=state.python||{status:'disabled'};
+  const pythonText=py.status==='connected'?'Python: conectado':
+   py.status==='starting'?'Python: conectando…':
+   py.status==='error'?'Python: error':
+   py.status==='disconnected'?'Python: desconectado':
+   'Python: no habilitado';
+  bits.push(pythonText);
+  if(state.pythonGiftEvents)bits.push('Python: '+state.pythonGiftEvents+' regalos');
   diag.textContent=bits.join(' · ');
   diag.hidden=!bits.length;
   const giftDebug=$('ttChatGiftDebug');
@@ -142,11 +150,15 @@
   if(giftDebug){
    const methods=Object.entries(state.methods||{}).filter(([key])=>/gift|chat/i.test(key))
     .map(([key,n])=>key+': '+n).slice(-5).join(' · ');
-   giftDebug.textContent=state.status!=='connected'?'Conectá primero para probar los regalos reales.':
-    (state.giftEvents>0?'El servidor recibe regalos correctamente.':
-     seen?'Llegaron eventos de regalo, pero no se registraron. Revisar formato.':
-      'TikTok todavía no envió ningún evento de regalo a este conector.')+
-     (methods?' · '+methods:'');
+   const py=state.python||{};
+   const pythonProblem=py.status==='error'&&py.error?' · Python: '+String(py.error).slice(0,180):'';
+   const nodeHint=state.status!=='connected'&&py.status!=='connected'?
+     'Los lectores aún no están conectados.':
+     state.giftEvents>0?'Regalos recibidos por el servidor.':
+     seen?'Node detectó un evento de regalo, pero no lo registró.':
+     py.status==='connected'?'Python está conectado. Esperando un regalo de TikTok…':
+     'Sin regalos detectados todavía.';
+   giftDebug.textContent=nodeHint+(methods?' · '+methods:'')+pythonProblem;
   }
   const latest=(Array.isArray(state.events)?state.events:state.comments||[]).slice(-45);
   const note=state.warning||(

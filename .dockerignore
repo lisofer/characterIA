@@ -1,0 +1,10 @@
+.git
+.gitignore
+node_modules
+__pycache__
+*.pyc
+.venv
+.env
+.env.*
+*.log
+.DS_Store

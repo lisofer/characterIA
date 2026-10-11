@@ -1,6 +1,7 @@
 'use strict';
 // Puente TikTok LIVE (no oficial). Solo lectura. Los controles son privados.
 const MAX_COMMENTS=75,MAX_EVENTS=75;
+const {createPythonGiftBridge}=require('./tiktok-python-bridge');
 function normalizeUsername(value){
  const input=String(value||'').trim().replace(/^@/,'');
  return /^[a-zA-Z0-9._]{2,30}$/.test(input)?input:null;
@@ -73,7 +74,16 @@ function createTikTokChat(options={}){
  let generation=0,active=null,nextId=0;
  let recentFingerprints=new Map(),giftFingerprints=new Map(),giftStreaks=new Map();
  const fresh=()=>now();
- const data={username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
+ let acceptPythonGift=()=>{};
+ const noopPython={
+  start:()=>{},stop:()=>{},
+  snapshot:()=>({status:'disabled',error:'El contenedor no tiene habilitado TikTokLive Python.'})
+ };
+ const pythonBridge=options.pythonGiftBridge||(
+  (process.env.TIKTOK_PYTHON_GIFTS==='1'||options.makePythonGiftBridge)?
+   (options.makePythonGiftBridge||createPythonGiftBridge)({onGift:item=>acceptPythonGift(item)}):
+   noopPython);
+ const data={username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,pythonGiftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
   lastGiftAt:0,methods:{},updatedAt:fresh(),connectedAt:0,lastEventAt:0,lastCommentAt:0,
   wsFrames:0,decodedEvents:0,chatEvents:0,socketConnected:false};
  function snapshot(){
@@ -86,15 +96,16 @@ function createTikTokChat(options={}){
     warning='La conexión recibe datos, pero aún no llegaron comentarios. Probá escribir uno en el LIVE.';
   }
   return {...data,warning,comments:data.comments.slice(),events:data.events.map(e=>({...e})),
-   methods:{...data.methods},giftFeedStatus:
+   python:pythonBridge.snapshot(),methods:{...data.methods},giftFeedStatus:
     data.giftEvents>0?'receiving':data.giftSignals+data.giftDecoded>0?'seen-not-displayed':'no-gift-events'};
  }
  function stop(){
   generation++;
   const old=active;active=null;
   if(old)try{Promise.resolve(old.disconnect()).catch(()=>{})}catch{}
+  pythonBridge.stop();acceptPythonGift=()=>{};
   recentFingerprints.clear();giftFingerprints.clear();giftStreaks.clear();
-  Object.assign(data,{username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
+  Object.assign(data,{username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,pythonGiftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
    lastGiftAt:0,methods:{},updatedAt:fresh(),
    connectedAt:0,lastEventAt:0,lastCommentAt:0,wsFrames:0,decodedEvents:0,chatEvents:0,socketConnected:false});
   return snapshot();
@@ -155,6 +166,19 @@ function createTikTokChat(options={}){
    }
    data.giftEvents++;data.lastGiftAt=stamp;data.updatedAt=stamp;
   };
+  // Segundo lector gratuito: solo regalos. Corre como proceso hijo en el mismo
+  // contenedor Railway y no interfiere con el chat actual de Node.
+  acceptPythonGift=event=>{
+   if(current!==generation)return;
+   const gift=normalizeGift(event,0,fresh());
+   if(!gift)return;
+   data.pythonGiftEvents++;
+   const duplicate=data.events.some(item=>item.kind==='gift'&&
+    item.username===gift.username&&item.giftId===gift.giftId&&
+    item.count===gift.count&&Math.abs(fresh()-item.at)<1600);
+   if(!duplicate)addGift(event);
+  };
+  try{pythonBridge.start(username)}catch(e){console.warn('Python TikTok gifts:',e?.message)}
   (async()=>{
    let connection;
    try{
