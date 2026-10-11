@@ -1468,7 +1468,7 @@ async function duelSample(id){
 }
 
 function primeDuelAudio(t,token){
- if(!D.running||D.generation!==token||D.moderatorBusy||D.stopAfterCurrent)return;
+ if(!D.running||D.generation!==token||D.moderatorBusy||D.stopAfterCurrent||t.needsReplan)return;
  // Precalentar como máximo los siguientes cuatro turnos; solo dos peticiones Fish simultáneas.
  for(const entry of (t.pending||[]).slice(0,4)){
   if(D.audioInFlight>=2)break;
