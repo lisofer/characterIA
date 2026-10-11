@@ -98,7 +98,7 @@ test('El panel muestra una alerta de regalo y emite el evento sin duplicarlo al 
   focus(){}
  }
  const ids=['ttChatPanel','ttChatStatus','ttChatConnect','ttChatRetry','ttChatSettings','ttChatUser',
-  'ttChatUserRow','ttChatDiagnostics','ttChatMessages','ttChatError','ttChatGiftAlert'];
+  'ttChatUserRow','ttChatDiagnostics','ttChatMessages','ttChatError','ttChatGiftAlert','ttChatTestGift','ttChatGiftDebug'];
  const elements=Object.fromEntries(ids.map(id=>[id,new Element(id)]));
  const document={readyState:'complete',activeElement:null,hidden:false,
   getElementById:id=>elements[id],createElement:tag=>new Element(tag)};
@@ -131,4 +131,34 @@ test('El panel muestra una alerta de regalo y emite el evento sin duplicarlo al 
  assert.equal(callbacks.length,1);
  assert.equal(published.length,1);
  unsub();
+});
+
+test('Prueba visual no genera evento de regalo que luego sea agradecido por la IA',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+ const src=fs.readFileSync(path.join(__dirname,'tiktok-chat-runtime.js'),'utf8');
+ class E{
+  constructor(id){this.id=id;this.value='';this.children=[];this.hidden=id==='ttChatGiftAlert';this.dataset={};this.style={};this.textContent='';this.scrollHeight=0;this.scrollTop=0;this.clientHeight=100;this.listeners={}}
+  addEventListener(event,cb){this.listeners[event]=cb}
+  setAttribute(name,value){this[name]=value}
+  replaceChildren(...items){this.children=items}
+  append(...items){this.children.push(...items)}
+  focus(){}
+ }
+ const keys=['ttChatPanel','ttChatStatus','ttChatConnect','ttChatRetry','ttChatSettings','ttChatUser','ttChatUserRow','ttChatDiagnostics','ttChatMessages','ttChatError','ttChatGiftAlert','ttChatTestGift','ttChatGiftDebug'];
+ const nodes=Object.fromEntries(keys.map(k=>[k,new E(k)]));
+ const doc={readyState:'complete',activeElement:null,hidden:false,getElementById:k=>nodes[k],createElement:k=>new E(k)};
+ const events=[],window={addEventListener(){},dispatchEvent:e=>events.push(e)};
+ class CustomEvent{constructor(type,init){this.type=type;this.detail=init.detail}}
+ const env={document:doc,window,CustomEvent,Date,Number,String,Boolean,Map,Set,
+  fetch:async()=>({ok:true,json:async()=>({status:'connected',username:'peleasfalopa',roomId:'1',connectedAt:1,events:[],comments:[]})}),
+  localStorage:{getItem:()=>null,setItem(){}},setTimeout:()=>1,clearTimeout(){},setInterval(){},console};
+ vm.runInNewContext(src,env,{filename:'tiktok-chat-runtime.js'});
+ const callbacks=[];
+ window.PERSONA_TIKTOK_CHAT.onGift(gift=>callbacks.push(gift));
+ nodes.ttChatTestGift.listeners.click();
+ assert.equal(nodes.ttChatGiftAlert.hidden,false);
+ assert.match(nodes.ttChatGiftAlert.textContent,/Juanma envió Rosa/);
+ assert.equal(callbacks.length,0);
+ assert.equal(events.length,0);
+ assert.match(nodes.ttChatGiftDebug.textContent,/Prueba visual/);
 });

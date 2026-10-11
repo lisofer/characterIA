@@ -73,8 +73,8 @@ function createTikTokChat(options={}){
  let generation=0,active=null,nextId=0;
  let recentFingerprints=new Map(),giftFingerprints=new Map(),giftStreaks=new Map();
  const fresh=()=>now();
- const data={username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,
-  updatedAt:fresh(),connectedAt:0,lastEventAt:0,lastCommentAt:0,
+ const data={username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
+  lastGiftAt:0,methods:{},updatedAt:fresh(),connectedAt:0,lastEventAt:0,lastCommentAt:0,
   wsFrames:0,decodedEvents:0,chatEvents:0,socketConnected:false};
  function snapshot(){
   const age=data.status==='connected'&&data.connectedAt?Math.max(0,fresh()-data.connectedAt):0;
@@ -85,14 +85,17 @@ function createTikTokChat(options={}){
    else if(!data.chatEvents)
     warning='La conexión recibe datos, pero aún no llegaron comentarios. Probá escribir uno en el LIVE.';
   }
-  return {...data,warning,comments:data.comments.slice(),events:data.events.map(e=>({...e}))};
+  return {...data,warning,comments:data.comments.slice(),events:data.events.map(e=>({...e})),
+   methods:{...data.methods},giftFeedStatus:
+    data.giftEvents>0?'receiving':data.giftSignals+data.giftDecoded>0?'seen-not-displayed':'no-gift-events'};
  }
  function stop(){
   generation++;
   const old=active;active=null;
   if(old)try{Promise.resolve(old.disconnect()).catch(()=>{})}catch{}
   recentFingerprints.clear();giftFingerprints.clear();giftStreaks.clear();
-  Object.assign(data,{username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,updatedAt:fresh(),
+  Object.assign(data,{username:'',status:'idle',error:'',roomId:null,comments:[],events:[],giftEvents:0,giftSignals:0,giftDecoded:0,giftBroadcasts:0,giftRejected:0,
+   lastGiftAt:0,methods:{},updatedAt:fresh(),
    connectedAt:0,lastEventAt:0,lastCommentAt:0,wsFrames:0,decodedEvents:0,chatEvents:0,socketConnected:false});
   return snapshot();
  }
@@ -126,7 +129,7 @@ function createTikTokChat(options={}){
   };
   const addGift=event=>{
    const gift=normalizeGift(event,++nextId,fresh());
-   if(!gift)return;
+   if(!gift){data.giftRejected++;data.updatedAt=fresh();return}
    const stamp=fresh();
    const fingerprint=gift.msgId?'id:'+gift.msgId+':'+gift.count+':'+gift.pending:
     'gift:'+gift.username+':'+gift.giftId+':'+gift.count+':'+gift.pending;
@@ -150,7 +153,7 @@ function createTikTokChat(options={}){
     if(data.events.length>MAX_EVENTS)data.events.splice(0,data.events.length-MAX_EVENTS);
     if(gift.streak)giftStreaks.set(streakKey,{id:gift.id,at:stamp,finished:!gift.pending});
    }
-   data.giftEvents++;data.updatedAt=stamp;
+   data.giftEvents++;data.lastGiftAt=stamp;data.updatedAt=stamp;
   };
   (async()=>{
    let connection;
@@ -172,14 +175,24 @@ function createTikTokChat(options={}){
     });
     connection.on(giftEvent,event=>{
      if(current!==generation||!event)return;
-     data.lastEventAt=fresh();data.updatedAt=fresh();addGift(event);
+     data.giftSignals++;data.lastEventAt=fresh();data.updatedAt=fresh();addGift(event);
     });
     connection.on('decodedData',(type,event)=>{
      if(current!==generation)return;
      data.decodedEvents++;data.lastEventAt=fresh();data.updatedAt=fresh();
      const decoded=decodedMessage(type,event);
+     const kind=decoded.type.slice(0,60);
+     if(/^[a-z0-9_-]{1,60}$/i.test(kind)){
+      data.methods[kind]=Math.min(1000000,(data.methods[kind]||0)+1);
+      if(Object.keys(data.methods).length>32){
+       const key=Object.keys(data.methods)[0];
+       delete data.methods[key];
+      }
+     }
      if(/^(WebcastChatMessage|chat)$/i.test(decoded.type))addComment(decoded.data);
-     if(/^(WebcastGiftMessage|gift)$/i.test(decoded.type))addGift(decoded.data);
+     if(/^(WebcastGiftMessage|gift)$/i.test(decoded.type)){data.giftDecoded++;addGift(decoded.data)}
+     if(/^(WebcastGiftBroadcastMessage|giftBroadcast)$/i.test(decoded.type))data.giftBroadcasts++;
+
     });
     connection.on('websocketConnected',()=>{
      if(current!==generation)return;

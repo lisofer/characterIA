@@ -335,3 +335,37 @@ test('Sin el catálogo premium los regalos desconocidos conservan su identificad
  const described=normalizeGift({user:{displayId:'viewer'},giftId:12456,describe:'Sent Tulip'},3,100);
  assert.equal(described.giftName,'Tulip');
 });
+
+test('Diagnóstico distingue regalo reconocido, evento directo y evento decodificado',async()=>{
+ let conn;
+ class Fake extends EventEmitter{
+  constructor(){super();conn=this}
+  async connect(){return {roomId:'rr'}}
+  disconnect(){}
+ }
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ assert.equal(c.snapshot().giftFeedStatus,'no-gift-events');
+ conn.emit('decodedData','WebcastGiftBroadcastMessage',{type:'WebcastGiftBroadcastMessage',data:{}});
+ assert.equal(c.snapshot().giftBroadcasts,1);
+ assert.equal(c.snapshot().giftEvents,0);
+ conn.emit('decodedData','WebcastGiftMessage',{type:'WebcastGiftMessage',data:{giftId:5655,giftName:'Rose',user:{displayId:'juanma'}}});
+ conn.emit('gift',{giftId:5655,giftName:'Rose',user:{displayId:'juanma'}});
+ const result=c.snapshot();
+ assert.equal(result.giftDecoded,1);
+ assert.equal(result.giftSignals,1);
+ assert.equal(result.giftEvents,1);
+ assert.equal(result.giftFeedStatus,'receiving');
+ assert.equal(result.methods.WebcastGiftMessage,1);
+ assert.equal(result.methods.WebcastGiftBroadcastMessage,1);
+});
+test('No expone conversaciones ni usuarios dentro del diagnóstico de métodos',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'1'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat'}})});
+ c.start('live_test');await tick();
+ conn.emit('decodedData','WebcastChatMessage',{type:'WebcastChatMessage',data:{comment:'texto_privado',user:{displayId:'persona'}}});
+ const summary=JSON.stringify(c.snapshot().methods);
+ assert.equal(summary.includes('texto_privado'),false);
+ assert.equal(summary.includes('persona'),false);
+});

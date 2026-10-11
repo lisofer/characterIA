@@ -131,11 +131,23 @@
    bits.push((state.wsFrames||0)+' paquetes');
    bits.push((state.decodedEvents||0)+' eventos');
    bits.push((state.chatEvents||0)+' chats');
-   bits.push((state.giftEvents||0)+' regalos recibidos');
+   bits.push('🎁 '+(state.giftEvents||0)+' regalos');
+   bits.push('gift '+(state.giftSignals||0)+' / datos '+(state.giftDecoded||0));
   }
   processGifts(state);
   diag.textContent=bits.join(' · ');
   diag.hidden=!bits.length;
+  const giftDebug=$('ttChatGiftDebug');
+  const seen=(state.giftSignals||0)+(state.giftDecoded||0);
+  if(giftDebug){
+   const methods=Object.entries(state.methods||{}).filter(([key])=>/gift|chat/i.test(key))
+    .map(([key,n])=>key+': '+n).slice(-5).join(' · ');
+   giftDebug.textContent=state.status!=='connected'?'Conectá primero para probar los regalos reales.':
+    (state.giftEvents>0?'El servidor recibe regalos correctamente.':
+     seen?'Llegaron eventos de regalo, pero no se registraron. Revisar formato.':
+      'TikTok todavía no envió ningún evento de regalo a este conector.')+
+     (methods?' · '+methods:'');
+  }
   const latest=(Array.isArray(state.events)?state.events:state.comments||[]).slice(-45);
   const note=state.warning||(
    state.status==='connecting'?'Conectando con el LIVE de @'+state.username+'…':
@@ -207,6 +219,10 @@
   $('ttChatUser').addEventListener('input',()=>{C.edited=true;updateButton()});
   $('ttChatConnect').addEventListener('click',toggle);
   $('ttChatRetry').addEventListener('click',()=>connect(true));
+  $('ttChatTestGift').addEventListener('click',()=>{
+   displayGift({name:'Juanma',giftName:'Rosa',emoji:'🌹',count:1});
+   $('ttChatGiftDebug').textContent='Prueba visual: el recuadro funciona. No llegó un regalo real y no se enviará ningún agradecimiento.';
+  });
   $('ttChatSettings').addEventListener('click',()=>{
    const row=$('ttChatUserRow');
    row.hidden=!row.hidden;
