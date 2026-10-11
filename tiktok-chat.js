@@ -45,8 +45,10 @@ function normalizeGift(event,id,at=Date.now()){
   x.gift&&typeof x.gift==='object'?x.gift:{};
  const info=x.extendedGiftInfo&&typeof x.extendedGiftInfo==='object'?x.extendedGiftInfo:{};
  const giftId=String(x.giftId??d.giftId??d.gift_id??'').slice(0,45);
- const giftName=String(d.giftName||x.giftName||info.name||info.giftName||d.name||
-  (giftId?'Regalo #'+giftId:'Regalo')).trim().slice(0,70);
+ const rawGiftName=d.giftName||x.giftName||info.name||info.giftName||d.name||
+  (typeof x.describe==='string'?x.describe.replace(/^(?:sent|envió|enviado|envi[oó])\s+/i,''):'');
+ // Identificación local de Rosa para no consultar un catálogo con tarifa Business.
+ const giftName=String(rawGiftName||(giftId==='5655'?'Rosa':giftId?'Regalo #'+giftId:'Regalo')).trim().slice(0,70);
  const amount=Number(x.repeatCount??d.repeatCount??d.repeat_count??1);
  const count=Number.isFinite(amount)?Math.max(1,Math.min(100000,Math.floor(amount))):1;
  const streak=Number(d.giftType??d.gift_type??x.giftType)===1;
@@ -157,7 +159,9 @@ function createTikTokChat(options={}){
     if(current!==generation)return;
     const Connection=library.TikTokLiveConnection||library.default?.TikTokLiveConnection;
     if(typeof Connection!=='function')throw Error('No se pudo cargar el lector de TikTok.');
-    connection=new Connection(username,{processInitialData:true,enableExtendedGiftInfo:true});
+    // La consulta opcional de regalos pide una firma de Euler de plan Business.
+    // No la usamos: recibimos WebcastGiftMessage con la conexión común.
+    connection=new Connection(username,{processInitialData:true,enableExtendedGiftInfo:false});
     active=connection;
     const chatEvent=library.WebcastEvent?.CHAT||'chat';
     const giftEvent=library.WebcastEvent?.GIFT||'gift';

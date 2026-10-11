@@ -280,7 +280,7 @@ test('decodedData de la nueva biblioteca usa {type,data}, no el mensaje directam
   constructor(username,settings){
    super();conn=this;
    assert.equal(settings.processInitialData,true);
-   assert.equal(settings.enableExtendedGiftInfo,true);
+   assert.equal(settings.enableExtendedGiftInfo,false);
   }
   async connect(){return {roomId:'1'}}
   disconnect(){}
@@ -304,4 +304,34 @@ test('decodedMessage admite formato moderno y heredado de eventos',()=>{
  assert.equal(decodedMessage('WebcastGiftMessage',{type:'WebcastGiftMessage',data:e}).data.user.displayId,'tiktok');
  assert.equal(decodedMessage({type:'WebcastGiftMessage',data:e}).type,'WebcastGiftMessage');
  assert.equal(eventPayload({type:'WebcastGiftMessage',data:e}),e);
+});
+
+test('Evita la consulta de catálogo Business al conectar y sigue escuchando regalos',async()=>{
+ let instance,optionsSeen;
+ class NoBusiness extends EventEmitter{
+  constructor(username,settings){
+   super();instance=this;optionsSeen=settings;
+   if(settings.enableExtendedGiftInfo)throw Error('This endpoint requires a Business plan');
+  }
+  async connect(){this.emit('connected',{roomId:'live112'});return {roomId:'live112'}}
+  disconnect(){}
+ }
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:NoBusiness,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('peleasfalopa');await tick();
+ assert.equal(c.snapshot().status,'connected');
+ assert.equal(optionsSeen.processInitialData,true);
+ assert.equal(optionsSeen.enableExtendedGiftInfo,false);
+ instance.emit('gift',{user:{displayId:'regalador'},giftId:5655,repeatCount:1,repeatEnd:true});
+ const item=c.snapshot().events.at(-1);
+ assert.equal(item.giftName,'Rosa');
+ assert.equal(item.emoji,'🌹');
+ assert.equal(item.username,'regalador');
+});
+test('Sin el catálogo premium los regalos desconocidos conservan su identificador',()=>{
+ const rose=normalizeGift({user:{displayId:'viewer'},giftId:5655,repeatCount:2},1,100);
+ assert.equal(rose.giftName,'Rosa');
+ const other=normalizeGift({user:{displayId:'viewer'},giftId:12456,repeatCount:1},2,100);
+ assert.equal(other.giftName,'Regalo #12456');
+ const described=normalizeGift({user:{displayId:'viewer'},giftId:12456,describe:'Sent Tulip'},3,100);
+ assert.equal(described.giftName,'Tulip');
 });
