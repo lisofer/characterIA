@@ -146,7 +146,7 @@ const server=http.createServer(async(req,res)=>{
    if(!quotaCheck(req,60))return respond(res,429,{error:'Demasiadas conexiones. Esperá unos minutos.'});
    try{
     const body=await jsonBody(req,1500);
-    return respond(res,202,tiktokChat.start(body.username));
+    return respond(res,202,tiktokChat.start(body.username,{force:body.force===true}));
    }catch(e){return respond(res,e.status||400,{error:e.message})}
   }
   if(req.method==='POST'&&route==='/api/tiktok/chat/disconnect')return respond(res,200,tiktokChat.stop());
