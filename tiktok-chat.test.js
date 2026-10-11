@@ -146,3 +146,22 @@ test('Recupera comentarios WebcastChatMessage desde decodedData y evita duplicad
  assert.equal(c.snapshot().comments[0].username,'paco');
  assert.equal(c.snapshot().chatEvents,1);
 });
+
+test('Pasa opciones al constructor para evitar processInitialData undefined',async()=>{
+ let created=null;
+ class RequiresOptions extends EventEmitter{
+  constructor(username,options){
+   super();
+   // Simula el acceso interno del conector a options.processInitialData.
+   if(typeof options?.processInitialData!=='boolean')throw TypeError("Cannot read properties of undefined (reading 'processInitialData')");
+   created={username,options};
+  }
+  async connect(){return {roomId:'live123'}}
+  disconnect(){}
+ }
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:RequiresOptions,WebcastEvent:{CHAT:'chat'}})});
+ c.start('@peleasfalopa');await tick();
+ assert.equal(c.snapshot().status,'connected');
+ assert.equal(created.username,'peleasfalopa');
+ assert.equal(created.options.processInitialData,true);
+});

@@ -76,7 +76,7 @@ function createTikTokChat(options={}){
     if(current!==generation)return;
     const Connection=library.TikTokLiveConnection||library.default?.TikTokLiveConnection;
     if(typeof Connection!=='function')throw Error('No se pudo cargar el lector de TikTok.');
-    connection=new Connection(username);
+    connection=new Connection(username,{processInitialData:true});
     active=connection;
     const chatEvent=library.WebcastEvent?.CHAT||'chat';
     connection.on(chatEvent,event=>{
