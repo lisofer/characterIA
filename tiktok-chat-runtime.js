@@ -42,8 +42,8 @@
   if(s.status==='error')return 'Error de conexión';
   return '● Desconectado';
  }
- function textLine(name,body){
-  const div=document.createElement('div');div.className='tt-chat-line';
+ function textLine(name,body,isGift=false,pending=false){
+  const div=document.createElement('div');div.className='tt-chat-line'+(isGift?' gift':'')+(pending?' streak':'');
   const strong=document.createElement('strong');strong.textContent=name;
   const content=document.createElement('span');content.textContent=body;
   div.append(strong,content);return div;
@@ -64,23 +64,31 @@
    bits.push((state.wsFrames||0)+' paquetes');
    bits.push((state.decodedEvents||0)+' eventos');
    bits.push((state.chatEvents||0)+' chats');
+   if(state.giftEvents)bits.push((state.events||[]).filter(e=>e.kind==='gift').length+' regalos');
   }
   diag.textContent=bits.join(' · ');
   diag.hidden=!bits.length;
-  const latest=(state.comments||[]).slice(-45);
+  const latest=(Array.isArray(state.events)?state.events:state.comments||[]).slice(-45);
   const note=state.warning||(
    state.status==='connecting'?'Conectando con el LIVE de @'+state.username+'…':
    state.status==='connected'?'Conectado a @'+state.username+'. Esperando comentarios nuevos…':
    state.status==='idle'?'Elegí el @usuario que está EN VIVO y tocá ▶.':
    'No hay mensajes. Reconectá para reintentar.');
-  const key=state.username+'|'+state.status+'|'+(state.warning||'')+'|'+latest.length+'|'+
-    (latest[0]?.id||'')+'|'+(latest.at(-1)?.id||'');
+  const key=state.username+'|'+state.status+'|'+(state.warning||'')+'|'+latest.map(x=>x.id+':'+(x.count||'')+':'+(x.pending||'')).join('|');
   if(key!==C.renderKey){
    const list=$('ttChatMessages');
    const pinned=list.scrollHeight-list.scrollTop-list.clientHeight<32||!C.renderKey;
    list.replaceChildren();
    if(!latest.length)list.append(textLine('TikTok LIVE',note));
-   else for(const item of latest)list.append(textLine('@'+(item.username||'usuario'),item.text||''));
+   else for(const item of latest){
+    const isGift=item.kind==='gift';
+    const name='@'+(item.username||'usuario');
+    if(!isGift){list.append(textLine(name,item.text||''));continue}
+    const giftName=/^rose$/i.test(item.giftName||'')?'Rosa':String(item.giftName||'Regalo');
+    const count=item.count>1?' ×'+item.count:'';
+    const msg=(item.emoji||'🎁')+' '+(item.pending?'está enviando ':'envió ')+giftName+count;
+    list.append(textLine(name,msg,true,Boolean(item.pending)));
+   }
    if(pinned)list.scrollTop=list.scrollHeight;
    C.renderKey=key;
   }

@@ -2,7 +2,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {EventEmitter}=require('node:events');
-const {normalizeUsername,normalizeComment,createTikTokChat}=require('./tiktok-chat');
+const {normalizeUsername,normalizeComment,normalizeGift,createTikTokChat}=require('./tiktok-chat');
 const tick=async()=>{for(let i=0;i<10;i++)await Promise.resolve()};
 test('Valida el @usuario y filtra datos del comentario',()=>{
  assert.equal(normalizeUsername('@peleasfalopa'),'peleasfalopa');
@@ -164,4 +164,80 @@ test('Pasa opciones al constructor para evitar processInitialData undefined',asy
  assert.equal(c.snapshot().status,'connected');
  assert.equal(created.username,'peleasfalopa');
  assert.equal(created.options.processInitialData,true);
+});
+
+test('Reconoce el nombre del regalo Rosa y el usuario en formatos actuales y anteriores',()=>{
+ const a=normalizeGift({user:{uniqueId:'rosa_fan',nickname:'Fan'},giftDetails:{giftName:'Rose',giftType:1},giftId:5655,repeatCount:1,repeatEnd:false,groupId:'group-1'},8,123);
+ assert.equal(a.kind,'gift');
+ assert.equal(a.username,'rosa_fan');
+ assert.equal(a.name,'Fan');
+ assert.equal(a.giftName,'Rose');
+ assert.equal(a.emoji,'🌹');
+ assert.equal(a.pending,true);
+ const b=normalizeGift({uniqueId:'mate',giftName:'Lion',giftType:0,repeatCount:1},9,124);
+ assert.equal(b.emoji,'🦁');
+ assert.equal(b.pending,false);
+ assert.equal(b.count,1);
+});
+test('Los comentarios y los regalos aparecen ordenados en el mismo recuadro',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'gift_room'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ conn.emit('chat',{comment:'Qué onda',user:{uniqueId:'alguien'}});
+ conn.emit('gift',{giftName:'Rose',giftType:0,repeatCount:1,user:{uniqueId:'pepito'},msgId:'g100'});
+ conn.emit('chat',{comment:'Se armó',user:{uniqueId:'otra'}});
+ assert.deepEqual(c.snapshot().events.map(e=>e.kind),['comment','gift','comment']);
+ assert.equal(c.snapshot().comments.length,2);
+ assert.equal(c.snapshot().events[1].giftName,'Rose');
+ assert.equal(c.snapshot().events[1].username,'pepito');
+ assert.equal(c.snapshot().giftEvents,1);
+});
+test('La racha de rosas actualiza una sola fila de x1 a x5 sin duplicados',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'123'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ const rose=(count,end,id)=>({giftId:5655,giftDetails:{giftName:'Rose',giftType:1},
+  user:{uniqueId:'rosafan'},repeatCount:count,repeatEnd:end,groupId:'streak_77',msgId:id});
+ conn.emit('gift',rose(1,false,'msg1'));
+ assert.equal(c.snapshot().events[0].pending,true);
+ conn.emit('gift',rose(3,false,'msg2'));
+ assert.equal(c.snapshot().events.length,1);
+ assert.equal(c.snapshot().events[0].count,3);
+ conn.emit('gift',rose(5,true,'msg3'));
+ assert.equal(c.snapshot().events.length,1);
+ assert.equal(c.snapshot().events[0].pending,false);
+ assert.equal(c.snapshot().events[0].count,5);
+});
+test('Un evento gift y decodedData del mismo regalo no generan dos filas',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'123'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ const gift={giftId:5,giftName:'Rose',giftType:0,msgId:'unique001',user:{uniqueId:'x'},repeatCount:1};
+ conn.emit('decodedData','WebcastGiftMessage',gift);
+ conn.emit('gift',gift);
+ assert.equal(c.snapshot().events.length,1);
+ assert.equal(c.snapshot().giftEvents,1);
+});
+test('Dos regalos independientes del mismo usuario se muestran separados',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'123'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ conn.emit('gift',{giftId:5,giftName:'Rose',giftType:0,msgId:'gift-1',uniqueId:'same'});
+ conn.emit('gift',{giftId:5,giftName:'Rose',giftType:0,msgId:'gift-2',uniqueId:'same'});
+ assert.equal(c.snapshot().events.length,2);
+});
+test('Al desconectar también se borran los regalos de la transmisión anterior',async()=>{
+ let conn;
+ class Fake extends EventEmitter{constructor(){super();conn=this}async connect(){return {roomId:'123'}}disconnect(){}}
+ const c=createTikTokChat({loadConnector:async()=>({TikTokLiveConnection:Fake,WebcastEvent:{CHAT:'chat',GIFT:'gift'}})});
+ c.start('live_test');await tick();
+ conn.emit('gift',{giftId:1,giftName:'Rose',uniqueId:'x'});
+ assert.equal(c.snapshot().events.length,1);
+ c.stop();
+ assert.equal(c.snapshot().events.length,0);
+ assert.equal(c.snapshot().giftEvents,0);
 });
