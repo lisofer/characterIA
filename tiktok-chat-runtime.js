@@ -1,10 +1,77 @@
 /* TikTok LIVE: visor privado de comentarios, conexión e indicadores de actividad. */
 (function(){
  'use strict';
+ // Detección independiente de la UI: avisa una sola vez al finalizar un regalo
+ // o una racha. Las actualizaciones intermedias solo actualizan la alerta visual.
+ function createGiftTracker(now=()=>Date.now()){
+  let session=null,seen=new Map(),notified=new Set(),ready=false;
+  function consume(state,armed=false){
+   const id=[state?.username||'',state?.roomId||'',state?.connectedAt||0].join('|');
+   if(id!==session){session=id;seen.clear();notified.clear();ready=false}
+   const gifts=(Array.isArray(state?.events)?state.events:[]).filter(x=>x?.kind==='gift');
+   const changes=[],completed=[];
+   if(!ready&&!armed){
+    for(const gift of gifts){
+     seen.set(gift.id,{count:gift.count,pending:gift.pending,at:gift.at});
+     if(!gift.pending)notified.add(gift.id); // No anunciar regalos anteriores al abrir el panel.
+    }
+    ready=true;return {changes,completed};
+   }
+   ready=true;
+   const currentTime=now();
+   for(const gift of gifts){
+    const prev=seen.get(gift.id);
+    const updated=!prev||prev.count!==gift.count||prev.pending!==gift.pending;
+    if(updated&&(!gift.at||currentTime-gift.at<12000))changes.push(gift);
+    seen.set(gift.id,{count:gift.count,pending:gift.pending,at:gift.at});
+    // La IA futura recibirá una sola señal por regalo, con la cantidad final.
+    // Algunas rachas no mandan repeatEnd: después de 6 s sin cambios cerramos.
+    if(!notified.has(gift.id)&&(!gift.pending||currentTime-Number(gift.at||currentTime)>=6000)){
+     notified.add(gift.id);
+     if(!gift.at||currentTime-gift.at<20000)completed.push(gift);
+    }
+   }
+   const ids=new Set(gifts.map(g=>g.id));
+   for(const key of seen.keys())if(!ids.has(key)){seen.delete(key);notified.delete(key)}
+   return {changes,completed};
+  }
+  function reset(){session=null;seen.clear();notified.clear();ready=false}
+  return {consume,reset};
+ }
+ if(typeof module!=='undefined'&&module.exports)module.exports={createGiftTracker};
  if(typeof document==='undefined')return;
  const $=id=>document.getElementById(id);
  const GLOBAL='persona-studio-global-v3',DEFAULT_USER='peleasfalopa';
- const C={status:'idle',username:'',pending:false,renderKey:'',polling:false,edited:false};
+ const C={status:'idle',username:'',pending:false,renderKey:'',polling:false,edited:false,armed:false,lastGift:null};
+ const giftTracker=createGiftTracker();
+ const giftCallbacks=new Set();
+ let hideGiftTimeout=null;
+ function displayGift(gift){
+  const box=$('ttChatGiftAlert');
+  if(!box)return;
+  const name=String(gift.name||gift.username||'Espectador').slice(0,50);
+  const giftName=/^rose$/i.test(gift.giftName||'')?'Rosa':String(gift.giftName||'Regalo').slice(0,70);
+  const qty=Number(gift.count)>1?' ×'+gift.count:'';
+  box.textContent=(gift.emoji||'🎁')+' '+name+' envió '+giftName+qty;
+  box.hidden=false;
+  if(hideGiftTimeout!==null)clearTimeout(hideGiftTimeout);
+  hideGiftTimeout=setTimeout(()=>{box.hidden=true;hideGiftTimeout=null},8500);
+ }
+ function emitGift(gift,state){
+  const detail={id:gift.id,username:gift.username||'',name:gift.name||gift.username||'Espectador',
+    giftId:gift.giftId||'',giftName:gift.giftName||'Regalo',
+    count:Number(gift.count)||1,emoji:gift.emoji||'🎁',at:gift.at||Date.now(),
+    roomId:state.roomId||'',broadcaster:state.username||''};
+  C.lastGift={...detail};
+  window.dispatchEvent(new CustomEvent('persona:tiktok-gift',{detail:{...detail}}));
+  for(const fn of giftCallbacks)try{fn({...detail})}catch(error){console.warn('Receptor de regalos:',error)}
+ }
+ function processGifts(state){
+  if(C.pending||(state.status!=='connected'&&state.status!=='connecting'))return;
+  const batch=giftTracker.consume(state,C.armed);
+  for(const gift of batch.changes)displayGift(gift);
+  for(const gift of batch.completed)emitGift(gift,state);
+ }
  function stored(){
   try{return String(JSON.parse(localStorage.getItem(GLOBAL)||'{}')?.tiktokChat?.username||DEFAULT_USER)}
   catch{return DEFAULT_USER}
@@ -66,6 +133,7 @@
    bits.push((state.chatEvents||0)+' chats');
    bits.push((state.giftEvents||0)+' regalos recibidos');
   }
+  processGifts(state);
   diag.textContent=bits.join(' · ');
   diag.hidden=!bits.length;
   const latest=(Array.isArray(state.events)?state.events:state.comments||[]).slice(-45);
@@ -100,7 +168,7 @@
   $('ttChatError').textContent=error;
  }
  async function poll(){
-  if(C.polling||document.hidden)return;
+  if(C.polling)return; // Seguimos leyendo regalos aunque el panel quede en segundo plano.
   C.polling=true;
   try{paint(await request(''))}
   catch(e){$('ttChatError').textContent='No se puede consultar el chat: '+e.message}
@@ -113,7 +181,7 @@
    $('ttChatError').textContent='Poné el @usuario de la cuenta que está transmitiendo (sin enlaces).';
    $('ttChatUserRow').hidden=false;$('ttChatUser').focus();return;
   }
-  C.pending=true;updateButton();$('ttChatError').textContent='';
+  C.pending=true;C.armed=true;C.lastGift=null;giftTracker.reset();updateButton();$('ttChatError').textContent='';
   try{
    const data=await request('/connect',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:name,force})});
@@ -123,7 +191,7 @@
  }
  async function disconnect(){
   if(C.pending)return;
-  C.pending=true;updateButton();
+  C.pending=true;C.armed=false;C.lastGift=null;giftTracker.reset();$('ttChatGiftAlert').hidden=true;updateButton();
   try{C.renderKey='';paint(await request('/disconnect',{method:'POST'}))}
   catch(e){$('ttChatError').textContent=e.message}
   finally{C.pending=false;updateButton()}
@@ -149,10 +217,14 @@
   });
   updateButton();poll();setInterval(poll,1600);
   window.addEventListener('focus',poll);
-  window.PERSONA_TIKTOK_CHAT={refresh:()=>{
-   if(C.status==='idle'&&!C.edited)$('ttChatUser').value='@'+stored().replace(/^@/,'');
-   poll();
-  }};
+  window.PERSONA_TIKTOK_CHAT={
+   refresh:()=>{if(C.status==='idle'&&!C.edited)$('ttChatUser').value='@'+stored().replace(/^@/,'');poll()},
+   onGift:callback=>{
+    if(typeof callback!=='function')return ()=>{};
+    giftCallbacks.add(callback);return ()=>giftCallbacks.delete(callback);
+   },
+   lastGift:()=>C.lastGift?{...C.lastGift}:null
+  };
  }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
  else init();
