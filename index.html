@@ -814,7 +814,7 @@ function restoreDuelGeneralPrompt(){
  $('duelPromptStatus').textContent='Guardado automático';
 }
 function saveDuelGeneralPrompt(){
- try{localStorage.setItem(DUEL_PROMPT_KEY,$('duelGeneralPrompt').value);window.PERSONA_CLOUD?.schedule();$('duelPromptStatus').textContent='Guardado automático'}
+ try{localStorage.setItem(DUEL_PROMPT_KEY,$('duelGeneralPrompt').value);D.contextSerial++;cancelEarlyDuelBatch(D.nextPrepared);D.nextPrepared=null;window.PERSONA_CLOUD?.schedule();$('duelPromptStatus').textContent='Guardado automático'}
  catch{$('duelPromptStatus').textContent='No se pudo guardar';toast('No se pudo guardar el prompt general.',true)}
 }
 $('duelGeneralPrompt').addEventListener('input',saveDuelGeneralPrompt);
