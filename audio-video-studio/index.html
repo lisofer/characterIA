@@ -17,7 +17,23 @@ h1{font-size:clamp(22px,4vw,30px);line-height:1.1;margin:2px 0 5px;letter-spacin
 .btn{border:1px solid #526479;color:var(--text);border-radius:12px;background:#253247;padding:12px 15px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:13px;font-weight:720;min-height:44px;text-decoration:none}.btn.primary{background:var(--a);border-color:var(--a);color:#07342f}.btn.secondary{background:#183a3b;border-color:#367774;color:#bcf9eb}.btn.wide{width:100%}.btn.tinybtn{min-height:36px;padding:8px 11px;font-size:12px}.btn:active{transform:translateY(1px)}.actions{display:flex;gap:8px;flex-wrap:wrap}.grid-two{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}.detail{font-size:12px;color:var(--muted);line-height:1.45}.visual{width:100%;aspect-ratio:9/16;position:relative;overflow:hidden;border-radius:14px;border:1px solid #3d4c60;background:#131722;max-height:375px}
 .visual img{position:absolute;width:100%;height:100%;left:0;top:0;object-fit:contain}.visual img.bg{object-fit:cover}#preview-avatar{object-position:center bottom}.preview-caption{color:#c8d6e9;font-size:12px;padding:10px 0 0}.choice-row{display:flex;gap:10px;overflow-x:auto;padding:0 1px 6px;scroll-snap-type:x mandatory}.choice{flex:0 0 110px;background:#101a29;border:1px solid #3a4b62;color:var(--text);border-radius:12px;padding:8px;text-align:left;scroll-snap-align:start}.choice.selected{border:2px solid var(--a);padding:7px;background:#183635}.choice img{width:100%;height:80px;object-fit:contain;border-radius:7px;background:#090e18}.choice b{display:block;margin-top:7px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.choice small{font-size:11px;color:var(--muted)}.choice.none{display:grid;place-items:center;text-align:center;min-height:120px}.choice.none span{font-size:24px}
 .result{border-color:#4a726b;background:linear-gradient(150deg,#18342d,#172536)}.status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--a);margin:8px 0}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor}.status.fail{color:var(--danger)}audio,video{width:100%;max-height:380px;margin:8px 0;border-radius:12px}
-.divider{height:1px;background:var(--line);margin:18px 0}.list-item{padding:13px 0;border-bottom:1px solid #344255}.list-item:last-child{border-bottom:0}.list-title{font-weight:760;font-size:14px}.list-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.45}.list-text{font-size:13px;color:#dce5f1;line-height:1.45;margin:10px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere}.empty{background:#111a29;border:1px dashed #3b5161;border-radius:15px;padding:23px 18px;color:var(--muted);font-size:13px;text-align:center;line-height:1.6}.row{display:flex;align-items:center;gap:12px}.row .grow{flex:1;min-width:0}.thumb{width:58px;height:78px;background:#101522;border:1px solid #33445a;border-radius:10px;object-fit:contain}.chip{background:#20363b;border:1px solid #436367;color:#c5eee9;font-size:10px;border-radius:99px;padding:4px 8px;white-space:nowrap}
+.divider{height:1px;background:var(--line);margin:18px 0}
+.slot-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:12px 0}
+.slot{position:relative;overflow:hidden;min-width:0;padding:6px 4px 8px;color:var(--text);border:1px solid #34445c;border-radius:11px;background:#101a29;cursor:pointer;text-align:center}
+.slot img{width:100%;aspect-ratio:3/4;object-fit:contain;border-radius:7px;display:block;background:#192538}
+.slot .empty-icon{width:100%;aspect-ratio:3/4;display:grid;place-items:center;color:#83aaac;font-size:25px;border-radius:7px;background:#1d2938}
+.slot small{display:block;margin-top:4px;color:#c7d4e5;font-size:10px;line-height:1.25}
+.slot .slot-index{position:absolute;z-index:1;top:7px;left:7px;background:#0c1523bb;border-radius:5px;padding:2px 4px;font-size:10px;font-weight:700}
+.slider-pair{display:grid;grid-template-columns:1fr;gap:13px;margin:12px 0}
+.slider-field{padding:11px;background:#101927;border:1px solid #314156;border-radius:12px}
+.slider-field label{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.slider-field output{color:var(--a);white-space:nowrap;font-size:12px}
+.slider-field input[type=range]{display:block;width:100%;accent-color:var(--a);padding:0;margin:2px 0;min-height:28px}
+.sync-help{font-size:12px;line-height:1.5;color:var(--muted);margin:10px 0}
+.inline-toggle{display:flex;align-items:center;gap:9px;font-size:12px;color:#d4e7ec;margin:12px 0}
+.inline-toggle input{width:18px;height:18px;accent-color:var(--a)}
+@media(min-width:560px){.slider-pair{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.list-item{padding:13px 0;border-bottom:1px solid #344255}.list-item:last-child{border-bottom:0}.list-title{font-weight:760;font-size:14px}.list-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.45}.list-text{font-size:13px;color:#dce5f1;line-height:1.45;margin:10px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere}.empty{background:#111a29;border:1px dashed #3b5161;border-radius:15px;padding:23px 18px;color:var(--muted);font-size:13px;text-align:center;line-height:1.6}.row{display:flex;align-items:center;gap:12px}.row .grow{flex:1;min-width:0}.thumb{width:58px;height:78px;background:#101522;border:1px solid #33445a;border-radius:10px;object-fit:contain}.chip{background:#20363b;border:1px solid #436367;color:#c5eee9;font-size:10px;border-radius:99px;padding:4px 8px;white-space:nowrap}
 nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;justify-content:center;border-top:1px solid #364358;background:#121a29ef;backdrop-filter:blur(16px);padding:8px 9px calc(8px + env(safe-area-inset-bottom))}nav button{max-width:210px;flex:1;display:grid;place-items:center;gap:4px;background:transparent;color:#98a8bd;border:0;border-radius:12px;padding:8px 4px;font-size:10px;font-weight:720}nav button .emoji{font-size:21px;line-height:1.2}nav button.current{background:#203e3d;color:#aaf6df}
 .overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:#0b101bf5}.login-box{width:100%;max-width:380px;border:1px solid #36515e;background:#182435;border-radius:22px;padding:28px 22px}.login-box .logo{font-size:37px;margin-bottom:18px}.login-box h1{font-size:24px}#toast{position:fixed;z-index:15;left:50%;bottom:104px;transform:translateX(-50%);background:#28463f;border:1px solid #68a691;padding:12px 16px;border-radius:13px;font-size:12px;width:max-content;max-width:90vw;box-shadow:0 5px 45px #0007}#toast.error{background:#532f3a;border-color:#be6c79}
 @media(min-width:760px){.grid-two{grid-template-columns:repeat(2,minmax(0,1fr))}.shell{padding:34px 24px 100px}.create-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:15px}.create-layout .right-col{position:sticky;top:103px;align-self:start}nav{left:50%;transform:translateX(-50%);max-width:540px;border-radius:18px 18px 0 0;border:1px solid #364358;border-bottom:0}.panel{padding:22px}.visual{max-height:540px}}
@@ -51,6 +67,11 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="field"><label for="speech-text">4. ¿Qué va a decir?</label><textarea id="speech-text" maxlength="3000" placeholder="Escribí exactamente lo que querés que diga..."></textarea></div>
 <details style="margin:0 0 16px"><summary style="font-size:13px;color:var(--a);font-weight:700;cursor:pointer">✧ Ayudarme a escribir con Gemini (opcional)</summary><div style="padding-top:12px"><div class="field"><label for="idea">Idea para el diálogo</label><input id="idea" placeholder="Ej.: un vendedor que se enoja porque..." maxlength="1200"></div><button class="btn secondary" id="gemini-btn" type="button">Crear un texto con Gemini</button></div></details>
 <button class="btn primary wide" id="generate" type="button">✦ Generar audio</button>
+<div class="divider"></div>
+<h3>Prueba de voz y sincronización</h3>
+<div class="field"><label for="test-text">Frase de ejemplo</label><textarea id="test-text" style="min-height:78px">Hola, ¿cómo estás? Me encanta poder hablar con vos.</textarea></div>
+<div class="actions"><button type="button" class="btn secondary" id="test-speak">▶ Probar con Fish</button><button type="button" class="btn" id="test-gestures">Ver gestos sin gastar Fish</button></div>
+<div class="sync-help">La prueba con Fish genera un MP3 y muestra los cambios de boca mientras se reproduce. Podés ajustar los sliders del personaje y volver a sincronizar sin volver a pagar el audio.</div>
 </div>
 <div id="current-result" hidden class="panel result"></div>
 </div>
@@ -59,6 +80,7 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <h3>Vista previa del escenario</h3>
 <div class="visual" id="preview-scene"><img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden></div>
 <div class="preview-caption" id="preview-caption">Seleccioná un personaje y un conjunto.</div>
+<div class="detail" id="preview-sync-status">Al reproducir una prueba, la boca se sincroniza con el tiempo real del MP3.</div>
 </div>
 </div>
 </div>
@@ -73,6 +95,13 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="field"><label>Muestra de voz (si no usás ID)</label><input name="reference" type="file" accept=".wav,.mp3,.m4a,.ogg,.flac,audio/*"></div>
 <div class="field"><label>Texto exacto de la muestra</label><textarea name="reference_text" style="min-height:80px" placeholder="Lo que realmente dice el audio de referencia"></textarea></div>
 <div class="field"><label>Personalidad / estilo para Gemini</label><textarea name="notes" style="min-height:75px" placeholder="Ej.: habla como un presentador irónico..."></textarea></div>
+<div class="divider"></div>
+<h3>Sincronización desde texto</h3>
+<div class="slider-pair">
+<div class="slider-field"><label for="mouth-new">Actividad labial (menos = más natural) <output id="mouth-value-new">45%</output></label><input id="mouth-new" name="mouth_intensity" type="range" min="20" max="85" step="5" value="45"></div>
+<div class="slider-field"><label for="delay-new">Adelanto visual <output id="delay-value-new">0 ms</output></label><input id="delay-new" name="voice_delay" type="range" min="-100" max="160" step="10" value="0"></div>
+</div><label class="inline-toggle"><input type="checkbox" name="auto_blink" checked>Parpadeo espontáneo</label>
+<div class="sync-help">La boca usa los gestos A, O y E, y mantiene reposo durante las pausas detectadas en Fish. El adelanto se mide respecto del audio real.</div>
 <button class="btn primary wide" type="submit">+ Guardar personaje</button>
 </form></div>
 <div class="panel"><h2>Mis personajes</h2><div id="characters-list"></div></div>
@@ -83,6 +112,13 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="grid-two"><div class="field"><label>Nombre</label><input name="name" required></div><div class="field"><label>ID de voz Fish</label><input name="voice_id"></div></div>
 <div class="field"><label>Texto de la muestra (si usa audio de referencia)</label><textarea name="reference_text" style="min-height:76px"></textarea></div>
 <div class="field"><label>Estilo para Gemini</label><textarea name="notes" style="min-height:76px"></textarea></div>
+<div class="divider"></div>
+<h3>Sincronización desde texto</h3>
+<div class="slider-pair">
+<div class="slider-field"><label for="mouth-edit">Actividad labial (menos = más natural) <output id="mouth-value-edit">45%</output></label><input id="mouth-edit" name="mouth_intensity" type="range" min="20" max="85" step="5" value="45"></div>
+<div class="slider-field"><label for="delay-edit">Adelanto visual <output id="delay-value-edit">0 ms</output></label><input id="delay-edit" name="voice_delay" type="range" min="-100" max="160" step="10" value="0"></div>
+</div><label class="inline-toggle"><input type="checkbox" name="auto_blink" checked>Parpadeo espontáneo</label>
+<div class="sync-help">La boca usa los gestos A, O y E, y mantiene reposo durante las pausas detectadas en Fish. El adelanto se mide respecto del audio real.</div>
 <button type="submit" class="btn secondary">Guardar cambios</button>
 </form>
 <div class="divider"></div>
@@ -91,13 +127,18 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="field"><label>Transcripción exacta</label><textarea name="reference_text" required style="min-height:75px"></textarea></div>
 <button type="submit" class="btn">Guardar nueva muestra</button></form>
 <div class="divider"></div>
-<h3>Agregar conjunto de ocho PNG</h3>
-<p class="detail">Elegí ocho imágenes numeradas 00.png a 07.png. Se ordenan alfabéticamente; 00 es reposo y 01–07 son distintas posiciones de la boca.</p>
+<h3>Vestimenta / conjuntos de 8 PNG</h3>
+<p class="detail">Creá un conjunto (por ejemplo, “Remera azul”) y tocá cada casilla para subir su PNG. No hace falta cargar las ocho imágenes de una sola vez.</p>
 <form id="new-outfit">
 <div class="field"><label>Nombre del conjunto</label><input name="name" required placeholder="Ej.: Remera azul"></div>
-<div class="field"><label>Seleccionar exactamente 8 PNG</label><input name="images" type="file" accept=".png,image/png" multiple required></div>
-<p id="file-count" class="detail">0 de 8 imágenes elegidas.</p><button type="submit" class="btn primary">Agregar vestimenta</button></form>
-<div id="outfits-list" style="margin-top:16px"></div>
+<button type="submit" class="btn primary">+ Crear conjunto vacío</button></form>
+<div class="field" style="margin-top:15px"><label for="outfit-editor-choice">Conjunto a configurar</label><select id="outfit-editor-choice"></select></div>
+<div id="outfits-list"></div>
+<input id="slot-file" type="file" accept=".png,image/png" hidden>
+<div class="divider"></div>
+<h3>Previsualizar los gestos</h3>
+<div class="actions" id="gesture-buttons"><button type="button" class="btn tinybtn" data-gesture="1">A</button><button type="button" class="btn tinybtn" data-gesture="5">O</button><button type="button" class="btn tinybtn" data-gesture="7">E</button><button type="button" class="btn tinybtn" data-gesture="3">Reposo</button><button type="button" class="btn tinybtn" data-gesture="2">Parpadeo</button></div>
+<p class="sync-help">Las casillas siguen el orden original de Persona Studio: boca A, reposo, boca O y boca E, cada una con ojos cerrados y abiertos.</p>
 </div>
 </section>
 <section class="tab" id="tab-backgrounds">
