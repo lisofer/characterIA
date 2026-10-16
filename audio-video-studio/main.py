@@ -153,6 +153,10 @@ def logout(_: None = Depends(auth)):
 def homepage():
     return FileResponse(BASE / "index.html", headers={"Cache-Control": "no-store"})
 
+@app.get("/api/generations")
+def generation_list(_: None = Depends(auth)):
+    return {"generations": rows("generations")}
+
 @app.get("/api/state")
 def state(_: None = Depends(auth)):
     characters = rows("characters", "name COLLATE NOCASE")
