@@ -40,6 +40,18 @@ class StudioSmokeTest(unittest.TestCase):
                                    data={"name":"faltan"},
                                    files=[("images", ("00.png", picture_bytes("red"), "image/png"))])
         self.assertEqual(invalid.status_code, 400, invalid.text)
+        empty = self.client.post("/api/characters/" + cid + "/outfits",data={"name":"Otro traje"})
+        self.assertEqual(empty.status_code,200,empty.text)
+        eid=empty.json()["id"]
+        self.assertEqual(self.client.get("/api/outfits/"+eid+"/image/1").status_code,404)
+        partial = self.client.post("/api/outfits/"+eid+"/slot/1",
+              files={"image":("01.png",picture_bytes("red"),"image/png")})
+        self.assertEqual(partial.status_code,200,partial.text)
+        state_after = self.client.get("/api/state").json()
+        saved = next(x for x in state_after["outfits"] if x["id"]==eid)
+        self.assertTrue(saved["slots"][1])
+        self.assertFalse(saved["complete"])
+        self.assertEqual(self.client.get("/api/outfits/"+eid+"/image/1").status_code,200)
         items = [("images", (f"{i:02d}.png", picture_bytes((i*23, 70, 130, 255)), "image/png")) for i in range(8)]
         outfit = self.client.post("/api/characters/" + cid + "/outfits",
                                   data={"name":"Remera test"}, files=items)
@@ -54,7 +66,7 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/backgrounds/"+bid+"/image").status_code,200)
         state = self.client.get("/api/state").json()
         self.assertEqual(len(state["characters"]), 1)
-        self.assertEqual(len(state["outfits"]), 1)
+        self.assertEqual(len(state["outfits"]), 2)
         self.assertEqual(len(state["backgrounds"]), 1)
         self.assertEqual(self.client.post("/api/generations", json={
             "character_id":cid, "outfit_id":sid,"background_id":bid,"text":"Hola"
