@@ -197,7 +197,7 @@ function renderCreate(){
  const outfits=data.outfits.filter(x=>x.character_id===currentChar());
  if(!outfits.some(x=>x.id===selectedOutfit))selectedOutfit=outfits[0]?.id||"";
  $("outfits-choice").innerHTML=outfits.length?outfits.map(x=>
-   '<button type="button" class="choice '+(selectedOutfit===x.id?"selected":"")+'" data-outfit="'+html(x.id)+'"><img src="/api/outfits/'+html(x.id)+'/image/0" alt=""><b>'+html(x.name)+'</b><small>8 PNG</small></button>'
+   '<button type="button" class="choice '+(selectedOutfit===x.id?"selected":"")+'" data-outfit="'+html(x.id)+'">'+(x.slots?.[3]?'<img src="/api/outfits/'+html(x.id)+'/image/3" alt="">':'<div class="empty-icon">＋</div>')+'<b>'+html(x.name)+'</b><small>'+((x.slots||[]).filter(Boolean).length)+'/8 PNG</small></button>'
  ).join(""):'<div class="empty" style="width:100%">No hay conjuntos. Agregá uno desde Personajes.</div>';
  $("background-choice").innerHTML='<button class="choice none '+(!selectedBackground?"selected":"")+'" data-background=""><span>◌</span><b>Sin fondo</b></button>'+
  data.backgrounds.map(x=>'<button type="button" class="choice '+(selectedBackground===x.id?"selected":"")+'" data-background="'+html(x.id)+'"><img style="object-fit:cover" src="/api/backgrounds/'+html(x.id)+'/image" alt=""><b>'+html(x.name)+'</b></button>').join("");
@@ -207,7 +207,7 @@ function renderCreate(){
  bg.hidden=!selectedBackground;
  if(selectedBackground)bg.src="/api/backgrounds/"+encodeURIComponent(selectedBackground)+"/image";
  avatar.hidden=!selectedOutfit;
- if(selectedOutfit)avatar.src="/api/outfits/"+encodeURIComponent(selectedOutfit)+"/image/0";
+ if(selectedOutfit){const set=findBy(data.outfits,selectedOutfit);const idx=set?.slots?.[3]?3:(set?.slots||[]).findIndex(Boolean);avatar.hidden=idx<0;if(idx>=0)avatar.src="/api/outfits/"+encodeURIComponent(selectedOutfit)+"/image/"+idx;}
  const c=findBy(data.characters,currentChar()),s=findBy(data.outfits,selectedOutfit);
  $("preview-caption").textContent=c?(c.name+" · "+(s?.name||"sin conjunto")):"Elegí un personaje para ver la vista previa.";
 }
@@ -220,13 +220,66 @@ function renderCharacters(){
  if(old&&findBy(data.characters,old))$("edit-character-choice").value=old;
  fillEdit();
 }
+const SLOT_NAMES=[
+ ["Ojos cerrados","Boca A"],["Ojos abiertos","Boca A"],
+ ["Ojos cerrados","Boca cerrada"],["Ojos abiertos","Boca cerrada"],
+ ["Ojos cerrados","Boca O"],["Ojos abiertos","Boca O"],
+ ["Ojos cerrados","Boca E"],["Ojos abiertos","Boca E"]
+];
 function fillEdit(){
  const c=findBy(data.characters,$("edit-character-choice").value);
  ["edit-character","update-reference","new-outfit"].forEach(form=>$(form).style.display=c?"block":"none");
- if(!c){$("outfits-list").innerHTML="";return}
- for(const key of ["name","voice_id","notes","reference_text"])$("edit-character").elements.namedItem(key).value=c[key]||"";
- $("outfits-list").innerHTML='<h3>Conjuntos de '+html(c.name)+'</h3>'+(
- data.outfits.filter(x=>x.character_id===c.id).map(x=>'<div class="row list-item"><img class="thumb" src="/api/outfits/'+html(x.id)+'/image/0" alt=""><div><strong>'+html(x.name)+'</strong><div class="detail">Ocho imágenes guardadas</div></div></div>').join("") || '<div class="empty">Todavía no hay conjuntos.</div>');
+ if(!c){$("outfits-list").innerHTML="";$("outfit-editor-choice").innerHTML="";return}
+ for(const key of ["name","voice_id","notes","reference_text","mouth_intensity","voice_delay"]){
+  const el=$("edit-character").elements.namedItem(key);
+  if(el)el.value=c[key]??"";
+ }
+ $("edit-character").elements.namedItem("auto_blink").checked=Boolean(c.auto_blink);
+ updateSliderLabels();
+ const outfits=data.outfits.filter(x=>x.character_id===c.id);
+ const old=$("outfit-editor-choice").value;
+ createOptions($("outfit-editor-choice"),outfits,"Seleccionar conjunto");
+ if(outfits.some(x=>x.id===old))$("outfit-editor-choice").value=old;
+ renderSlotGrid();
+}
+function renderSlotGrid(){
+ const s=findBy(data.outfits,$("outfit-editor-choice").value);
+ const root=$("outfits-list");
+ if(!s){root.innerHTML='<div class="empty">Creá un conjunto para comenzar a cargar los PNG.</div>';return}
+ const loaded=(s.slots||[]).filter(Boolean).length;
+ root.innerHTML='<p class="detail">'+html(s.name)+' · '+loaded+'/8 imágenes. Tocá cada casilla para cargar o reemplazar su PNG.</p>'+
+ '<div class="slot-grid">'+SLOT_NAMES.map((names,i)=>
+ '<button class="slot" type="button" data-slot="'+i+'" aria-label="Cargar '+html(names.join(", "))+'">'+
+ '<span class="slot-index">'+String(i+1).padStart(2,"0")+'</span>'+
+ (s.slots?.[i]?'<img src="/api/outfits/'+html(s.id)+'/image/'+i+'" alt="'+html(names.join(", "))+'">':'<div class="empty-icon">＋</div>')+
+ '<small>'+names[0]+'<br>'+names[1]+'</small></button>'
+ ).join("")+'</div>'+
+ '<p class="detail">'+(loaded===8?"✓ Los ocho gestos están listos para exportar MP4.":"Faltan "+(8-loaded)+" gestos; podés seguir cargándolos en otro momento.")+'</p>';
+ root.querySelectorAll("[data-slot]").forEach(btn=>btn.onclick=()=>{
+   $("slot-file").dataset.index=btn.dataset.slot;$("slot-file").value="";$("slot-file").click();
+ });
+}
+function updateSliderLabels(){
+ for(const id of ["new","edit"]){
+  $("mouth-value-"+id).textContent=$("mouth-"+id).value+"%";
+  $("delay-value-"+id).textContent=$("delay-"+id).value+" ms";
+ }
+}
+for(const el of document.querySelectorAll("input[type=range]"))el.addEventListener("input",updateSliderLabels);
+function editPayload(){
+ const f=$("edit-character"),payload=Object.fromEntries(new FormData(f).entries());
+ payload.auto_blink=f.elements.namedItem("auto_blink").checked;
+ payload.mouth_intensity=Number(payload.mouth_intensity);
+ payload.voice_delay=Number(payload.voice_delay);
+ return payload;
+}
+async function saveEditedCharacter(silent=false){
+ const id=$("edit-character-choice").value;
+ const payload=editPayload();
+ await api("/api/characters/"+encodeURIComponent(id),{method:"PUT",
+   headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+ if(!silent)toast("Ajustes y voz guardados.");
+ return id;
 }
 function getName(arr,id){return findBy(arr,id)?.name||"Desconocido";}
 function statusText(j){
