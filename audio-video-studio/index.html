@@ -120,6 +120,11 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 </div><label class="inline-toggle"><input type="checkbox" name="auto_blink" checked>Parpadeo espontáneo</label>
 <div class="sync-help">La boca usa los gestos A, O y E, y mantiene reposo durante las pausas detectadas en Fish. El adelanto se mide respecto del audio real.</div>
 <button type="submit" class="btn secondary">Guardar cambios</button>
+<div class="divider"></div>
+<h3>Prueba de sincronización de este personaje</h3>
+<div class="field"><label for="edit-test-text">Frase de prueba</label><textarea id="edit-test-text" style="min-height:76px">Hola, ¿cómo estás? Me encanta poder hablar con vos.</textarea></div>
+<div class="actions"><button class="btn primary" type="button" id="edit-test-fish">▶ Probar con Fish y animar</button><button class="btn" type="button" id="edit-apply-sync">Aplicar sliders al último MP3</button></div>
+<p class="sync-help">La primera prueba genera audio real con Fish. Después podés corregir actividad labial y adelanto visual sobre ese mismo MP3, sin volver a sintetizar la voz.</p>
 </form>
 <div class="divider"></div>
 <h3>Reemplazar muestra de voz</h3><form id="update-reference">
