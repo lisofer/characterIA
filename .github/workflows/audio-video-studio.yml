@@ -1,0 +1,25 @@
+name: Persona Studio mobile checks
+on:
+  push:
+    branches: [audio-video-studio-mobile]
+    paths:
+      - 'audio-video-studio/**'
+      - '.github/workflows/audio-video-studio.yml'
+  workflow_dispatch:
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Python dependencies
+        run: pip install -r audio-video-studio/requirements.txt
+      - name: Syntax and import checks
+        run: python -m py_compile audio-video-studio/main.py audio-video-studio/test_smoke.py
+      - name: Integration smoke test
+        working-directory: audio-video-studio
+        run: python -m unittest -v test_smoke.py
