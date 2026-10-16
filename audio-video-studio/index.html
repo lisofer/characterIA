@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b101b">
+<title>Persona Studio · Audio & Video</title>
+<style>
+:root{color-scheme:dark;--bg:#0b101b;--panel:#151d2c;--card:#1b2637;--line:#303e55;--text:#f0f5ff;--muted:#9dadc2;--a:#88e4ce;--b:#ccecff;--danger:#ffc2c5}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);background:var(--bg)}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}a{color:var(--a)}[hidden]{display:none!important}
+body:before{content:"";position:fixed;inset:0 0 auto;height:290px;background:radial-gradient(ellipse at 55% -40%,#1e4f52aa,transparent 70%);pointer-events:none}
+header{position:sticky;top:0;z-index:2;background:#0b101bef;backdrop-filter:blur(16px);border-bottom:1px solid #26344a;padding:14px max(16px,env(safe-area-inset-left));display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px}.brand-mark{width:39px;height:39px;background:#174c49;border:1px solid #518980;border-radius:12px;display:grid;place-items:center;color:var(--a);font-size:21px}.brand strong{font-size:15px;letter-spacing:-.2px}.brand small{display:block;font-size:11px;color:var(--muted);font-weight:450;margin-top:2px}.header-action{border:1px solid var(--line);background:#192536;color:var(--muted);border-radius:11px;padding:8px 10px;font-size:12px}
+.shell{max-width:1100px;margin:auto;padding:20px 16px 112px;position:relative}.tab{display:none}.tab.active{display:block}
+h1{font-size:clamp(22px,4vw,30px);line-height:1.1;margin:2px 0 5px;letter-spacing:-.8px}h2{font-size:18px;margin:0 0 5px}h3{font-size:14px;margin:0 0 7px}.sub{color:var(--muted);font-size:13px;margin:0 0 20px;line-height:1.5}.tiny{color:var(--muted);font-size:11px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 12px 36px #0206122b}
+.field{margin:0 0 15px}.field:last-child{margin-bottom:0}label{display:block;font-size:12px;font-weight:700;color:#dce7f5;margin:0 0 8px}input:not([type=checkbox]),select,textarea{display:block;width:100%;min-height:44px;padding:11px 12px;background:#0e1725;border:1px solid #34445b;border-radius:11px;color:var(--text);outline:0}input:focus,textarea:focus,select:focus{border-color:var(--a);box-shadow:0 0 0 3px #88e4ce17}textarea{min-height:135px;resize:vertical;line-height:1.55;font-size:15px}input[type=file]{min-height:46px;font-size:12px}select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23adc2d1' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:33px}
+.btn{border:1px solid #526479;color:var(--text);border-radius:12px;background:#253247;padding:12px 15px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:13px;font-weight:720;min-height:44px;text-decoration:none}.btn.primary{background:var(--a);border-color:var(--a);color:#07342f}.btn.secondary{background:#183a3b;border-color:#367774;color:#bcf9eb}.btn.wide{width:100%}.btn.tinybtn{min-height:36px;padding:8px 11px;font-size:12px}.btn:active{transform:translateY(1px)}.actions{display:flex;gap:8px;flex-wrap:wrap}.grid-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.detail{font-size:12px;color:var(--muted);line-height:1.45}.visual{width:100%;aspect-ratio:9/16;position:relative;overflow:hidden;border-radius:14px;border:1px solid #3d4c60;background:#131722;max-height:375px}
+.visual img{position:absolute;width:100%;height:100%;left:0;top:0;object-fit:contain}.visual img.bg{object-fit:cover}.preview-caption{color:#c8d6e9;font-size:12px;padding:10px 0 0}.choice-row{display:flex;gap:10px;overflow-x:auto;padding:0 1px 6px;scroll-snap-type:x mandatory}.choice{flex:0 0 110px;background:#101a29;border:1px solid #3a4b62;color:var(--text);border-radius:12px;padding:8px;text-align:left;scroll-snap-align:start}.choice.selected{border:2px solid var(--a);padding:7px;background:#183635}.choice img{width:100%;height:80px;object-fit:contain;border-radius:7px;background:#090e18}.choice b{display:block;margin-top:7px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.choice small{font-size:11px;color:var(--muted)}.choice.none{display:grid;place-items:center;text-align:center;min-height:120px}.choice.none span{font-size:24px}
+.result{border-color:#4a726b;background:linear-gradient(150deg,#18342d,#172536)}.status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--a);margin:8px 0}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor}.status.fail{color:var(--danger)}audio,video{width:100%;max-height:380px;margin:8px 0;border-radius:12px}
+.divider{height:1px;background:var(--line);margin:18px 0}.list-item{padding:13px 0;border-bottom:1px solid #344255}.list-item:last-child{border-bottom:0}.list-title{font-weight:760;font-size:14px}.list-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.45}.list-text{font-size:13px;color:#dce5f1;line-height:1.45;margin:10px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere}.empty{background:#111a29;border:1px dashed #3b5161;border-radius:15px;padding:23px 18px;color:var(--muted);font-size:13px;text-align:center;line-height:1.6}.row{display:flex;align-items:center;gap:12px}.row .grow{flex:1;min-width:0}.thumb{width:58px;height:78px;background:#101522;border:1px solid #33445a;border-radius:10px;object-fit:contain}.chip{background:#20363b;border:1px solid #436367;color:#c5eee9;font-size:10px;border-radius:99px;padding:4px 8px;white-space:nowrap}
+nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;justify-content:center;border-top:1px solid #364358;background:#121a29ef;backdrop-filter:blur(16px);padding:8px 9px calc(8px + env(safe-area-inset-bottom))}nav button{max-width:210px;flex:1;display:grid;place-items:center;gap:4px;background:transparent;color:#98a8bd;border:0;border-radius:12px;padding:8px 4px;font-size:10px;font-weight:720}nav button .emoji{font-size:21px;line-height:1.2}nav button.current{background:#203e3d;color:#aaf6df}
+.overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:#0b101bf5}.login-box{width:100%;max-width:380px;border:1px solid #36515e;background:#182435;border-radius:22px;padding:28px 22px}.login-box .logo{font-size:37px;margin-bottom:18px}.login-box h1{font-size:24px}#toast{position:fixed;z-index:15;left:50%;bottom:104px;transform:translateX(-50%);background:#28463f;border:1px solid #68a691;padding:12px 16px;border-radius:13px;font-size:12px;width:max-content;max-width:90vw;box-shadow:0 5px 45px #0007}#toast.error{background:#532f3a;border-color:#be6c79}
+@media(min-width:760px){.shell{padding:34px 24px 100px}.create-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:15px}.create-layout .right-col{position:sticky;top:103px;align-self:start}nav{left:50%;transform:translateX(-50%);max-width:540px;border-radius:18px 18px 0 0;border:1px solid #364358;border-bottom:0}.panel{padding:22px}.visual{max-height:540px}}
+</style>
+</head>
+<body>
+<div id="login" class="overlay" hidden>
+<form id="login-form" class="login-box">
+<div class="logo">◈</div><h1>Acceso privado</h1><p class="sub">Ingresá tu clave para entrar a tu estudio. Quedará iniciada la sesión en este dispositivo.</p>
+<div class="field"><label for="password">Clave de acceso</label><input id="password" type="password" required autocomplete="current-password"></div>
+<button class="btn primary wide" type="submit">Entrar al estudio →</button>
+<p id="login-error" class="detail"></p>
+</form>
+</div>
+<div id="app" hidden>
+<header>
+<div class="brand"><span class="brand-mark">◈</span><div><strong>Persona Studio</strong><small>Audio & Video · Privado</small></div></div>
+<button id="logout" class="header-action">Salir ↗</button>
+</header>
+<div class="shell">
+<section class="tab active" id="tab-create">
+<h1>Crear contenido</h1><p class="sub">Elegí un personaje, escribí su diálogo y descargá su voz o video.</p>
+<div class="create-layout">
+<div class="left-col">
+<div class="panel">
+<div class="field"><label for="character-choice">1. Personaje</label><select id="character-choice"><option value="">Seleccionar personaje</option></select></div>
+<div class="field"><label>2. Conjunto de ocho PNG</label><div id="outfits-choice" class="choice-row"></div></div>
+<div class="field"><label>3. Fondo de video</label><div id="background-choice" class="choice-row"></div><div class="detail">Sin fondo = lienzo oscuro liso en MP4. Los PNG se superponen al fondo.</div></div>
+</div>
+<div class="panel">
+<div class="field"><label for="speech-text">4. ¿Qué va a decir?</label><textarea id="speech-text" maxlength="3000" placeholder="Escribí exactamente lo que querés que diga..."></textarea></div>
+<details style="margin:0 0 16px"><summary style="font-size:13px;color:var(--a);font-weight:700;cursor:pointer">✧ Ayudarme a escribir con Gemini (opcional)</summary><div style="padding-top:12px"><div class="field"><label for="idea">Idea para el diálogo</label><input id="idea" placeholder="Ej.: un vendedor que se enoja porque..." maxlength="1200"></div><button class="btn secondary" id="gemini-btn" type="button">Crear un texto con Gemini</button></div></details>
+<button class="btn primary wide" id="generate" type="button">✦ Generar audio</button>
+</div>
+<div id="current-result" hidden class="panel result"></div>
+</div>
+<div class="right-col">
+<div class="panel">
+<h3>Vista previa del escenario</h3>
+<div class="visual" id="preview-scene"><img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden></div>
+<div class="preview-caption" id="preview-caption">Seleccioná un personaje y un conjunto.</div>
+</div>
+</div>
+</div>
+</section>
+<section class="tab" id="tab-characters">
+<h1>Personajes</h1><p class="sub">Cada uno conserva su voz y puede tener tantos conjuntos de PNG como necesites.</p>
+<div class="grid-two" id="character-top-grid">
+<div class="panel"><h2>Nuevo personaje</h2><p class="detail">Usá una voz de Fish o una muestra de audio con su texto exacto.</p>
+<form id="new-character">
+<div class="field"><label>Nombre</label><input name="name" required placeholder="Ej.: El periodista"></div>
+<div class="field"><label>ID de voz de Fish (opcional)</label><input name="voice_id" placeholder="ID del modelo de voz guardado"></div>
+<div class="field"><label>Muestra de voz (si no usás ID)</label><input name="reference" type="file" accept=".wav,.mp3,.m4a,.ogg,.flac,audio/*"></div>
+<div class="field"><label>Texto exacto de la muestra</label><textarea name="reference_text" style="min-height:80px" placeholder="Lo que realmente dice el audio de referencia"></textarea></div>
+<div class="field"><label>Personalidad / estilo para Gemini</label><textarea name="notes" style="min-height:75px" placeholder="Ej.: habla como un presentador irónico..."></textarea></div>
+<button class="btn primary wide" type="submit">+ Guardar personaje</button>
+</form></div>
+<div class="panel"><h2>Mis personajes</h2><div id="characters-list"></div></div>
+</div>
+<div class="panel"><h2>Configurar personaje</h2>
+<div class="field"><label for="edit-character-choice">Seleccioná un personaje</label><select id="edit-character-choice"></select></div>
+<form id="edit-character">
+<div class="grid-two"><div class="field"><label>Nombre</label><input name="name" required></div><div class="field"><label>ID de voz Fish</label><input name="voice_id"></div></div>
+<div class="field"><label>Texto de la muestra (si usa audio de referencia)</label><textarea name="reference_text" style="min-height:76px"></textarea></div>
+<div class="field"><label>Estilo para Gemini</label><textarea name="notes" style="min-height:76px"></textarea></div>
+<button type="submit" class="btn secondary">Guardar cambios</button>
+</form>
+<div class="divider"></div>
+<h3>Reemplazar muestra de voz</h3><form id="update-reference">
+<div class="field"><label>Audio de referencia</label><input type="file" name="reference" required accept=".wav,.mp3,.m4a,.ogg,.flac,audio/*"></div>
+<div class="field"><label>Transcripción exacta</label><textarea name="reference_text" required style="min-height:75px"></textarea></div>
+<button type="submit" class="btn">Guardar nueva muestra</button></form>
+<div class="divider"></div>
+<h3>Agregar conjunto de ocho PNG</h3>
+<p class="detail">Elegí ocho imágenes numeradas 00.png a 07.png. Se ordenan alfabéticamente; 00 es reposo y 01–07 son distintas posiciones de la boca.</p>
+<form id="new-outfit">
+<div class="field"><label>Nombre del conjunto</label><input name="name" required placeholder="Ej.: Remera azul"></div>
+<div class="field"><label>Seleccionar exactamente 8 PNG</label><input name="images" type="file" accept=".png,image/png" multiple required></div>
+<p id="file-count" class="detail">0 de 8 imágenes elegidas.</p><button type="submit" class="btn primary">Agregar vestimenta</button></form>
+<div id="outfits-list" style="margin-top:16px"></div>
+</div>
+</section>
+<section class="tab" id="tab-backgrounds">
+<h1>Mis fondos</h1><p class="sub">Una biblioteca de escenarios para usar con cualquier personaje.</p>
+<div class="panel"><h2>Agregar fondo</h2>
+<form id="new-background"><div class="field"><label>Nombre</label><input name="name" required placeholder="Ej.: Oficina cálida"></div>
+<div class="field"><label>Imagen (JPG, PNG o WebP)</label><input name="image" type="file" accept="image/*" required></div>
+<button class="btn primary" type="submit">+ Guardar fondo</button></form>
+</div>
+<div class="panel"><h2>Fondos guardados</h2><div id="backgrounds-list" class="choice-row" style="flex-wrap:wrap"></div></div>
+</section>
+<section class="tab" id="tab-library">
+<h1>Biblioteca</h1><p class="sub">Tus audios, guiones y videos quedan guardados aunque cambies la aplicación.</p>
+<div id="library-list"></div>
+</section>
+</div>
+<nav>
+<button type="button" data-tab="create" class="current"><span class="emoji">✦</span>Crear</button>
+<button type="button" data-tab="characters"><span class="emoji">♙</span>Personajes</button>
+<button type="button" data-tab="backgrounds"><span class="emoji">▧</span>Fondos</button>
+<button type="button" data-tab="library"><span class="emoji">♫</span>Biblioteca</button>
+</nav>
+</div>
+<div id="toast" hidden></div>
+<script>
+"use strict";
+const $ = id=>document.getElementById(id);
+const html = s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let data={characters:[],outfits:[],backgrounds:[],generations:[]}, selectedOutfit="",selectedBackground="",currentJob="",activeTab="create";
+function toast(message,error=false){const t=$("toast");t.textContent=message;t.className=error?"error":"";t.hidden=false;clearTimeout(window.toastTimeout);window.toastTimeout=setTimeout(()=>t.hidden=true,4800)}
+async function api(path,options={}){
+ const res=await fetch(path,{credentials:"same-origin",...options});
+ if(res.status===401 && path!=="/api/login"){showLogin();throw new Error("Sesión vencida, volvé a ingresar.");}
+ const response=await res.json().catch(()=>({detail:"Respuesta inesperada del servidor"}));
+ if(!res.ok)throw new Error(typeof response.detail==="string"?response.detail:"Error "+res.status);
+ return response;
+}
+function showLogin(){ $("login").hidden=false;$("app").hidden=true;}
+function showApp(){ $("login").hidden=true;$("app").hidden=false;}
+function busy(button,enabled=true){if(!button)return;button.disabled=enabled;button.dataset.original??=button.textContent;button.textContent=enabled?"Procesando…":button.dataset.original;}
+function setTab(tab){activeTab=tab;document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.id==="tab-"+tab));document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("current",x.dataset.tab===tab));window.scrollTo({top:0,behavior:"smooth"});}
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
+$("login-form").addEventListener("submit",async ev=>{
+ ev.preventDefault();const b=ev.currentTarget.querySelector("button");busy(b);
+ try{await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("password").value})});$("password").value="";await load();showApp();}
+ catch(err){$("login-error").textContent=err.message;}finally{busy(b,false)}
+});
+$("logout").addEventListener("click",async()=>{await api("/api/logout",{method:"POST"}).catch(()=>{});showLogin()});
+function createOptions(select,arr,placeholder){const old=select.value;select.innerHTML='<option value="">'+html(placeholder)+'</option>'+arr.map(x=>'<option value="'+html(x.id)+'">'+html(x.name)+'</option>').join("");if(arr.some(x=>x.id===old))select.value=old;else if(arr.length)select.value=arr[0].id;}
+function findBy(arr,id){return arr.find(x=>x.id===id)}
+function currentChar(){return $("character-choice").value}
+function renderCreate(){
+ const current=$("character-choice").value;
+ createOptions($("character-choice"),data.characters,"Seleccionar personaje");
+ if(current&&findBy(data.characters,current))$("character-choice").value=current;
+ const outfits=data.outfits.filter(x=>x.character_id===currentChar());
+ if(!outfits.some(x=>x.id===selectedOutfit))selectedOutfit=outfits[0]?.id||"";
+ $("outfits-choice").innerHTML=outfits.length?outfits.map(x=>
+   '<button type="button" class="choice '+(selectedOutfit===x.id?"selected":"")+'" data-outfit="'+html(x.id)+'"><img src="/api/outfits/'+html(x.id)+'/image/0" alt=""><b>'+html(x.name)+'</b><small>8 PNG</small></button>'
+ ).join(""):'<div class="empty" style="width:100%">No hay conjuntos. Agregá uno desde Personajes.</div>';
+ $("background-choice").innerHTML='<button class="choice none '+(!selectedBackground?"selected":"")+'" data-background=""><span>◌</span><b>Sin fondo</b></button>'+
+ data.backgrounds.map(x=>'<button type="button" class="choice '+(selectedBackground===x.id?"selected":"")+'" data-background="'+html(x.id)+'"><img style="object-fit:cover" src="/api/backgrounds/'+html(x.id)+'/image" alt=""><b>'+html(x.name)+'</b></button>').join("");
+ $("outfits-choice").querySelectorAll("[data-outfit]").forEach(x=>x.onclick=()=>{selectedOutfit=x.dataset.outfit;renderCreate()});
+ $("background-choice").querySelectorAll("[data-background]").forEach(x=>x.onclick=()=>{selectedBackground=x.dataset.background;renderCreate()});
+ const bg=$("preview-bg"),avatar=$("preview-avatar");
+ bg.hidden=!selectedBackground;
+ if(selectedBackground)bg.src="/api/backgrounds/"+encodeURIComponent(selectedBackground)+"/image";
+ avatar.hidden=!selectedOutfit;
+ if(selectedOutfit)avatar.src="/api/outfits/"+encodeURIComponent(selectedOutfit)+"/image/0";
+ const c=findBy(data.characters,currentChar()),s=findBy(data.outfits,selectedOutfit);
+ $("preview-caption").textContent=c?(c.name+" · "+(s?.name||"sin conjunto")):"Elegí un personaje para ver la vista previa.";
+}
+function renderCharacters(){
+ $("characters-list").innerHTML=data.characters.length?data.characters.map(c=>
+  '<div class="list-item"><div class="row"><div class="grow"><div class="list-title">'+html(c.name)+'</div><div class="list-meta">'+(c.voice_id?"Voz Fish configurada":"Muestra de audio")+' · '+data.outfits.filter(s=>s.character_id===c.id).length+' conjuntos</div></div><button class="btn tinybtn" data-edit-id="'+html(c.id)+'">Editar</button></div></div>'
+ ).join(""):'<div class="empty">Todavía no creaste personajes.</div>';
+ $("characters-list").querySelectorAll("[data-edit-id]").forEach(el=>el.onclick=()=>{$("edit-character-choice").value=el.dataset.editId;fillEdit();document.getElementById("edit-character-choice").scrollIntoView({behavior:"smooth",block:"center"});});
+ const old=$("edit-character-choice").value;createOptions($("edit-character-choice"),data.characters,"Seleccionar personaje");
+ if(old&&findBy(data.characters,old))$("edit-character-choice").value=old;
+ fillEdit();
+}
+function fillEdit(){
+ const c=findBy(data.characters,$("edit-character-choice").value);
+ ["edit-character","update-reference","new-outfit"].forEach(form=>$(form).style.display=c?"block":"none");
+ if(!c){$("outfits-list").innerHTML="";return}
+ for(const key of ["name","voice_id","notes","reference_text"])$("edit-character").elements.namedItem(key).value=c[key]||"";
+ $("outfits-list").innerHTML='<h3>Conjuntos de '+html(c.name)+'</h3>'+(
+ data.outfits.filter(x=>x.character_id===c.id).map(x=>'<div class="row list-item"><img class="thumb" src="/api/outfits/'+html(x.id)+'/image/0" alt=""><div><strong>'+html(x.name)+'</strong><div class="detail">Ocho imágenes guardadas</div></div></div>').join("") || '<div class="empty">Todavía no hay conjuntos.</div>');
+}
+function getName(arr,id){return findBy(arr,id)?.name||"Desconocido";}
+function statusText(j){
+ if(j.status==="queued")return "En cola";
+ if(j.status==="generating")return "Generando voz en Fish…";
+ if(j.status==="rendering")return "Creando MP4 con el movimiento de la boca…";
+ if(j.status==="ready")return "Listo";
+ if(j.status==="video_failed")return "Error al exportar MP4";
+ if(j.status==="interrupted")return "Interrumpido";
+ return "Error al crear el audio";
+}
+function jobHtml(j,compact=false){
+ const text=html(j.text),mp3=Boolean(j.audio_file),mp4=Boolean(j.video_file);
+ const head='<div class="row"><div class="grow"><div class="list-title">'+html(getName(data.characters,j.character_id))+'</div><div class="list-meta">'+new Date(j.created_at*1000).toLocaleString("es-AR")+' · '+html(getName(data.outfits,j.outfit_id))+'</div></div><span class="chip">'+html(statusText(j))+'</span></div>';
+ const err=j.error?'<p class="detail" style="color:var(--danger)">'+html(j.error)+'</p>':"";
+ const files='<div class="actions">'+
+  (mp3?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp3?download=1">↓ MP3</a>':'')+
+  (mp3&&!mp4&&j.status!=="rendering"?'<button class="btn tinybtn secondary" data-video="'+j.id+'">✦ Crear MP4</button>':'')+
+  (mp4?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp4?download=1">↓ MP4</a>':'')+
+  (["failed","interrupted"].includes(j.status)?'<button class="btn tinybtn" data-retry="'+j.id+'">Reintentar audio</button>':'')+
+ '</div>';
+ const media=mp4&&!compact?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':mp3&&!compact?'<audio controls preload="none" src="/api/generations/'+j.id+'/file/mp3"></audio>':"";
+ return head+'<div class="list-text">'+text+'</div>'+err+media+files;
+}
+function bindJobs(root){
+ root.querySelectorAll("[data-video]").forEach(b=>b.onclick=async()=>{
+  busy(b);try{await api("/api/generations/"+b.dataset.video+"/video",{method:"POST"});toast("El video se está preparando. Podés seguir usando la página.");await load();}
+  catch(err){toast(err.message,true)}finally{busy(b,false)}
+ });
+ root.querySelectorAll("[data-retry]").forEach(b=>b.onclick=async()=>{
+  busy(b);try{await api("/api/generations/"+b.dataset.retry+"/retry",{method:"POST"});toast("Reintentando…");await load()}
+  catch(err){toast(err.message,true)}finally{busy(b,false)}
+ });
+}
+function renderLibrary(){
+ $("library-list").innerHTML=data.generations.length?data.generations.map(j=>'<div class="panel">'+jobHtml(j,true)+'</div>').join(""):'<div class="empty">Acá aparecerán todas las generaciones, con su texto y las descargas.</div>';
+ bindJobs($("library-list"));
+ const j=findBy(data.generations,currentJob);
+ $("current-result").hidden=!j;
+ if(j){$("current-result").innerHTML='<h2>Última generación</h2>'+jobHtml(j,false);bindJobs($("current-result"))}
+}
+function renderBackgrounds(){
+ $("backgrounds-list").innerHTML=data.backgrounds.length?data.backgrounds.map(x=>
+ '<div class="choice" style="flex-basis:135px;cursor:default"><img style="height:140px;object-fit:cover" src="/api/backgrounds/'+html(x.id)+'/image" alt=""><b>'+html(x.name)+'</b></div>'
+ ).join(""):'<div class="empty" style="width:100%">Todavía no agregaste fondos.</div>';
+}
+async function load(){
+ data=await api("/api/state");
+ renderCreate();renderCharacters();renderBackgrounds();renderLibrary();
+}
+function handleForm(id,endpoint,callback){
+ const form=$(id);form.addEventListener("submit",async ev=>{
+  ev.preventDefault();const b=form.querySelector("[type=submit]");busy(b);
+  try{await api(typeof endpoint==="function"?endpoint():endpoint,{method:"POST",body:new FormData(form)});form.reset();toast("Guardado correctamente.");await load();if(callback)callback()}
+  catch(err){toast(err.message,true)}finally{busy(b,false)}
+ });
+}
+handleForm("new-character","/api/characters");
+handleForm("new-outfit",()=>"/api/characters/"+encodeURIComponent($("edit-character-choice").value)+"/outfits");
+handleForm("new-background","/api/backgrounds");
+handleForm("update-reference",()=>"/api/characters/"+encodeURIComponent($("edit-character-choice").value)+"/reference");
+$("new-outfit").elements.namedItem("images").addEventListener("change",e=>{
+ let files=[...e.target.files].sort((a,b)=>a.name.localeCompare(b.name));
+ $("file-count").textContent=files.length+" de 8 imágenes elegidas. "+(files.length===8?"✓ Orden: "+files.map(f=>f.name).join(", "):"Elegí exactamente ocho PNG.");
+});
+$("edit-character-choice").addEventListener("change",fillEdit);
+$("edit-character").addEventListener("submit",async e=>{
+ e.preventDefault();const b=e.target.querySelector("button");busy(b);
+ const id=$("edit-character-choice").value;
+ const form=new FormData(e.target);const payload=Object.fromEntries(form.entries());
+ try{await api("/api/characters/"+encodeURIComponent(id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});toast("Personaje actualizado.");await load();}
+ catch(err){toast(err.message,true)}finally{busy(b,false)}
+});
+$("character-choice").addEventListener("change",()=>{selectedOutfit="";renderCreate()});
+$("generate").addEventListener("click",async()=>{
+ const text=$("speech-text").value.trim();
+ if(!currentChar()||!selectedOutfit){toast("Elegí un personaje y un conjunto de PNG.",true);return}
+ if(!text){toast("Escribí el texto que va a decir.",true);return}
+ const b=$("generate");busy(b);
+ try{
+  const result=await api("/api/generations",{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({character_id:currentChar(),outfit_id:selectedOutfit,background_id:selectedBackground,text})});
+  currentJob=result.id;toast("Generación iniciada. Queda guardada en Biblioteca.");await load();
+ }catch(err){toast(err.message,true)}finally{busy(b,false)}
+});
+$("gemini-btn").addEventListener("click",async()=>{
+ const idea=$("idea").value.trim();
+ if(!currentChar()){toast("Primero elegí un personaje.",true);return}
+ if(!idea){toast("Escribí una idea para Gemini.",true);return}
+ const b=$("gemini-btn");busy(b);
+ try{const result=await api("/api/script",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({character_id:currentChar(),idea})});$("speech-text").value=result.text;toast("Texto de Gemini listo. Podés editarlo.");}
+ catch(err){toast(err.message,true)}finally{busy(b,false)}
+});
+(async()=>{
+ try{await load();showApp();}catch(err){showLogin();}
+})();
+setInterval(async()=>{
+ if($("app").hidden)return;
+ if(data.generations.some(j=>["queued","generating","rendering"].includes(j.status))){
+  try{await load()}catch(err){}
+ }
+},3500);
+</script>
+</body>
+</html>
