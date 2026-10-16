@@ -306,7 +306,7 @@ function jobHtml(j,compact=false){
   (mp4?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp4?download=1">↓ MP4</a>':'')+
   (["failed","interrupted"].includes(j.status)?'<button class="btn tinybtn" data-retry="'+j.id+'">Reintentar audio</button>':'')+
  '</div>';
- const media=!compact?(mp3?'<audio data-audio-id="'+j.id+'" controls playsinline preload="metadata" src="/api/generations/'+j.id+'/file/mp3"></audio>':'')+(mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':''):"";
+ const media=(mp3?'<audio data-audio-id="'+j.id+'" controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp3"></audio>':'')+(!compact&&mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':'');
  return head+'<div class="list-text">'+text+'</div>'+err+media+files;
 }
 function bindJobs(root){
