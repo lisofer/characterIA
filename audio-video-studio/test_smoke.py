@@ -66,7 +66,7 @@ class StudioSmokeTest(unittest.TestCase):
                              "-f","lavfi","-i","sine=frequency=420:duration=1.3",
                              "-codec:a","libmp3lame",str(audio)],capture_output=True,timeout=30)
         self.assertEqual(proc.returncode,0,proc.stderr.decode(errors="replace"))
-        main.change("INSERT INTO generations VALUES (?,?,?,?,?,?,?,?,?,?)",
+        main.change("INSERT INTO generations (id,character_id,outfit_id,background_id,text,status,error,audio_file,video_file,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (ident,cid,sid,bid,"Guion de prueba","ready","",str(audio),"",time.time()))
         start=self.client.post("/api/generations/"+ident+"/video")
         self.assertEqual(start.status_code,200,start.text)
@@ -80,6 +80,27 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertEqual(final["status"],"ready", final["error"])
         self.assertTrue(Path(final["video_file"]).stat().st_size>2000)
         self.assertEqual(self.client.get("/api/generations/"+ident+"/file/mp3?download=1").status_code,200)
+        sync=self.client.get("/api/generations/"+ident+"/sync")
+        self.assertEqual(sync.status_code,200,sync.text)
+        timeline=sync.json()
+        self.assertEqual(timeline["slot_names"],["aClosed","aOpen","idleClosed","idleOpen","oClosed","oOpen","eClosed","eOpen"])
+        self.assertTrue(timeline["events"])
+        self.assertEqual(timeline["intensity"],45)
+        adjusted=self.client.post("/api/generations/"+ident+"/retime",json={
+            "mouth_intensity":20,"voice_delay":60,"auto_blink":False
+        })
+        self.assertEqual(adjusted.status_code,200,adjusted.text)
+        self.assertEqual(adjusted.json()["timeline"]["delay_ms"],60)
+        self.assertEqual(adjusted.json()["timeline"]["intensity"],20)
+        self.assertFalse(adjusted.json()["timeline"]["auto_blink"])
+        self.assertEqual(main.record("characters",cid)["mouth_intensity"],20)
+        self.assertFalse(main.record("generations",ident)["video_file"])
+        second=self.client.post("/api/generations/"+ident+"/video")
+        self.assertEqual(second.status_code,200,second.text)
+        until=time.time()+75
+        while time.time()<until and main.record("generations",ident)["status"]=="rendering":
+            time.sleep(.4)
+        self.assertEqual(main.record("generations",ident)["status"],"ready",main.record("generations",ident)["error"])
         self.assertEqual(self.client.get("/api/generations/"+ident+"/file/mp4?download=1").status_code,200)
 
 if __name__=="__main__":
