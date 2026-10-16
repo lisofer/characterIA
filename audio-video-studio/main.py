@@ -14,6 +14,7 @@ import subprocess
 import statistics
 import threading
 from array import array
+from lip_sync import build_timeline, event_durations, SLOTS
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -34,7 +35,7 @@ PASSWORD = os.getenv("APP_PASSWORD", "")
 SECRET = os.getenv("SESSION_SECRET", "")
 FISH_KEY = os.getenv("FISH_API_KEY", "")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
-FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro")
+FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="studio")
 for directory in (DATA, ASSETS, OUTPUTS, TEMP):
@@ -72,6 +73,17 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_gen_time ON generations(created_at DESC);
         """)
+        for table, columns in {
+            "characters": [
+                ("mouth_intensity", "INTEGER NOT NULL DEFAULT 45"),
+                ("voice_delay", "INTEGER NOT NULL DEFAULT 0"),
+                ("auto_blink", "INTEGER NOT NULL DEFAULT 1")],
+            "generations": [("sync_file", "TEXT NOT NULL DEFAULT ''")]
+        }.items():
+            existing = {row[1] for row in db.execute("PRAGMA table_info(" + table + ")")}
+            for name, sql_type in columns:
+                if name not in existing:
+                    db.execute("ALTER TABLE " + table + " ADD COLUMN " + name + " " + sql_type)
         db.execute("UPDATE generations SET status='interrupted', error='Trabajo interrumpido por un reinicio; podés reintentarlo.' WHERE status IN ('queued','generating','rendering')")
 init_db()
 
@@ -163,7 +175,7 @@ def state(_: None = Depends(auth)):
     for c in characters:
         c.pop("reference_file", None)
     return {
-        "characters": characters, "outfits": rows("outfits"),
+        "characters": characters, "outfits": outfit_rows(),
         "backgrounds": rows("backgrounds"), "generations": rows("generations"),
         "fish_configured": bool(FISH_KEY), "gemini_configured": bool(GEMINI_KEY)
     }
@@ -197,7 +209,7 @@ async def character_create(name: str = Form(...), voice_id: str = Form(""),
         directory.mkdir(parents=True, exist_ok=True)
         ref_file = str(directory / ("reference" + ext))
         Path(ref_file).write_bytes(raw)
-    change("INSERT INTO characters VALUES (?,?,?,?,?,?,?)",
+    change("INSERT INTO characters (id,name,voice_id,reference_file,reference_text,notes,created_at) VALUES (?,?,?,?,?,?,?)",
            (char_id, name, voice_id, ref_file, reference_text, notes.strip()[:1200], time.time()))
     return {"id": char_id}
 
@@ -206,14 +218,18 @@ class EditCharacter(BaseModel):
     voice_id: str = Field(default="", max_length=150)
     reference_text: str = Field(default="", max_length=2500)
     notes: str = Field(default="", max_length=1200)
+    mouth_intensity: int = Field(default=45, ge=20, le=85)
+    voice_delay: int = Field(default=0, ge=-100, le=160)
+    auto_blink: bool = True
 
 @app.put("/api/characters/{char_id}")
 def character_edit(char_id: str, payload: EditCharacter, _: None = Depends(auth)):
     char = record("characters", char_id)
     if not payload.voice_id.strip() and not char["reference_file"]:
         raise HTTPException(400, "Este personaje necesita ID de voz o muestra.")
-    change("UPDATE characters SET name=?, voice_id=?, reference_text=?, notes=? WHERE id=?",
-           (payload.name.strip(), payload.voice_id.strip(), payload.reference_text.strip(), payload.notes.strip(), char_id))
+    change("UPDATE characters SET name=?, voice_id=?, reference_text=?, notes=?, mouth_intensity=?, voice_delay=?, auto_blink=? WHERE id=?",
+           (payload.name.strip(), payload.voice_id.strip(), payload.reference_text.strip(), payload.notes.strip(),
+            payload.mouth_intensity, payload.voice_delay, int(payload.auto_blink), char_id))
     return {"ok": True}
 
 @app.post("/api/characters/{char_id}/reference")
@@ -234,29 +250,51 @@ async def reference_update(char_id: str, reference_text: str = Form(...),
            (str(filename), reference_text.strip()[:2500], char_id))
     return {"ok": True}
 
+
+def outfit_dir(outfit):
+    return ASSETS / "characters" / outfit["character_id"] / "outfits" / outfit["id"]
+
+def outfit_rows():
+    result = rows("outfits")
+    for outfit in result:
+        folder = outfit_dir(outfit)
+        outfit["slots"] = [(folder / f"{i:02d}.png").is_file() for i in range(8)]
+        outfit["complete"] = all(outfit["slots"])
+    return result
+
+async def save_png(upload: UploadFile, path: Path):
+    raw = await read_bounded(upload, 12 * 1024 * 1024)
+    if Path(upload.filename or "").suffix.lower() != ".png":
+        raise HTTPException(400, "Las imágenes deben ser PNG.")
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.width * image.height > 20_000_000:
+                raise HTTPException(400, "Imagen demasiado grande.")
+            if image.mode not in ("RGBA", "RGB", "P", "LA"):
+                raise HTTPException(400, "Imagen PNG no compatible.")
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(400, "PNG inválido.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stage = path.with_suffix(".incoming")
+    stage.write_bytes(raw)
+    stage.replace(path)
+
 @app.post("/api/characters/{char_id}/outfits")
-async def outfit_create(char_id: str, name: str = Form(...), images: list[UploadFile] = File(...),
+async def outfit_create(char_id: str, name: str = Form(...),
+                        images: list[UploadFile] | None = File(None),
                         _: None = Depends(auth)):
     record("characters", char_id)
-    if len(images) != 8:
-        raise HTTPException(400, "Cada conjunto necesita exactamente 8 archivos PNG.")
+    if images and len(images) != 8:
+        raise HTTPException(400, "Si cargás imágenes juntas, deben ser exactamente ocho.")
     set_id = new_id()
     directory = ASSETS / "characters" / char_id / "outfits" / set_id
     directory.mkdir(parents=True, exist_ok=True)
     try:
-        for index, item in enumerate(sorted(images, key=lambda a: (a.filename or "").casefold())):
-            data = await read_bounded(item, 12 * 1024 * 1024)
-            if Path(item.filename or "").suffix.lower() != ".png":
-                raise HTTPException(400, "Las 8 imágenes tienen que ser PNG.")
-            try:
-                with Image.open(io.BytesIO(data)) as picture:
-                    picture.verify()
-                with Image.open(io.BytesIO(data)) as picture:
-                    if picture.width * picture.height > 20_000_000:
-                        raise HTTPException(400, "Una imagen supera el tamaño máximo.")
-            except (UnidentifiedImageError, OSError):
-                raise HTTPException(400, "Uno de los PNG es inválido.")
-            (directory / f"{index:02d}.png").write_bytes(data)
+        if images:
+            for index, item in enumerate(sorted(images, key=lambda a: (a.filename or "").casefold())):
+                await save_png(item, directory / f"{index:02d}.png")
     except Exception:
         shutil.rmtree(directory, ignore_errors=True)
         raise
@@ -264,15 +302,24 @@ async def outfit_create(char_id: str, name: str = Form(...), images: list[Upload
            (set_id, char_id, name.strip()[:80] or "Nuevo conjunto", time.time()))
     return {"id": set_id}
 
+@app.post("/api/outfits/{set_id}/slot/{index}")
+async def image_slot_upload(set_id: str, index: int, image: UploadFile = File(...),
+                            _: None = Depends(auth)):
+    if not 0 <= index < 8:
+        raise HTTPException(400, "Casilla inválida.")
+    outfit = record("outfits", set_id)
+    await save_png(image, outfit_dir(outfit) / f"{index:02d}.png")
+    return {"ok": True, "index": index}
+
 @app.get("/api/outfits/{set_id}/image/{index}")
 def image_outfit(set_id: str, index: int, _: None = Depends(auth)):
     outfit = record("outfits", set_id)
     if index not in range(8):
         raise HTTPException(404, "Imagen no encontrada")
-    path = ASSETS / "characters" / outfit["character_id"] / "outfits" / set_id / f"{index:02d}.png"
+    path = outfit_dir(outfit) / f"{index:02d}.png"
     if not path.is_file():
-        raise HTTPException(404, "Imagen no encontrada")
-    return FileResponse(path, media_type="image/png")
+        raise HTTPException(404, "Esta casilla todavía no tiene una imagen.")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 @app.post("/api/backgrounds")
 async def background_create(name: str = Form(...), image: UploadFile = File(...),
@@ -321,7 +368,7 @@ def generation_create(item: GenerationInput, _: None = Depends(auth)):
     if not text:
         raise HTTPException(400, "El texto está vacío.")
     ident = new_id()
-    change("INSERT INTO generations VALUES (?,?,?,?,?,?,?,?,?,?)",
+    change("INSERT INTO generations (id,character_id,outfit_id,background_id,text,status,error,audio_file,video_file,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
            (ident, item.character_id, item.outfit_id, item.background_id, text,
             "queued", "", "", "", time.time()))
     executor.submit(generate_speech, ident)
@@ -332,12 +379,14 @@ def generate_speech(ident: str):
         job = record("generations", ident)
         character = record("characters", job["character_id"])
         change("UPDATE generations SET status='generating', error='' WHERE id=?", (ident,))
-        params = {"text": job["text"], "format": "mp3"}
+        params = {"text": job["text"], "format": "mp3", "latency": "balanced",
+                  "chunk_length": 150, "prosody": {"speed": 1, "volume": 0, "normalize_loudness": True},
+                  "temperature": .7, "top_p": .7}
         headers = {"Authorization": "Bearer " + FISH_KEY, "model": FISH_MODEL}
         if character["voice_id"]:
             params["reference_id"] = character["voice_id"]
-            headers["Content-Type"] = "application/json"
-            payload = json.dumps(params).encode()
+            headers["Content-Type"] = "application/msgpack"
+            payload = msgpack.packb(params, use_bin_type=True)
         else:
             if not character["reference_file"] or not character["reference_text"]:
                 raise RuntimeError("Falta la muestra de voz o su transcripción.")
@@ -356,28 +405,60 @@ def generate_speech(ident: str):
                     raise RuntimeError("Fish no devolvió un archivo de audio válido.")
             audio_file = OUTPUTS / (ident + ".mp3")
             audio_file.write_bytes(response.content)
-        change("UPDATE generations SET status='ready', audio_file=? WHERE id=?", (str(audio_file), ident))
+        sync = create_sync(record("generations", ident), audio_file, character)
+        change("UPDATE generations SET status='ready', audio_file=?, sync_file=? WHERE id=?",
+               (str(audio_file), str(sync), ident))
     except Exception as error:
         change("UPDATE generations SET status='failed', error=? WHERE id=?",
                (str(error)[:500], ident))
 
-def amplitudes(audio: Path):
-    proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(audio), "-f", "s16le", "-ac", "1",
-         "-ar", "8000", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        timeout=90, check=True)
-    raw = proc.stdout
-    samples = array("h")
-    samples.frombytes(raw[:len(raw) - len(raw) % 2])
-    window = 960  # ~120ms
-    levels = []
-    for start in range(0, len(samples), window):
-        part = samples[start:start + window]
-        if not part:
-            break
-        # Approximate RMS; energy follows real voiced passages.
-        levels.append(math.sqrt(sum(x*x for x in part) / len(part)))
-    return levels, len(samples) / 8000
+
+def create_sync(job, audio_file: Path, character=None):
+    character = character or record("characters", job["character_id"])
+    timeline = build_timeline(audio_file, job["text"],
+                              character["mouth_intensity"], character["voice_delay"],
+                              bool(character["auto_blink"]))
+    output = OUTPUTS / (job["id"] + ".sync.json")
+    stage = OUTPUTS / (job["id"] + ".sync.tmp")
+    stage.write_text(json.dumps(timeline, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+    stage.replace(output)
+    return output
+
+def load_sync(job):
+    if not job["audio_file"] or not Path(job["audio_file"]).is_file():
+        raise HTTPException(409, "Todavía no hay MP3 para sincronizar.")
+    path = Path(job.get("sync_file") or "")
+    if not job.get("sync_file") or not path.is_file():
+        path = create_sync(job, Path(job["audio_file"]))
+        change("UPDATE generations SET sync_file=? WHERE id=?", (str(path), job["id"]))
+    return json.loads(path.read_text("utf-8"))
+
+@app.get("/api/generations/{ident}/sync")
+def sync_preview(ident: str, _: None = Depends(auth)):
+    job = record("generations", ident)
+    return load_sync(job)
+
+class SyncSettings(BaseModel):
+    mouth_intensity: int = Field(ge=20, le=85)
+    voice_delay: int = Field(ge=-100, le=160)
+    auto_blink: bool = True
+
+@app.post("/api/generations/{ident}/retime")
+def sync_retime(ident: str, settings: SyncSettings, _: None = Depends(auth)):
+    job = record("generations", ident)
+    if job["status"] == "rendering":
+        raise HTTPException(409, "Esperá a que termine el video antes de ajustar.")
+    if not job["audio_file"] or not Path(job["audio_file"]).is_file():
+        raise HTTPException(409, "Primero se necesita el MP3.")
+    change("UPDATE characters SET mouth_intensity=?, voice_delay=?, auto_blink=? WHERE id=?",
+           (settings.mouth_intensity, settings.voice_delay, int(settings.auto_blink), job["character_id"]))
+    updated_character = record("characters", job["character_id"])
+    path = create_sync(job, Path(job["audio_file"]), updated_character)
+    if job["video_file"]:
+        Path(job["video_file"]).unlink(missing_ok=True)
+    change("UPDATE generations SET status='ready', video_file='', sync_file=?, error='' WHERE id=?",
+           (str(path), ident))
+    return {"ok": True, "timeline": json.loads(path.read_text("utf-8"))}
 
 def render_video(ident: str):
     folder = None
@@ -386,61 +467,51 @@ def render_video(ident: str):
         outfit = record("outfits", job["outfit_id"])
         if not job["audio_file"] or not Path(job["audio_file"]).is_file():
             raise RuntimeError("Generá primero el MP3.")
+        missing = [SLOTS[i] for i in range(8) if not (outfit_dir(outfit) / f"{i:02d}.png").is_file()]
+        if missing:
+            raise RuntimeError("Faltan imágenes para exportar: " + ", ".join(missing))
         change("UPDATE generations SET status='rendering', error='' WHERE id=?", (ident,))
+        plan = load_sync(job)
         folder = Path(tempfile.mkdtemp(prefix="render_", dir=TEMP))
         width, height = 720, 1280
         if job["background_id"]:
             bg = record("backgrounds", job["background_id"])
             with Image.open(bg["file"]) as im:
-                base = ImageOps.fit(im.convert("RGB"), (width, height), method=Image.Resampling.LANCZOS).convert("RGBA")
+                base = ImageOps.fit(im.convert("RGB"), (width, height),
+                                    method=Image.Resampling.LANCZOS).convert("RGBA")
         else:
-            # H.264 MP4 has no alpha channel: no selected photo = solid neutral canvas.
             base = Image.new("RGBA", (width, height), "#131722")
-        outfit_dir = ASSETS / "characters" / outfit["character_id"] / "outfits" / outfit["id"]
+        outfit_folder = outfit_dir(outfit)
         for index in range(8):
-            with Image.open(outfit_dir / f"{index:02d}.png") as source:
+            with Image.open(outfit_folder / f"{index:02d}.png") as source:
                 sprite = source.convert("RGBA")
                 sprite.thumbnail((width, height), Image.Resampling.LANCZOS)
             composed = base.copy()
-            x = (width - sprite.width) // 2
-            y = height - sprite.height
-            composed.alpha_composite(sprite, (x, y))
+            composed.alpha_composite(sprite, ((width - sprite.width) // 2, height - sprite.height))
             composed.convert("RGB").save(folder / f"frame_{index}.png", optimize=False)
-        levels, duration = amplitudes(Path(job["audio_file"]))
-        if not levels:
-            raise RuntimeError("No se pudo analizar la voz del MP3.")
-        peak = max(levels)
-        # 0 = descanso; 1..7 = speaking mouth sprites based on loudness and movement.
-        timeline = []
-        for i, level in enumerate(levels):
-            if level < max(110, peak * 0.075):
-                pose = 0
-            else:
-                strength = min(6, int(6 * level / max(peak * .80, 1)))
-                pose = 1 + min(6, max(0, strength + (i % 3 - 1)))
-            if timeline and timeline[-1][0] == pose:
-                timeline[-1][1] += 1
-            else:
-                timeline.append([pose, 1])
+
         lines = ["ffconcat version 1.0"]
-        for pose, count in timeline:
-            frame = (folder / f"frame_{pose}.png").as_posix()
-            lines += [f"file '{frame}'", f"duration {count * 0.12:.5f}"]
-        lines.append(f"file '{(folder / f'frame_{timeline[-1][0]}.png').as_posix()}'")
+        for pose, duration in event_durations(plan):
+            frame_path = (folder / f"frame_{pose}.png").as_posix()
+            lines += [f"file '{frame_path}'", f"duration {duration:.6f}"]
+        last_pose = plan["events"][-1][1]
+        lines.append(f"file '{(folder / f'frame_{last_pose}.png').as_posix()}'")
         seq = folder / "timeline.ffconcat"
         seq.write_text("\n".join(lines) + "\n", encoding="utf-8")
         output = OUTPUTS / (ident + ".mp4")
+        stage = OUTPUTS / (ident + ".pending.mp4")
         process = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
              "-f", "concat", "-safe", "0", "-i", str(seq),
-             "-i", job["audio_file"], "-vf", "fps=24,format=yuv420p",
+             "-i", job["audio_file"], "-vf", "fps=25,format=yuv420p",
              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
              "-preset", "veryfast", "-crf", "23", "-threads", "2",
              "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-             "-t", f"{duration:.3f}", str(output)],
+             "-t", f"{plan['duration']:.5f}", str(stage)],
             capture_output=True, text=True, timeout=600)
-        if process.returncode or not output.exists() or output.stat().st_size < 1000:
+        if process.returncode or not stage.exists() or stage.stat().st_size < 1000:
             raise RuntimeError("FFmpeg: " + process.stderr[-400:])
+        stage.replace(output)
         change("UPDATE generations SET status='ready', video_file=? WHERE id=?", (str(output), ident))
     except Exception as error:
         change("UPDATE generations SET status='video_failed', error=? WHERE id=?",
@@ -478,8 +549,11 @@ def output_file(ident: str, kind: str, download: int = 0, _: None = Depends(auth
     job = record("generations", ident)
     if kind not in ("mp3", "mp4"):
         raise HTTPException(404, "Formato desconocido.")
-    path = Path(job["audio_file"] if kind == "mp3" else job["video_file"])
-    if not str(path) or not path.is_file():
+    filename = job["audio_file"] if kind == "mp3" else job["video_file"]
+    if not filename:
+        raise HTTPException(404, "Archivo todavía no disponible.")
+    path = Path(filename)
+    if not path.is_file():
         raise HTTPException(404, "Archivo todavía no disponible.")
     return FileResponse(path, media_type="audio/mpeg" if kind == "mp3" else "video/mp4",
                         filename=f"{ident[:8]}.{kind}" if download else None,
