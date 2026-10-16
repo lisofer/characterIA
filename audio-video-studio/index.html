@@ -306,10 +306,16 @@ function jobHtml(j,compact=false){
   (mp4?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp4?download=1">↓ MP4</a>':'')+
   (["failed","interrupted"].includes(j.status)?'<button class="btn tinybtn" data-retry="'+j.id+'">Reintentar audio</button>':'')+
  '</div>';
- const media=mp4&&!compact?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':mp3&&!compact?'<audio controls preload="none" src="/api/generations/'+j.id+'/file/mp3"></audio>':"";
+ const media=!compact?(mp3?'<audio data-audio-id="'+j.id+'" controls playsinline preload="metadata" src="/api/generations/'+j.id+'/file/mp3"></audio>':'')+(mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':''):"";
  return head+'<div class="list-text">'+text+'</div>'+err+media+files;
 }
 function bindJobs(root){
+ root.querySelectorAll("[data-audio-id]").forEach(audio=>{
+  audio.addEventListener("play",()=>startSyncedPlayback(audio,audio.dataset.audioId));
+  audio.addEventListener("seeked",()=>{if(playingAudio===audio)syncFrame()});
+  audio.addEventListener("pause",()=>{if(playingAudio===audio){playingAudio=null;setIdlePreview()}});
+  audio.addEventListener("ended",()=>{if(playingAudio===audio){playingAudio=null;setIdlePreview()}});
+ });
  root.querySelectorAll("[data-video]").forEach(b=>b.onclick=async()=>{
   busy(b);try{await api("/api/generations/"+b.dataset.video+"/video",{method:"POST"});toast("El video se está preparando. Podés seguir usando la página.");await load();}
   catch(err){toast(err.message,true)}finally{busy(b,false)}
@@ -401,17 +407,97 @@ $("edit-apply-sync").addEventListener("click",async()=>{
  }catch(err){toast(err.message,true)}finally{busy(btn,false)}
 });
 $("character-choice").addEventListener("change",()=>{selectedOutfit="";renderCreate()});
-$("generate").addEventListener("click",async()=>{
- const text=$("speech-text").value.trim();
- if(!currentChar()||!selectedOutfit){toast("Elegí un personaje y un conjunto de PNG.",true);return}
- if(!text){toast("Escribí el texto que va a decir.",true);return}
- const b=$("generate");busy(b);
+
+let playingAudio=null,playingSync=null,playingGeneration=null,shownPose=-1;
+function setIdlePreview(){
+ const set=findBy(data.outfits,selectedOutfit),i=set?.slots?.[3]?3:set?.slots?.findIndex(Boolean)??-1;
+ if(!set||i<0)return;
+ const avatar=$("preview-avatar");
+ avatar.src="/api/outfits/"+set.id+"/image/"+i;
+ avatar.hidden=false;
+ shownPose=i;
+ $("preview-sync-status").textContent="En reposo · Reproducí el audio para animar la boca.";
+}
+function syncFrame(){
+ if(!playingAudio||!playingSync||playingAudio.paused)return;
+ const job=findBy(data.generations,playingGeneration);
+ if(!job)return;
+ const sec=playingAudio.currentTime,events=playingSync.events;
+ if(!events?.length)return;
+ let lo=0,hi=events.length-1;
+ while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(events[mid][0]<=sec)lo=mid;else hi=mid-1}
+ const pose=events[lo][1];
+ if(pose!==shownPose){
+  const set=findBy(data.outfits,job.outfit_id),idx=set?.slots?.[pose]?pose:(set?.slots?.[3]?3:-1);
+  if(idx>=0){
+   const src="/api/outfits/"+job.outfit_id+"/image/"+idx;
+   if($("preview-avatar").getAttribute("src")!==src)$("preview-avatar").src=src;
+   $("preview-avatar").hidden=false;
+  }
+  shownPose=pose;
+ }
+ $("preview-sync-status").textContent="Fish · "+(playingSync.slot_names?.[pose]||"reposo")+" · "+Math.round(sec*1000)+" ms · actividad "+playingSync.intensity+"%";
+ if(!playingAudio.paused&&playingAudio.currentTime<playingSync.duration){
+  requestAnimationFrame(syncFrame);
+ }
+}
+async function startSyncedPlayback(audio,ident){
+ // Media time is the only animation clock: no drifting independent timers.
+ playingAudio=audio;playingGeneration=ident;playingSync=null;shownPose=-1;
+ const job=findBy(data.generations,ident);if(!job)return;
+ selectedOutfit=job.outfit_id;selectedBackground=job.background_id||"";
+ $("character-choice").value=job.character_id;renderCreate();
+ $("preview-sync-status").textContent="Analizando sincronización…";
  try{
-  const result=await api("/api/generations",{method:"POST",headers:{"Content-Type":"application/json"},
+  const sync=await api("/api/generations/"+ident+"/sync");
+  if(playingAudio!==audio)return;
+  playingSync=sync;syncFrame();
+ }catch(err){toast("No se pudo cargar la sincronización: "+err.message,true)}
+}
+async function createGeneration(text,isTest=false){
+ text=String(text||"").trim();
+ if(!currentChar()||!selectedOutfit)throw new Error("Elegí un personaje y un conjunto PNG.");
+ if(!text)throw new Error("Escribí el texto que va a decir.");
+ const result=await api("/api/generations",{method:"POST",headers:{"Content-Type":"application/json"},
    body:JSON.stringify({character_id:currentChar(),outfit_id:selectedOutfit,background_id:selectedBackground,text})});
-  currentJob=result.id;toast("Generación iniciada. Queda guardada en Biblioteca.");await load();
- }catch(err){toast(err.message,true)}finally{busy(b,false)}
+ currentJob=result.id;
+ toast(isTest?"Prueba Fish iniciada. Cuando esté lista, tocá Reproducir para ver los gestos.":"Generación iniciada. Queda guardada en Biblioteca.");
+ await load();
+ return result;
+}
+$("generate").addEventListener("click",async()=>{
+ const b=$("generate");busy(b);
+ try{await createGeneration($("speech-text").value)}catch(err){toast(err.message,true)}
+ finally{busy(b,false)}
 });
+$("test-speak").addEventListener("click",async()=>{
+ const b=$("test-speak");busy(b);
+ try{await createGeneration($("test-text").value,true)}catch(err){toast(err.message,true)}
+ finally{busy(b,false)}
+});
+$("test-gestures").addEventListener("click",()=>{
+ const set=findBy(data.outfits,selectedOutfit);if(!set){toast("Seleccioná un conjunto de PNG primero.",true);return}
+ const poses=[3,1,3,5,3,7,3,2,3],avatar=$("preview-avatar");
+ let n=0;
+ if(window.gestureTimer)clearInterval(window.gestureTimer);
+ window.gestureTimer=setInterval(()=>{
+  if(n>=poses.length){clearInterval(window.gestureTimer);setIdlePreview();return}
+  const pos=poses[n++];
+  if(set.slots?.[pos]){avatar.src="/api/outfits/"+set.id+"/image/"+pos;avatar.hidden=false}
+  $("preview-sync-status").textContent="Demostración visual · "+(SLOT_NAMES[pos]?.join(" / ")||"reposo");
+ },380);
+});
+document.querySelectorAll("[data-gesture]").forEach(btn=>btn.addEventListener("click",()=>{
+ const setId=$("outfit-editor-choice").value,s=findBy(data.outfits,setId);
+ if(!s){toast("Elegí un conjunto PNG.",true);return}
+ const pos=Number(btn.dataset.gesture),charId=$("edit-character-choice").value;
+ $("character-choice").value=charId;selectedOutfit=setId;renderCreate();setTab("create");
+ if(s.slots?.[pos]){
+  $("preview-avatar").src="/api/outfits/"+setId+"/image/"+pos;
+  $("preview-avatar").hidden=false;
+  $("preview-sync-status").textContent="Expresión de prueba · "+SLOT_NAMES[pos].join(" / ");
+ }else toast("Esta expresión todavía no tiene PNG.",true);
+}));
 $("gemini-btn").addEventListener("click",async()=>{
  const idea=$("idea").value.trim();
  if(!currentChar()){toast("Primero elegí un personaje.",true);return}
