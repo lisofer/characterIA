@@ -343,20 +343,62 @@ function handleForm(id,endpoint,callback){
  });
 }
 handleForm("new-character","/api/characters");
-handleForm("new-outfit",()=>"/api/characters/"+encodeURIComponent($("edit-character-choice").value)+"/outfits");
+$("new-outfit").addEventListener("submit",async event=>{
+ event.preventDefault();
+ const form=event.currentTarget,button=form.querySelector("[type=submit]");busy(button);
+ try{
+  const result=await api("/api/characters/"+encodeURIComponent($("edit-character-choice").value)+"/outfits",
+   {method:"POST",body:new FormData(form)});
+  form.reset();await load();$("outfit-editor-choice").value=result.id;renderSlotGrid();
+  toast("Conjunto creado. Ahora tocá las ocho casillas para cargar las imágenes.");
+ }catch(err){toast(err.message,true)}finally{busy(button,false)}
+});
 handleForm("new-background","/api/backgrounds");
 handleForm("update-reference",()=>"/api/characters/"+encodeURIComponent($("edit-character-choice").value)+"/reference");
-$("new-outfit").elements.namedItem("images").addEventListener("change",e=>{
- let files=[...e.target.files].sort((a,b)=>a.name.localeCompare(b.name));
- $("file-count").textContent=files.length+" de 8 imágenes elegidas. "+(files.length===8?"✓ Orden: "+files.map(f=>f.name).join(", "):"Elegí exactamente ocho PNG.");
+$("outfit-editor-choice").addEventListener("change",renderSlotGrid);
+$("slot-file").addEventListener("change",async event=>{
+ const file=event.target.files[0];if(!file)return;
+ const idx=Number(event.target.dataset.index),sid=$("outfit-editor-choice").value;
+ if(!sid||!Number.isInteger(idx)||idx<0||idx>=8){toast("Seleccioná un conjunto válido.",true);return}
+ const form=new FormData();form.append("image",file);
+ try{
+  await api("/api/outfits/"+encodeURIComponent(sid)+"/slot/"+idx,{method:"POST",body:form});
+  toast("Casilla "+String(idx+1)+" guardada.");
+  await load();$("outfit-editor-choice").value=sid;renderSlotGrid();
+ }catch(err){toast(err.message,true)}
 });
 $("edit-character-choice").addEventListener("change",fillEdit);
 $("edit-character").addEventListener("submit",async e=>{
- e.preventDefault();const b=e.target.querySelector("button");busy(b);
- const id=$("edit-character-choice").value;
- const form=new FormData(e.target);const payload=Object.fromEntries(form.entries());
- try{await api("/api/characters/"+encodeURIComponent(id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});toast("Personaje actualizado.");await load();}
+ e.preventDefault();const b=e.target.querySelector('[type="submit"]');busy(b);
+ try{await saveEditedCharacter();await load();}
  catch(err){toast(err.message,true)}finally{busy(b,false)}
+});
+$("edit-test-fish").addEventListener("click",async()=>{
+ const btn=$("edit-test-fish");busy(btn);
+ try{
+  const charId=await saveEditedCharacter(true);
+  await load();
+  $("character-choice").value=charId;
+  selectedOutfit=data.outfits.find(x=>x.character_id===charId&&x.complete)?.id||
+                 data.outfits.find(x=>x.character_id===charId)?.id||"";
+  renderCreate();$("test-text").value=$("edit-test-text").value;
+  setTab("create");
+  await createGeneration($("test-text").value, true);
+ }catch(err){toast(err.message,true)}
+ finally{busy(btn,false)}
+});
+$("edit-apply-sync").addEventListener("click",async()=>{
+ const btn=$("edit-apply-sync");busy(btn);
+ try{
+  const charId=await saveEditedCharacter(true);
+  const candidate=data.generations.find(x=>x.character_id===charId&&x.audio_file);
+  if(!candidate)throw new Error("Todavía no hay un MP3 de este personaje para reajustar.");
+  await api("/api/generations/"+candidate.id+"/retime",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({mouth_intensity:Number($("mouth-edit").value),voice_delay:Number($("delay-edit").value),auto_blink:$("edit-character").elements.namedItem("auto_blink").checked})});
+  playingSync=null;currentJob=candidate.id;await load();$("character-choice").value=charId;
+  selectedOutfit=candidate.outfit_id;selectedBackground=candidate.background_id||"";
+  renderCreate();setTab("create");toast("Sincronización reajustada sin generar otro audio. Reproducí el MP3 para probar.");
+ }catch(err){toast(err.message,true)}finally{busy(btn,false)}
 });
 $("character-choice").addEventListener("change",()=>{selectedOutfit="";renderCreate()});
 $("generate").addEventListener("click",async()=>{
