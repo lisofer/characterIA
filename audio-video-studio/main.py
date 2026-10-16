@@ -190,7 +190,11 @@ async def read_bounded(file: UploadFile, max_bytes: int):
 async def character_create(name: str = Form(...), voice_id: str = Form(""),
                            reference_text: str = Form(""), notes: str = Form(""),
                            reference: UploadFile | None = File(None),
+                           mouth_intensity: int = Form(45), voice_delay: int = Form(0),
+                           auto_blink: bool = Form(False),
                            _: None = Depends(auth)):
+    if not 20 <= mouth_intensity <= 85 or not -100 <= voice_delay <= 160:
+        raise HTTPException(400, "Ajustes de sincronización fuera del rango permitido.")
     name = name.strip()[:80]
     voice_id = voice_id.strip()[:150]
     reference_text = reference_text.strip()[:2500]
@@ -209,8 +213,9 @@ async def character_create(name: str = Form(...), voice_id: str = Form(""),
         directory.mkdir(parents=True, exist_ok=True)
         ref_file = str(directory / ("reference" + ext))
         Path(ref_file).write_bytes(raw)
-    change("INSERT INTO characters (id,name,voice_id,reference_file,reference_text,notes,created_at) VALUES (?,?,?,?,?,?,?)",
-           (char_id, name, voice_id, ref_file, reference_text, notes.strip()[:1200], time.time()))
+    change("INSERT INTO characters (id,name,voice_id,reference_file,reference_text,notes,created_at,mouth_intensity,voice_delay,auto_blink) VALUES (?,?,?,?,?,?,?,?,?,?)",
+           (char_id, name, voice_id, ref_file, reference_text, notes.strip()[:1200], time.time(),
+            mouth_intensity, voice_delay, int(auto_blink)))
     return {"id": char_id}
 
 class EditCharacter(BaseModel):
