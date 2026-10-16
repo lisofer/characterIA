@@ -22,6 +22,17 @@ jobs:
         run: pip install -r audio-video-studio/requirements.txt
       - name: Syntax and import checks
         run: python -m py_compile audio-video-studio/main.py audio-video-studio/test_smoke.py
+      - name: Check mobile frontend JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          content = Path('audio-video-studio/index.html').read_text()
+          match = re.search(r'<script>([\s\S]*?)</script>', content)
+          assert match is not None, 'Missing inline JavaScript'
+          Path('/tmp/persona-frontend.js').write_text(match.group(1))
+          PY
+          node --check /tmp/persona-frontend.js
       - name: Integration smoke test
         working-directory: audio-video-studio
         run: python -m unittest -v test_smoke.py
