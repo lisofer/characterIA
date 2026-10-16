@@ -6,11 +6,12 @@ Una aplicación separada y **mobile-first** para generar MP3 con Fish Audio y MP
 
 - Acceso privado mediante APP_PASSWORD, sesión en cookie HttpOnly firmada por SESSION_SECRET (90 días).
 - Personajes con voz de Fish mediante **reference_id** o **archivo de audio + transcripción exacta**.
-- Varios conjuntos (subcarpetas) de **8 PNG** por personaje; subirlos numerados `00.png`…`07.png`.
+- Varios conjuntos de **8 casillas PNG** por personaje, cargadas individualmente. Orden compatible con Persona Studio 3.1: 01 ojos cerrados/boca A, 02 ojos abiertos/boca A, 03 ojos cerrados/reposo, 04 ojos abiertos/reposo, 05 ojos cerrados/boca O, 06 ojos abiertos/boca O, 07 ojos cerrados/boca E, 08 ojos abiertos/boca E.
 - Biblioteca global de fondos de imagen, reutilizables entre personajes.
 - Guiones escritos manualmente o asistidos opcionalmente por Gemini.
 - Generación MP3 guardada con el texto exacto, el personaje, conjunto y fondo. MP4 a demanda.
-- MP4 vertical de 720×1280, H.264/AAC, optimizado para teléfono; analiza volumen/pausas reales del audio para escoger PNG de boca.
+- MP4 vertical de 720×1280, H.264/AAC, optimizado para teléfono; usa visemas A/O/E desde el texto y pausas/actividad del audio real de Fish. La vista previa y el MP4 comparten exactamente la misma línea de tiempo, evitando desajustes entre ambos reproductores.
+- Configuración persistente por personaje: actividad labial 20–85% (45% por defecto), adelanto visual −100 a +160ms (0ms por defecto), parpadeo espontáneo. Prueba Fish real y reajuste de MP3 existente sin regenerarlo.
 - Historial y archivos persistentes en SQLite y el directorio de datos. Exportación MP4 en segundo plano dentro del servicio.
 
 ## Railway
@@ -25,7 +26,9 @@ No se guarda ninguna clave en GitHub ni en el navegador. APP_PASSWORD y SESSION_
 
 **Advertencia sobre fondos y transparencia:** MP4 H.264 no permite transparencia alfa convencional. «Sin fondo» utiliza un lienzo oscuro sólido; para videos transparentes de verdad sería necesario un formato alternativo como WebM con alfa.
 
-**Orden de PNG:** `00.png` es boca cerrada/reposo; `01.png` a `07.png` corresponden a posiciones de boca o expresiones habladas de diferente apertura. Es importante conservar la misma posición y escala del personaje entre todos los archivos. El sistema estima movimiento a partir de la energía acústica; no implementa fonemas exactos.
+**Orden de PNG:** el original Persona Studio usa ocho estados combinando (A, reposo, O, E) con ojos cerrados/abiertos. Los archivos se guardan internamente con índices `00.png` a `07.png`, pero se cargan tocando cada casilla de la interfaz. Usar la misma pose, encuadre y tamaño en las ocho imágenes.
+
+**Precisión:** el motor utiliza grupos fonéticos aproximados a partir del texto y actividad/pausas del MP3; no es alineación fonética exacta. Para perfeccionar un audio concreto, ajustar los sliders y usar «Aplicar sliders al último MP3» antes de exportar video.
 
 **Muestras de voz:** subir audios propios o para los que tengas autorización. La transcripción debe corresponder exactamente a la muestra.
 
@@ -59,6 +62,7 @@ Tener ffmpeg instalado localmente. Abrir http://localhost:3000.
     backgrounds/<id>.png
   outputs/<generation-id>.mp3
   outputs/<generation-id>.mp4
+  outputs/<generation-id>.sync.json
   tmp/ (archivos temporales de render)
 ```
 
