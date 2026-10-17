@@ -28,6 +28,22 @@ class StudioSmokeTest(unittest.TestCase):
         cls.client.post("/api/login", json={"password": "local-test-password"})
 
     def test_full_storage_and_video(self):
+        # The mobile create view must not show the old test panel or the last-generation card.
+        homepage=self.client.get("/")
+        self.assertEqual(homepage.status_code,200)
+        ui=homepage.text
+        self.assertIn('id="character-choice"',ui)
+        self.assertIn('id="outfit-choice"',ui)
+        self.assertIn('id="background-choice"',ui)
+        self.assertIn('id="preview-scene"',ui)
+        self.assertIn('id="download-mp3"',ui)
+        self.assertIn('id="download-mp4"',ui)
+        self.assertNotIn('id="current-result"',ui)
+        self.assertNotIn('id="test-speak"',ui)
+        script=self.client.get("/mobile-player.js")
+        self.assertEqual(script.status_code,200)
+        self.assertIn('function unlockAudio()',script.text)
+        self.assertIn('function syncFrame()',script.text)
         unauth = TestClient(main.app)
         self.assertEqual(unauth.get("/api/state").status_code, 401)
         self.assertEqual(unauth.post("/api/login", json={"password": "bad"}).status_code, 401)
