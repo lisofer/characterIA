@@ -4,6 +4,47 @@
 let audioContext=null, activePlayback=null, playingSync=null, shownPose=-1;
 let pendingAutoPlayJob="",pendingVideoDownloadJob="",pendingWebmDownloadJob="",pollBusy=false,playToken=0;
 const decodedAudio=new Map(),syncCache=new Map();
+let mp4Shape="fit",mp4Vertical=0,mp4Circle=100;
+function shapePayload(){return {shape:mp4Shape,vertical:mp4Vertical,circle_size:mp4Circle};}
+function applyFrameUI(){
+ const stage=$("preview-scene");
+ if(!stage)return;
+ stage.classList.remove("frame-fit","frame-square","frame-circle");
+ stage.classList.add("frame-"+mp4Shape);
+ stage.style.setProperty("--crop-top",(mp4Shape==="square"?-38.8889-mp4Vertical*0.388889:-38.8889)+"%");
+ stage.style.setProperty("--circle-radius",(mp4Circle/2)+"%");
+ $("square-slider-row").hidden=mp4Shape!=="square";
+ $("circle-slider-row").hidden=mp4Shape!=="circle";
+ $("square-vertical").value=String(mp4Vertical);
+ $("circle-size").value=String(mp4Circle);
+ $("square-vertical-value").textContent=mp4Vertical===0?"0":(mp4Vertical>0?"+":"")+mp4Vertical;
+ $("circle-size-value").textContent=mp4Circle+"%";
+ document.querySelectorAll("[data-shape]").forEach(btn=>{
+  let selected=btn.dataset.shape===mp4Shape;
+  btn.classList.toggle("selected",selected);
+  btn.setAttribute("aria-pressed",selected?"true":"false");
+ });
+}
+function setShapeFromJob(job){
+ mp4Shape=["fit","square","circle"].includes(job?.mp4_shape)?job.mp4_shape:"fit";
+ mp4Vertical=Number(job?.mp4_vertical||0);
+ mp4Circle=Number(job?.mp4_circle||100);
+ applyFrameUI();
+}
+async function syncMp4Framing(job){
+ const result=await api("/api/generations/"+job.id+"/framing",{
+  method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify(shapePayload())
+ });
+ if(result.changed){
+  job.video_file="";
+  job.mp4_shape=mp4Shape;
+  job.mp4_vertical=mp4Vertical;
+  job.mp4_circle=mp4Circle;
+ }
+ return result.changed;
+}
+
 
 function stageMessage(message=""){
  const el=$("stage-overlay");
@@ -157,7 +198,7 @@ async function createGeneration(text){
  if(!text)throw new Error("Escribí el texto que va a decir.");
  const result=await api("/api/generations",{
   method:"POST",headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({character_id:currentChar(),outfit_id:selectedOutfit,background_id:selectedBackground,text})
+  body:JSON.stringify({character_id:currentChar(),outfit_id:selectedOutfit,background_id:selectedBackground,text,...shapePayload()})
  });
  stopPlayback();
  currentJob=result.id;
@@ -217,6 +258,16 @@ async function refreshJobs(){
  }finally{pollBusy=false}
 }
 function setupPlayer(){
+ applyFrameUI();
+ document.querySelectorAll("[data-shape]").forEach(btn=>btn.addEventListener("click",()=>{
+  mp4Shape=btn.dataset.shape;applyFrameUI();
+ }));
+ $("square-vertical").addEventListener("input",event=>{
+  mp4Vertical=Number(event.target.value);applyFrameUI();
+ });
+ $("circle-size").addEventListener("input",event=>{
+  mp4Circle=Number(event.target.value);applyFrameUI();
+ });
  $("character-choice").addEventListener("change",()=>{selectedOutfit="";selectionChanged()});
  $("outfit-choice").addEventListener("change",()=>{selectedOutfit=$("outfit-choice").value;selectionChanged()});
  $("background-choice").addEventListener("change",()=>{selectedBackground=$("background-choice").value;selectionChanged()});
@@ -238,14 +289,14 @@ function setupPlayer(){
  });
  $("download-mp4").addEventListener("click",async()=>{
   const j=activeJob();
-  if(!j?.audio_file)return;
-  if(j.video_file){
-   startDownload("/api/generations/"+j.id+"/file/mp4?download=1","personaje.mp4");
-   return;
-  }
-  if(["rendering","rendering_webm"].includes(j.status))return;
+  if(!j?.audio_file || ["rendering","rendering_webm"].includes(j.status))return;
   $("download-mp4").disabled=true;
   try{
+   await syncMp4Framing(j);
+   if(j.video_file){
+    startDownload("/api/generations/"+j.id+"/file/mp4?download=1","personaje.mp4");
+    return;
+   }
    pendingVideoDownloadJob=j.id;
    await api("/api/generations/"+j.id+"/video",{method:"POST"});
    stageMessage("Preparando MP4…");
