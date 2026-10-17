@@ -50,6 +50,23 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 #tab-create .download-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;max-width:300px}
 #tab-create .download-row .btn{width:100%;min-height:43px;font-size:14px}
 @media(min-width:760px){#tab-create .stage-touch{max-width:310px}#tab-create .download-row{max-width:330px}}
+
+#tab-create .shape-controls{width:100%;max-width:330px}
+#tab-create .shape-switch{display:grid;grid-template-columns:1.45fr 1fr 1fr;gap:5px}
+#tab-create .shape-switch button{font:inherit;font-size:11px;line-height:1.25;font-weight:650;color:var(--muted);border:1px solid var(--line);background:#142031;min-height:43px;padding:6px 3px;border-radius:10px}
+#tab-create .shape-switch button.selected{color:#082d2b;background:var(--a);border-color:var(--a)}
+#tab-create .shape-slider{margin-top:11px;padding:9px 10px;background:#101927;border:1px solid #314156;border-radius:10px}
+#tab-create .shape-slider label{display:flex;justify-content:space-between;gap:8px}
+#tab-create .shape-slider output{color:var(--a)}
+#tab-create .shape-slider input{width:100%;min-height:26px;margin:3px 0 0;accent-color:var(--a)}
+#tab-create .stage-touch.frame-square,#tab-create .stage-touch.frame-circle{aspect-ratio:1/1;max-width:300px}
+#tab-create .stage-touch .stage-mask{position:absolute;inset:0;display:block;overflow:hidden}
+#tab-create .stage-touch .stage-inner{position:absolute;inset:0;display:block}
+#tab-create .stage-touch.frame-square .stage-inner,#tab-create .stage-touch.frame-circle .stage-inner{height:177.7778%;top:var(--crop-top,-38.8889%)}
+#tab-create .stage-touch.frame-circle .stage-mask{clip-path:circle(var(--circle-radius,50%) at center)}
+#tab-create .stage-touch .stage-inner img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center bottom}
+#tab-create .stage-touch .stage-inner img.bg{object-fit:cover;object-position:center}
+#tab-create .stage-touch .stage-inner img[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -81,8 +98,17 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 </div>
 <div class="right-col">
 <div class="panel stage-panel">
-<button type="button" class="visual stage-touch" id="preview-scene" aria-label="Reproducir el audio desde el principio" title="Tocá para escuchar otra vez">
-<img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden>
+<div class="shape-controls">
+<div class="shape-switch" role="group" aria-label="Forma de exportación MP4">
+<button type="button" data-shape="fit" class="selected" aria-pressed="true">Ajustar a la forma</button>
+<button type="button" data-shape="square" aria-pressed="false">Cuadrado</button>
+<button type="button" data-shape="circle" aria-pressed="false">Círculo</button>
+</div>
+<div class="shape-slider" id="square-slider-row" hidden><label for="square-vertical">Posición vertical <output id="square-vertical-value">0</output></label><input type="range" min="-100" max="100" step="1" value="0" id="square-vertical"></div>
+<div class="shape-slider" id="circle-slider-row" hidden><label for="circle-size">Tamaño del círculo <output id="circle-size-value">100%</output></label><input type="range" min="55" max="100" step="1" value="100" id="circle-size"></div>
+</div>
+<button type="button" class="visual stage-touch frame-fit" id="preview-scene" aria-label="Reproducir el audio desde el principio" title="Tocá para escuchar otra vez">
+<span class="stage-mask"><span class="stage-inner"><img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden></span></span>
 <span class="stage-overlay" id="stage-overlay" hidden></span>
 </button>
 <div class="download-row">
