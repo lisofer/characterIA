@@ -37,6 +37,19 @@ h1{font-size:clamp(22px,4vw,30px);line-height:1.1;margin:2px 0 5px;letter-spacin
 nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;justify-content:center;border-top:1px solid #364358;background:#121a29ef;backdrop-filter:blur(16px);padding:8px 9px calc(8px + env(safe-area-inset-bottom))}nav button{max-width:210px;flex:1;display:grid;place-items:center;gap:4px;background:transparent;color:#98a8bd;border:0;border-radius:12px;padding:8px 4px;font-size:10px;font-weight:720}nav button .emoji{font-size:21px;line-height:1.2}nav button.current{background:#203e3d;color:#aaf6df}
 .overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:18px;background:#0b101bf5}.login-box{width:100%;max-width:380px;border:1px solid #36515e;background:#182435;border-radius:22px;padding:28px 22px}.login-box .logo{font-size:37px;margin-bottom:18px}.login-box h1{font-size:24px}#toast{position:fixed;z-index:15;left:50%;bottom:104px;transform:translateX(-50%);background:#28463f;border:1px solid #68a691;padding:12px 16px;border-radius:13px;font-size:12px;width:max-content;max-width:90vw;box-shadow:0 5px 45px #0007}#toast.error{background:#532f3a;border-color:#be6c79}
 @media(min-width:760px){.grid-two{grid-template-columns:repeat(2,minmax(0,1fr))}.shell{padding:34px 24px 100px}.create-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:15px}.create-layout .right-col{position:sticky;top:103px;align-self:start}nav{left:50%;transform:translateX(-50%);max-width:540px;border-radius:18px 18px 0 0;border:1px solid #364358;border-bottom:0}.panel{padding:22px}.visual{max-height:540px}}
+
+/* The create screen is intentionally compact and touch-first. */
+#tab-create .compact-panel .field{margin-bottom:12px}
+#tab-create .compact-panel textarea{min-height:100px}
+#tab-create .stage-panel{padding:12px;display:flex;flex-direction:column;align-items:center;gap:12px}
+#tab-create .stage-touch{display:block;max-width:260px;max-height:none;aspect-ratio:9/16;width:100%;height:auto;padding:0;cursor:pointer;touch-action:manipulation;overflow:hidden}
+#tab-create .stage-touch:focus-visible{outline:3px solid var(--a);outline-offset:3px}
+#tab-create .stage-touch img{pointer-events:none}
+#tab-create .stage-touch:active{border-color:var(--a)}
+#tab-create .stage-overlay{position:absolute;inset:auto 8px 10px;z-index:1;border-radius:9px;background:#0b1423d9;color:#f4fcff;font-size:12px;font-weight:700;padding:9px;text-align:center;pointer-events:none}
+#tab-create .download-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;width:100%;max-width:260px}
+#tab-create .download-row .btn{width:100%;min-height:43px;font-size:14px}
+@media(min-width:760px){#tab-create .stage-touch{max-width:310px}#tab-create .download-row{max-width:310px}}
 </style>
 </head>
 <body>
@@ -55,32 +68,27 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 </header>
 <div class="shell">
 <section class="tab active" id="tab-create">
-<h1>Crear contenido</h1><p class="sub">Elegí un personaje, escribí su diálogo y descargá su voz o video.</p>
+<h1>Crear contenido</h1>
 <div class="create-layout">
 <div class="left-col">
-<div class="panel">
-<div class="field"><label for="character-choice">1. Personaje</label><select id="character-choice"><option value="">Seleccionar personaje</option></select></div>
-<div class="field"><label>2. Conjunto de ocho PNG</label><div id="outfits-choice" class="choice-row"></div></div>
-<div class="field"><label>3. Fondo de video</label><div id="background-choice" class="choice-row"></div><div class="detail">Sin fondo = lienzo oscuro liso en MP4. Los PNG se superponen al fondo.</div></div>
+<div class="panel compact-panel">
+<div class="field"><label for="character-choice">Personaje</label><select id="character-choice"><option value="">Seleccionar personaje</option></select></div>
+<div class="field"><label for="outfit-choice">Conjunto</label><select id="outfit-choice"><option value="">Seleccionar conjunto</option></select></div>
+<div class="field"><label for="background-choice">Fondo</label><select id="background-choice"><option value="">Sin fondo</option></select></div>
+<div class="field"><label for="speech-text">Texto</label><textarea id="speech-text" maxlength="3000" placeholder="¿Qué querés que diga el personaje?"></textarea></div>
+<button class="btn primary wide" id="generate" type="button">Generar</button>
 </div>
-<div class="panel">
-<div class="field"><label for="speech-text">4. ¿Qué va a decir?</label><textarea id="speech-text" maxlength="3000" placeholder="Escribí exactamente lo que querés que diga..."></textarea></div>
-<details style="margin:0 0 16px"><summary style="font-size:13px;color:var(--a);font-weight:700;cursor:pointer">✧ Ayudarme a escribir con Gemini (opcional)</summary><div style="padding-top:12px"><div class="field"><label for="idea">Idea para el diálogo</label><input id="idea" placeholder="Ej.: un vendedor que se enoja porque..." maxlength="1200"></div><button class="btn secondary" id="gemini-btn" type="button">Crear un texto con Gemini</button></div></details>
-<button class="btn primary wide" id="generate" type="button">✦ Generar audio</button>
-<div class="divider"></div>
-<h3>Prueba de voz y sincronización</h3>
-<div class="field"><label for="test-text">Frase de ejemplo</label><textarea id="test-text" style="min-height:78px">Hola, ¿cómo estás? Me encanta poder hablar con vos.</textarea></div>
-<div class="actions"><button type="button" class="btn secondary" id="test-speak">▶ Probar con Fish</button><button type="button" class="btn" id="test-gestures">Ver gestos sin gastar Fish</button></div>
-<div class="sync-help">La prueba con Fish genera un MP3 y muestra los cambios de boca mientras se reproduce. Podés ajustar los sliders del personaje y volver a sincronizar sin volver a pagar el audio.</div>
-</div>
-<div id="current-result" hidden class="panel result"></div>
 </div>
 <div class="right-col">
-<div class="panel">
-<h3>Vista previa del escenario</h3>
-<div class="visual" id="preview-scene"><img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden></div>
-<div class="preview-caption" id="preview-caption">Seleccioná un personaje y un conjunto.</div>
-<div class="detail" id="preview-sync-status">Al reproducir una prueba, la boca se sincroniza con el tiempo real del MP3.</div>
+<div class="panel stage-panel">
+<button type="button" class="visual stage-touch" id="preview-scene" aria-label="Reproducir el audio desde el principio" title="Tocá para escuchar otra vez">
+<img class="bg" id="preview-bg" hidden><img id="preview-avatar" hidden>
+<span class="stage-overlay" id="stage-overlay" hidden></span>
+</button>
+<div class="download-row">
+<button class="btn tinybtn" id="download-mp3" type="button" disabled>MP3</button>
+<button class="btn tinybtn" id="download-mp4" type="button" disabled>MP4</button>
+</div>
 </div>
 </div>
 </div>
@@ -120,11 +128,7 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 </div><label class="inline-toggle"><input type="checkbox" name="auto_blink" checked>Parpadeo espontáneo</label>
 <div class="sync-help">La boca usa los gestos A, O y E, y mantiene reposo durante las pausas detectadas en Fish. El adelanto se mide respecto del audio real.</div>
 <button type="submit" class="btn secondary">Guardar cambios</button>
-<div class="divider"></div>
-<h3>Prueba de sincronización de este personaje</h3>
-<div class="field"><label for="edit-test-text">Frase de prueba</label><textarea id="edit-test-text" style="min-height:76px">Hola, ¿cómo estás? Me encanta poder hablar con vos.</textarea></div>
-<div class="actions"><button class="btn primary" type="button" id="edit-test-fish">▶ Probar con Fish y animar</button><button class="btn" type="button" id="edit-apply-sync">Aplicar sliders al último MP3</button></div>
-<p class="sync-help">La primera prueba genera audio real con Fish. Después podés corregir actividad labial y adelanto visual sobre ese mismo MP3, sin volver a sintetizar la voz.</p>
+
 </form>
 <div class="divider"></div>
 <h3>Reemplazar muestra de voz</h3><form id="update-reference">
@@ -196,25 +200,34 @@ function createOptions(select,arr,placeholder){const old=select.value;select.inn
 function findBy(arr,id){return arr.find(x=>x.id===id)}
 function currentChar(){return $("character-choice").value}
 function renderCreate(){
- const current=$("character-choice").value;
- createOptions($("character-choice"),data.characters,"Seleccionar personaje");
- if(current&&findBy(data.characters,current))$("character-choice").value=current;
+ const cselect=$("character-choice"), old=cselect.value;
+ createOptions(cselect,data.characters,"Seleccionar personaje");
+ if(old&&findBy(data.characters,old))cselect.value=old;
  const outfits=data.outfits.filter(x=>x.character_id===currentChar());
+ const sel=$("outfit-choice");
+ sel.innerHTML='<option value="">Seleccionar conjunto</option>'+outfits.map(x=>'<option value="'+html(x.id)+'">'+html(x.name)+' · '+(x.slots||[]).filter(Boolean).length+'/8</option>').join("");
  if(!outfits.some(x=>x.id===selectedOutfit))selectedOutfit=outfits[0]?.id||"";
- $("outfits-choice").innerHTML=outfits.length?outfits.map(x=>
-   '<button type="button" class="choice '+(selectedOutfit===x.id?"selected":"")+'" data-outfit="'+html(x.id)+'">'+(x.slots?.[3]?'<img src="/api/outfits/'+html(x.id)+'/image/3" alt="">':'<div class="empty-icon">＋</div>')+'<b>'+html(x.name)+'</b><small>'+((x.slots||[]).filter(Boolean).length)+'/8 PNG</small></button>'
- ).join(""):'<div class="empty" style="width:100%">No hay conjuntos. Agregá uno desde Personajes.</div>';
- $("background-choice").innerHTML='<button class="choice none '+(!selectedBackground?"selected":"")+'" data-background=""><span>◌</span><b>Sin fondo</b></button>'+
- data.backgrounds.map(x=>'<button type="button" class="choice '+(selectedBackground===x.id?"selected":"")+'" data-background="'+html(x.id)+'"><img style="object-fit:cover" src="/api/backgrounds/'+html(x.id)+'/image" alt=""><b>'+html(x.name)+'</b></button>').join("");
- $("outfits-choice").querySelectorAll("[data-outfit]").forEach(x=>x.onclick=()=>{selectedOutfit=x.dataset.outfit;renderCreate()});
- $("background-choice").querySelectorAll("[data-background]").forEach(x=>x.onclick=()=>{selectedBackground=x.dataset.background;renderCreate()});
- const bg=$("preview-bg"),avatar=$("preview-avatar");
- bg.hidden=!selectedBackground;
- if(selectedBackground)bg.src="/api/backgrounds/"+encodeURIComponent(selectedBackground)+"/image";
- avatar.hidden=!selectedOutfit;
- if(selectedOutfit){const set=findBy(data.outfits,selectedOutfit);const idx=set?.slots?.[3]?3:(set?.slots||[]).findIndex(Boolean);avatar.hidden=idx<0;if(idx>=0)avatar.src="/api/outfits/"+encodeURIComponent(selectedOutfit)+"/image/"+idx;}
- const c=findBy(data.characters,currentChar()),s=findBy(data.outfits,selectedOutfit);
- $("preview-caption").textContent=c?(c.name+" · "+(s?.name||"sin conjunto")):"Elegí un personaje para ver la vista previa.";
+ sel.value=selectedOutfit;
+ const bg=$("background-choice");
+ bg.innerHTML='<option value="">Sin fondo</option>'+data.backgrounds.map(x=>'<option value="'+html(x.id)+'">'+html(x.name)+'</option>').join("");
+ if(selectedBackground&&!findBy(data.backgrounds,selectedBackground))selectedBackground="";
+ bg.value=selectedBackground;
+ const back=$("preview-bg"),avatar=$("preview-avatar");
+ back.hidden=!selectedBackground;
+ if(selectedBackground){
+  const src="/api/backgrounds/"+encodeURIComponent(selectedBackground)+"/image";
+  if(back.getAttribute("src")!==src)back.src=src;
+ }
+ const set=findBy(data.outfits,selectedOutfit);
+ const idx=set?.slots?.[3]?3:(set?.slots||[]).findIndex(Boolean);
+ if(!activePlayback||activePlayback.id!==currentJob){
+  avatar.hidden=idx<0||!set;
+  if(set&&idx>=0){
+   const src="/api/outfits/"+encodeURIComponent(set.id)+"/image/"+idx;
+   if(avatar.getAttribute("src")!==src)avatar.src=src;
+  }
+ }
+ updateStageButtons();
 }
 function renderCharacters(){
  $("characters-list").innerHTML=data.characters.length?data.characters.map(c=>
@@ -306,7 +319,7 @@ function jobHtml(j,compact=false){
   (mp4?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp4?download=1">↓ MP4</a>':'')+
   (["failed","interrupted"].includes(j.status)?'<button class="btn tinybtn" data-retry="'+j.id+'">Reintentar audio</button>':'')+
  '</div>';
- const media=(mp3?'<audio data-audio-id="'+j.id+'" controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp3"></audio>':'')+(!compact&&mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':'');
+ const media=compact?"":(mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':'');
  return head+'<div class="list-text">'+text+'</div>'+err+media+files;
 }
 function bindJobs(root){
@@ -326,11 +339,8 @@ function bindJobs(root){
  });
 }
 function renderLibrary(){
- $("library-list").innerHTML=data.generations.length?data.generations.map(j=>'<div class="panel">'+jobHtml(j,true)+'</div>').join(""):'<div class="empty">Acá aparecerán todas las generaciones, con su texto y las descargas.</div>';
+ $("library-list").innerHTML=data.generations.length?data.generations.map(j=>'<div class="panel">'+jobHtml(j,true)+'</div>').join(""):'<div class="empty">Acá están guardados todos tus audios y videos.</div>';
  bindJobs($("library-list"));
- const j=findBy(data.generations,currentJob);
- $("current-result").hidden=!j;
- if(j){$("current-result").innerHTML='<h2>Última generación</h2>'+jobHtml(j,false);bindJobs($("current-result"))}
 }
 function renderBackgrounds(){
  $("backgrounds-list").innerHTML=data.backgrounds.length?data.backgrounds.map(x=>
