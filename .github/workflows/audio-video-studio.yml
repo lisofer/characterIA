@@ -33,6 +33,7 @@ jobs:
           Path('/tmp/persona-frontend.js').write_text(match.group(1))
           PY
           node --check /tmp/persona-frontend.js
+          node --check audio-video-studio/mobile-player.js
       - name: Integration smoke test
         working-directory: audio-video-studio
         run: python -m unittest -v test_smoke.py
