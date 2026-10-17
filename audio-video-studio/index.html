@@ -67,6 +67,12 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 #tab-create .stage-touch .stage-inner img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center bottom}
 #tab-create .stage-touch .stage-inner img.bg{object-fit:cover;object-position:center}
 #tab-create .stage-touch .stage-inner img[hidden]{display:none}
+
+.fish-settings{border:1px solid var(--line);border-radius:13px;background:#111c2a;padding:13px;margin:0 0 17px}
+.fish-settings>summary{cursor:pointer;font-size:14px;font-weight:750;color:#bff4e7;list-style-position:inside;padding:3px 0}
+.fish-settings[open]>summary{margin-bottom:9px}
+.fish-settings .field{margin:12px 0}
+.fish-settings .slider-pair{margin:8px 0}
 </style>
 </head>
 <body>
@@ -130,6 +136,18 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="field"><label>Muestra de voz (si no usás ID)</label><input name="reference" type="file" accept=".wav,.mp3,.m4a,.ogg,.flac,audio/*"></div>
 <div class="field"><label>Texto exacto de la muestra</label><textarea name="reference_text" style="min-height:80px" placeholder="Lo que realmente dice el audio de referencia"></textarea></div>
 <div class="field"><label>Personalidad / estilo para Gemini</label><textarea name="notes" style="min-height:75px" placeholder="Ej.: habla como un presentador irónico..."></textarea></div>
+<details class="fish-settings">
+<summary>🎙️ Voz Fish · Expresividad y ajustes</summary>
+<p class="sync-help">Estos valores se guardan para este personaje y se aplican cuando generás una nueva voz.</p>
+<div class="slider-pair">
+<div class="slider-field"><label for="fish-temp-new">Expresividad / variación <output id="fish-temp-value-new">0.70</output></label><input type="range" id="fish-temp-new" name="fish_temperature" min="0.1" max="1" step="0.05" value="0.7"></div>
+<div class="slider-field"><label for="fish-top-new">Variedad <output id="fish-top-value-new">0.70</output></label><input type="range" id="fish-top-new" name="fish_top_p" min="0.1" max="1" step="0.05" value="0.7"></div>
+<div class="slider-field"><label for="fish-speed-new">Velocidad <output id="fish-speed-value-new">1.00×</output></label><input type="range" id="fish-speed-new" name="fish_speed" min="0.5" max="2" step="0.05" value="1"></div>
+<div class="slider-field"><label for="fish-volume-new">Volumen <output id="fish-volume-value-new">0 dB</output></label><input type="range" id="fish-volume-new" name="fish_volume" min="-20" max="20" step="1" value="0"></div>
+</div>
+<div class="field"><label for="fish-latency-new">Modo de generación</label><select id="fish-latency-new" name="fish_latency"><option value="balanced" selected>Balanced (más rápido)</option><option value="normal">Normal (prioriza calidad)</option></select></div>
+<div class="field"><label for="fish-tags-new">Etiquetas de voz (opcional)</label><input id="fish-tags-new" name="fish_tags" placeholder="[confident] [whispering]" maxlength="120"><p class="tiny">Podés usar hasta tres etiquetas entre corchetes. Por ejemplo: [angry], [happy], [calm]. Se aplican al principio de cada texto.</p></div>
+</details>
 <div class="divider"></div>
 <h3>Sincronización desde texto</h3>
 <div class="slider-pair">
@@ -147,6 +165,18 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="grid-two"><div class="field"><label>Nombre</label><input name="name" required></div><div class="field"><label>ID de voz Fish</label><input name="voice_id"></div></div>
 <div class="field"><label>Texto de la muestra (si usa audio de referencia)</label><textarea name="reference_text" style="min-height:76px"></textarea></div>
 <div class="field"><label>Estilo para Gemini</label><textarea name="notes" style="min-height:76px"></textarea></div>
+<details class="fish-settings" open>
+<summary>🎙️ Voz Fish · Expresividad y ajustes</summary>
+<p class="sync-help">Estos valores se guardan para este personaje y se aplican cuando generás una nueva voz.</p>
+<div class="slider-pair">
+<div class="slider-field"><label for="fish-temp-edit">Expresividad / variación <output id="fish-temp-value-edit">0.70</output></label><input type="range" id="fish-temp-edit" name="fish_temperature" min="0.1" max="1" step="0.05" value="0.7"></div>
+<div class="slider-field"><label for="fish-top-edit">Variedad <output id="fish-top-value-edit">0.70</output></label><input type="range" id="fish-top-edit" name="fish_top_p" min="0.1" max="1" step="0.05" value="0.7"></div>
+<div class="slider-field"><label for="fish-speed-edit">Velocidad <output id="fish-speed-value-edit">1.00×</output></label><input type="range" id="fish-speed-edit" name="fish_speed" min="0.5" max="2" step="0.05" value="1"></div>
+<div class="slider-field"><label for="fish-volume-edit">Volumen <output id="fish-volume-value-edit">0 dB</output></label><input type="range" id="fish-volume-edit" name="fish_volume" min="-20" max="20" step="1" value="0"></div>
+</div>
+<div class="field"><label for="fish-latency-edit">Modo de generación</label><select id="fish-latency-edit" name="fish_latency"><option value="balanced" selected>Balanced (más rápido)</option><option value="normal">Normal (prioriza calidad)</option></select></div>
+<div class="field"><label for="fish-tags-edit">Etiquetas de voz (opcional)</label><input id="fish-tags-edit" name="fish_tags" placeholder="[confident] [whispering]" maxlength="120"><p class="tiny">Podés usar hasta tres etiquetas entre corchetes. Por ejemplo: [angry], [happy], [calm]. Se aplican al principio de cada texto.</p></div>
+</details>
 <div class="divider"></div>
 <h3>Sincronización desde texto</h3>
 <div class="slider-pair">
@@ -276,7 +306,8 @@ function fillEdit(){
  const c=findBy(data.characters,$("edit-character-choice").value);
  ["edit-character","update-reference","new-outfit"].forEach(form=>$(form).style.display=c?"block":"none");
  if(!c){$("outfits-list").innerHTML="";$("outfit-editor-choice").innerHTML="";return}
- for(const key of ["name","voice_id","notes","reference_text","mouth_intensity","voice_delay"]){
+ for(const key of ["name","voice_id","notes","reference_text","mouth_intensity","voice_delay",
+                   "fish_temperature","fish_top_p","fish_speed","fish_volume","fish_latency","fish_tags"]){
   const el=$("edit-character").elements.namedItem(key);
   if(el)el.value=c[key]??"";
  }
@@ -309,6 +340,11 @@ function updateSliderLabels(){
  for(const id of ["new","edit"]){
   $("mouth-value-"+id).textContent=$("mouth-"+id).value+"%";
   $("delay-value-"+id).textContent=$("delay-"+id).value+" ms";
+  $("fish-temp-value-"+id).textContent=Number($("fish-temp-"+id).value).toFixed(2);
+  $("fish-top-value-"+id).textContent=Number($("fish-top-"+id).value).toFixed(2);
+  $("fish-speed-value-"+id).textContent=Number($("fish-speed-"+id).value).toFixed(2)+"×";
+  const vol=Number($("fish-volume-"+id).value);
+  $("fish-volume-value-"+id).textContent=(vol>0?"+":"")+vol+" dB";
  }
 }
 for(const el of document.querySelectorAll("input[type=range]"))el.addEventListener("input",updateSliderLabels);
@@ -317,6 +353,9 @@ function editPayload(){
  payload.auto_blink=f.elements.namedItem("auto_blink").checked;
  payload.mouth_intensity=Number(payload.mouth_intensity);
  payload.voice_delay=Number(payload.voice_delay);
+ for(const key of ["fish_temperature","fish_top_p","fish_speed","fish_volume"]){
+  payload[key]=Number(payload[key]);
+ }
  return payload;
 }
 async function saveEditedCharacter(silent=false){
