@@ -165,6 +165,10 @@ def logout(_: None = Depends(auth)):
 def homepage():
     return FileResponse(BASE / "index.html", headers={"Cache-Control": "no-store"})
 
+@app.get("/mobile-player.js")
+def mobile_player_script():
+    return FileResponse(BASE / "mobile-player.js", media_type="text/javascript", headers={"Cache-Control":"no-store"})
+
 @app.get("/api/generations")
 def generation_list(_: None = Depends(auth)):
     return {"generations": rows("generations")}
