@@ -47,9 +47,9 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 #tab-create .stage-touch img{pointer-events:none}
 #tab-create .stage-touch:active{border-color:var(--a)}
 #tab-create .stage-overlay{position:absolute;inset:auto 8px 10px;z-index:1;border-radius:9px;background:#0b1423d9;color:#f4fcff;font-size:12px;font-weight:700;padding:9px;text-align:center;pointer-events:none}
-#tab-create .download-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;width:100%;max-width:260px}
+#tab-create .download-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%;max-width:300px}
 #tab-create .download-row .btn{width:100%;min-height:43px;font-size:14px}
-@media(min-width:760px){#tab-create .stage-touch{max-width:310px}#tab-create .download-row{max-width:310px}}
+@media(min-width:760px){#tab-create .stage-touch{max-width:310px}#tab-create .download-row{max-width:330px}}
 </style>
 </head>
 <body>
@@ -88,6 +88,7 @@ nav{position:fixed;z-index:3;bottom:0;left:0;width:100%;display:flex;gap:2px;jus
 <div class="download-row">
 <button class="btn tinybtn" id="download-mp3" type="button" disabled>MP3</button>
 <button class="btn tinybtn" id="download-mp4" type="button" disabled>MP4</button>
+<button class="btn tinybtn" id="download-webm" type="button" disabled title="Video transparente, sin fondo">WebM</button>
 </div>
 </div>
 </div>
@@ -307,17 +308,20 @@ function statusText(j){
  if(j.status==="rendering")return "Creando MP4 con el movimiento de la boca…";
  if(j.status==="ready")return "Listo";
  if(j.status==="video_failed")return "Error al exportar MP4";
+ if(j.status==="rendering_webm")return "Creando WebM transparente…";
+ if(j.status==="webm_failed")return "Error al exportar WebM";
  if(j.status==="interrupted")return "Interrumpido";
  return "Error al crear el audio";
 }
 function jobHtml(j,compact=false){
- const text=html(j.text),mp3=Boolean(j.audio_file),mp4=Boolean(j.video_file);
+ const text=html(j.text),mp3=Boolean(j.audio_file),mp4=Boolean(j.video_file),webm=Boolean(j.webm_file);
  const head='<div class="row"><div class="grow"><div class="list-title">'+html(getName(data.characters,j.character_id))+'</div><div class="list-meta">'+new Date(j.created_at*1000).toLocaleString("es-AR")+' · '+html(getName(data.outfits,j.outfit_id))+'</div></div><span class="chip">'+html(statusText(j))+'</span></div>';
  const err=j.error?'<p class="detail" style="color:var(--danger)">'+html(j.error)+'</p>':"";
  const files='<div class="actions">'+
   (mp3?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp3?download=1">↓ MP3</a>':'')+
   (mp3&&!mp4&&j.status!=="rendering"?'<button class="btn tinybtn secondary" data-video="'+j.id+'">✦ Crear MP4</button>':'')+
   (mp4?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/mp4?download=1">↓ MP4</a>':'')+
+  (webm?'<a class="btn tinybtn" href="/api/generations/'+j.id+'/file/webm?download=1">↓ WebM</a>':'')+
   (["failed","interrupted"].includes(j.status)?'<button class="btn tinybtn" data-retry="'+j.id+'">Reintentar audio</button>':'')+
  '</div>';
  const media=compact?"":(mp4?'<video controls playsinline preload="none" src="/api/generations/'+j.id+'/file/mp4"></video>':'');
