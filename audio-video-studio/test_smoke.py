@@ -39,6 +39,11 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertIn('id="download-mp3"',ui)
         self.assertIn('id="download-mp4"',ui)
         self.assertIn('id="download-webm"',ui)
+        self.assertIn('data-shape="fit"',ui)
+        self.assertIn('data-shape="square"',ui)
+        self.assertIn('data-shape="circle"',ui)
+        self.assertIn('id="square-vertical"',ui)
+        self.assertIn('id="circle-size"',ui)
         self.assertNotIn('id="current-result"',ui)
         self.assertNotIn('id="test-speak"',ui)
         script=self.client.get("/mobile-player.js")
@@ -170,6 +175,47 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertFalse(updated["video_file"])
         self.assertFalse(updated["webm_file"])
         self.assertTrue(Path(updated["audio_file"]).is_file())
+        # Switching shape never re-synthesizes Fish and leaves the WebM untouched.
+        original_webm=main.record("generations",ident)["webm_file"]
+        first_square=self.client.post("/api/generations/"+ident+"/framing",
+            json={"shape":"square","vertical":-70,"circle_size":100})
+        self.assertEqual(first_square.status_code,200,first_square.text)
+        self.assertTrue(first_square.json()["changed"])
+        job=main.record("generations",ident)
+        self.assertEqual(job["mp4_shape"],"square")
+        self.assertEqual(job["mp4_vertical"],-70)
+        self.assertFalse(job["video_file"])
+        self.assertEqual(job["webm_file"],original_webm)
+        self.assertEqual(self.client.get("/api/generations/"+ident+"/file/webm").status_code,200)
+        sq_img=main._export_canvas(job,main.record("outfits",sid),False,0)
+        self.assertEqual(sq_img.size,(1080,1080))
+        self.assertEqual(sq_img.mode,"RGB")
+        self.assertEqual(self.client.post("/api/generations/"+ident+"/framing",
+            json={"shape":"bad","vertical":0,"circle_size":100}).status_code,422)
+        first_round=self.client.post("/api/generations/"+ident+"/framing",
+            json={"shape":"circle","vertical":0,"circle_size":75})
+        self.assertEqual(first_round.status_code,200,first_round.text)
+        job=main.record("generations",ident)
+        self.assertEqual(job["mp4_shape"],"circle")
+        masked=main._export_canvas(job,main.record("outfits",sid),False,0)
+        self.assertEqual(masked.size,(1080,1080))
+        self.assertEqual(masked.getpixel((0,0)),(19,23,34))
+        self.assertNotEqual(masked.getpixel((540,540)),(19,23,34))
+        # The final MP4 is truly encoded at 1080x1080 for a circular frame.
+        start=self.client.post("/api/generations/"+ident+"/video")
+        self.assertEqual(start.status_code,200,start.text)
+        until=time.time()+90
+        while time.time()<until and main.record("generations",ident)["status"]=="rendering":
+            time.sleep(.4)
+        circle_job=main.record("generations",ident)
+        self.assertEqual(circle_job["status"],"ready",circle_job["error"])
+        resolution=subprocess.run(
+            ["ffprobe","-v","error","-select_streams","v:0","-show_entries",
+             "stream=width,height","-of","csv=s=x:p=0",circle_job["video_file"]],
+            capture_output=True,text=True,check=True,timeout=25)
+        self.assertEqual(resolution.stdout.strip(),"1080x1080")
+        self.assertTrue(Path(circle_job["webm_file"]).is_file())
+
 
 
 if __name__=="__main__":
