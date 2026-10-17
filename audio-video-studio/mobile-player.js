@@ -2,7 +2,7 @@
 // Mobile Persona Studio player. The Generate touch unlocks a persistent AudioContext,
 // allowing playback after asynchronous Fish generation on Chrome Android.
 let audioContext=null, activePlayback=null, playingSync=null, shownPose=-1;
-let pendingAutoPlayJob="",pendingVideoDownloadJob="",pollBusy=false,playToken=0;
+let pendingAutoPlayJob="",pendingVideoDownloadJob="",pendingWebmDownloadJob="",pollBusy=false,playToken=0;
 const decodedAudio=new Map(),syncCache=new Map();
 
 function stageMessage(message=""){
@@ -14,12 +14,16 @@ function activeJob(){return findBy(data.generations,currentJob)}
 function updateStageButtons(){
  const j=activeJob(),ready=Boolean(j?.audio_file);
  $("download-mp3").disabled=!ready;
- $("download-mp4").disabled=!ready||j?.status==="rendering";
+ const exporting=["rendering","rendering_webm"].includes(j?.status);
+ $("download-mp4").disabled=!ready||exporting;
+ $("download-webm").disabled=!ready||exporting;
  if(!j){stageMessage();return}
  if(["queued","generating"].includes(j.status)){stageMessage("Generando voz…");return}
  if(j.status==="rendering"){stageMessage("Preparando MP4…");return}
+ if(j.status==="rendering_webm"){stageMessage("Preparando WebM transparente…");return}
  if(!ready&&["failed","interrupted"].includes(j.status)){stageMessage("No se pudo generar la voz");return}
- if(j.status==="video_failed"){stageMessage("No se pudo exportar el video");return}
+ if(j.status==="video_failed"){stageMessage("No se pudo exportar el MP4");return}
+ if(j.status==="webm_failed"){stageMessage("No se pudo exportar el WebM");return}
  stageMessage();
 }
 function idlePose(){
@@ -47,7 +51,7 @@ function stopPlayback(reset=true){
 }
 function selectionChanged(){
  stopPlayback();
- pendingAutoPlayJob="";pendingVideoDownloadJob="";currentJob="";
+ pendingAutoPlayJob="";pendingVideoDownloadJob="";pendingWebmDownloadJob="";currentJob="";
  renderCreate();
 }
 function getAudioContext(){
@@ -159,6 +163,7 @@ async function createGeneration(text){
  currentJob=result.id;
  pendingAutoPlayJob=result.id;
  pendingVideoDownloadJob="";
+ pendingWebmDownloadJob="";
  stageMessage("Generando voz…");
  await refreshJobs();
  return result;
@@ -168,9 +173,9 @@ async function refreshJobs(){
  pollBusy=true;
  try{
   const result=await api("/api/generations");
-  const before=JSON.stringify(data.generations.map(j=>[j.id,j.status,j.audio_file,j.video_file,j.error]));
+  const before=JSON.stringify(data.generations.map(j=>[j.id,j.status,j.audio_file,j.video_file,j.webm_file,j.error]));
   data.generations=result.generations;
-  const after=JSON.stringify(data.generations.map(j=>[j.id,j.status,j.audio_file,j.video_file,j.error]));
+  const after=JSON.stringify(data.generations.map(j=>[j.id,j.status,j.audio_file,j.video_file,j.webm_file,j.error]));
   if(before!==after)renderLibrary();
   updateStageButtons();
   const j=activeJob();
@@ -196,6 +201,17 @@ async function refreshJobs(){
    }else if(j.status==="video_failed"){
     pendingVideoDownloadJob="";
     toast(j.error||"No se pudo exportar el MP4.",true);
+   }
+  }
+  if(pendingWebmDownloadJob && j?.id===pendingWebmDownloadJob){
+   if(j.webm_file){
+    pendingWebmDownloadJob="";
+    stageMessage();
+    startDownload("/api/generations/"+j.id+"/file/webm?download=1","personaje-transparente.webm");
+    toast("WebM transparente listo. Si no se descargó, tocá WebM otra vez.");
+   }else if(j.status==="webm_failed"){
+    pendingWebmDownloadJob="";
+    toast(j.error||"No se pudo exportar el WebM transparente.",true);
    }
   }
  }finally{pollBusy=false}
@@ -227,7 +243,7 @@ function setupPlayer(){
    startDownload("/api/generations/"+j.id+"/file/mp4?download=1","personaje.mp4");
    return;
   }
-  if(j.status==="rendering")return;
+  if(["rendering","rendering_webm"].includes(j.status))return;
   $("download-mp4").disabled=true;
   try{
    pendingVideoDownloadJob=j.id;
@@ -236,6 +252,25 @@ function setupPlayer(){
    await refreshJobs();
   }catch(err){
    pendingVideoDownloadJob="";
+   toast(err.message,true);updateStageButtons();
+  }
+ });
+ $("download-webm").addEventListener("click",async()=>{
+  const j=activeJob();
+  if(!j?.audio_file)return;
+  if(j.webm_file){
+   startDownload("/api/generations/"+j.id+"/file/webm?download=1","personaje-transparente.webm");
+   return;
+  }
+  if(["rendering","rendering_webm"].includes(j.status))return;
+  $("download-webm").disabled=true;
+  try{
+   pendingWebmDownloadJob=j.id;
+   await api("/api/generations/"+j.id+"/webm",{method:"POST"});
+   stageMessage("Preparando WebM transparente…");
+   await refreshJobs();
+  }catch(err){
+   pendingWebmDownloadJob="";
    toast(err.message,true);updateStageButtons();
   }
  });
