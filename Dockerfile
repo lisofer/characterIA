@@ -9,7 +9,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY audio-video-studio/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY audio-video-studio/main.py audio-video-studio/index.html audio-video-studio/lip_sync.py /app/
+COPY audio-video-studio/main.py audio-video-studio/index.html audio-video-studio/lip_sync.py audio-video-studio/mobile-player.js /app/
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 3000
