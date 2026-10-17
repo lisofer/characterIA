@@ -427,6 +427,7 @@ setupPlayer();
    currentJob=recent.id;
    $("character-choice").value=recent.character_id;
    selectedOutfit=recent.outfit_id;selectedBackground=recent.background_id||"";
+   setShapeFromJob(recent);
    renderCreate();
   }
   showApp();
