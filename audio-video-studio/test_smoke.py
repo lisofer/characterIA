@@ -167,14 +167,6 @@ class StudioSmokeTest(unittest.TestCase):
                          "The character body must remain opaque over transparent canvas.")
         self.assertTrue(Path(main.record("generations",ident)["video_file"]).is_file(),
                         "Generating WebM must not delete the already rendered MP4.")
-        # Retiming must invalidate both videos but keep the Fish MP3.
-        settings={"mouth_intensity":65,"voice_delay":-20,"auto_blink":True}
-        recal=self.client.post("/api/generations/"+ident+"/retime",json=settings)
-        self.assertEqual(recal.status_code,200,recal.text)
-        updated=main.record("generations",ident)
-        self.assertFalse(updated["video_file"])
-        self.assertFalse(updated["webm_file"])
-        self.assertTrue(Path(updated["audio_file"]).is_file())
         # Switching shape never re-synthesizes Fish and leaves the WebM untouched.
         original_webm=main.record("generations",ident)["webm_file"]
         first_square=self.client.post("/api/generations/"+ident+"/framing",
@@ -215,6 +207,15 @@ class StudioSmokeTest(unittest.TestCase):
             capture_output=True,text=True,check=True,timeout=25)
         self.assertEqual(resolution.stdout.strip(),"1080x1080")
         self.assertTrue(Path(circle_job["webm_file"]).is_file())
+        # Retiming must invalidate both videos but keep the Fish MP3.
+        settings={"mouth_intensity":65,"voice_delay":-20,"auto_blink":True}
+        recal=self.client.post("/api/generations/"+ident+"/retime",json=settings)
+        self.assertEqual(recal.status_code,200,recal.text)
+        updated=main.record("generations",ident)
+        self.assertFalse(updated["video_file"])
+        self.assertFalse(updated["webm_file"])
+        self.assertTrue(Path(updated["audio_file"]).is_file())
+
 
 
 
