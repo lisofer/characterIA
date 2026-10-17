@@ -39,6 +39,12 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertIn('id="download-mp3"',ui)
         self.assertIn('id="download-mp4"',ui)
         self.assertIn('id="download-webm"',ui)
+        self.assertIn('id="fish-temp-edit"',ui)
+        self.assertIn('id="fish-top-edit"',ui)
+        self.assertIn('id="fish-speed-edit"',ui)
+        self.assertIn('id="fish-volume-edit"',ui)
+        self.assertIn('id="fish-latency-edit"',ui)
+        self.assertIn('id="fish-tags-edit"',ui)
         self.assertIn('data-shape="fit"',ui)
         self.assertIn('data-shape="square"',ui)
         self.assertIn('data-shape="circle"',ui)
@@ -58,6 +64,64 @@ class StudioSmokeTest(unittest.TestCase):
         })
         self.assertEqual(char.status_code, 200, char.text)
         cid = char.json()["id"]
+
+        # Persisted Fish settings must be applied to real TTS requests rather
+        # than merely changing sliders on the mobile screen.
+        saved=self.client.put("/api/characters/"+cid,json={
+            "name":"Prueba","voice_id":"demo-fish-voice-id","notes":"divertido",
+            "reference_text":"","mouth_intensity":45,"voice_delay":0,
+            "auto_blink":True,"fish_temperature":0.9,"fish_top_p":0.55,
+            "fish_speed":1.25,"fish_volume":-4,"fish_latency":"normal",
+            "fish_tags":"[confident] [whispering]"
+        })
+        self.assertEqual(saved.status_code,200,saved.text)
+        stored=main.record("characters",cid)
+        self.assertEqual(stored["fish_temperature"],0.9)
+        self.assertEqual(stored["fish_speed"],1.25)
+        self.assertEqual(stored["fish_volume"],-4)
+        self.assertEqual(stored["fish_tags"],"[confident] [whispering]")
+        expected=main.fish_tts_parameters(stored,"Buenas tardes")
+        self.assertEqual(expected["text"],"[confident] [whispering] Buenas tardes")
+        self.assertEqual(expected["temperature"],0.9)
+        self.assertEqual(expected["top_p"],0.55)
+        self.assertEqual(expected["latency"],"normal")
+        self.assertEqual(expected["prosody"]["speed"],1.25)
+        self.assertEqual(expected["prosody"]["volume"],-4)
+        self.assertEqual(self.client.put("/api/characters/"+cid,json={
+            "name":"Prueba","voice_id":"demo-fish-voice-id",
+            "fish_temperature":1.5
+        }).status_code,422)
+        self.assertEqual(self.client.put("/api/characters/"+cid,json={
+            "name":"Prueba","voice_id":"demo-fish-voice-id",
+            "fish_tags":"hablá de forma triste"
+        }).status_code,400)
+
+        # Avoid real API consumption: intercept the outgoing msgpack payload
+        # and assert Fish receives exactly the saved character configuration.
+        from unittest.mock import patch
+        import msgpack
+        fish_job=main.new_id()
+        main.change(
+            "INSERT INTO generations (id,character_id,outfit_id,background_id,text,status,error,audio_file,video_file,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (fish_job,cid,"pending","", "Hola mundo","queued","","","",time.time())
+        )
+        with patch.object(main,"FISH_KEY","mock-key"), patch.object(main.httpx,"Client") as fish_client, patch.object(main,"create_sync") as create_sync:
+            fish_client.return_value.__enter__.return_value.post.return_value.status_code=200
+            fish_client.return_value.__enter__.return_value.post.return_value.content=b"ID3"+bytes(300)
+            fish_client.return_value.__enter__.return_value.post.return_value.headers={"content-type":"audio/mpeg"}
+            create_sync.return_value=main.OUTPUTS/(fish_job+".sync.json")
+            main.generate_speech(fish_job)
+            fish_request=fish_client.return_value.__enter__.return_value.post.call_args
+            body=msgpack.unpackb(fish_request.kwargs["content"],raw=False)
+            self.assertEqual(body["text"],"[confident] [whispering] Hola mundo")
+            self.assertEqual(body["temperature"],0.9)
+            self.assertEqual(body["top_p"],0.55)
+            self.assertEqual(body["prosody"]["speed"],1.25)
+            self.assertEqual(body["prosody"]["volume"],-4)
+            self.assertEqual(body["latency"],"normal")
+            self.assertEqual(body["reference_id"],"demo-fish-voice-id")
+            self.assertEqual(main.record("generations",fish_job)["status"],"ready")
+
         invalid = self.client.post("/api/characters/" + cid + "/outfits",
                                    data={"name":"faltan"},
                                    files=[("images", ("00.png", picture_bytes("red"), "image/png"))])
