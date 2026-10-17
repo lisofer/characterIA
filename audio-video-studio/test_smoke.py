@@ -38,6 +38,7 @@ class StudioSmokeTest(unittest.TestCase):
         self.assertIn('id="preview-scene"',ui)
         self.assertIn('id="download-mp3"',ui)
         self.assertIn('id="download-mp4"',ui)
+        self.assertIn('id="download-webm"',ui)
         self.assertNotIn('id="current-result"',ui)
         self.assertNotIn('id="test-speak"',ui)
         script=self.client.get("/mobile-player.js")
@@ -130,6 +131,46 @@ class StudioSmokeTest(unittest.TestCase):
             time.sleep(.4)
         self.assertEqual(main.record("generations",ident)["status"],"ready",main.record("generations",ident)["error"])
         self.assertEqual(self.client.get("/api/generations/"+ident+"/file/mp4?download=1").status_code,200)
+        # WEBM must preserve actual transparent alpha even when an MP4 background is selected.
+        transparent=self.client.post("/api/generations/"+ident+"/webm")
+        self.assertEqual(transparent.status_code,200,transparent.text)
+        until=time.time()+140
+        while time.time()<until and main.record("generations",ident)["status"]=="rendering_webm":
+            time.sleep(.4)
+        webm_job=main.record("generations",ident)
+        self.assertEqual(webm_job["status"],"ready",webm_job["error"])
+        self.assertTrue(Path(webm_job["webm_file"]).is_file())
+        result=self.client.get("/api/generations/"+ident+"/file/webm?download=1")
+        self.assertEqual(result.status_code,200,result.text[:300] if result.status_code!=200 else "")
+        self.assertIn("video/webm",result.headers["content-type"])
+        probe=subprocess.run(
+            ["ffprobe","-v","error","-show_entries","stream=codec_name:stream_tags=alpha_mode",
+             "-of","json",webm_job["webm_file"]],capture_output=True,text=True,check=True,timeout=25)
+        info=__import__("json").loads(probe.stdout)
+        self.assertTrue(any(s.get("codec_name")=="opus" for s in info["streams"]))
+        self.assertTrue(any(s.get("codec_name")=="vp9" and
+            s.get("tags",{}).get("ALPHA_MODE")=="1" for s in info["streams"]),info)
+        # Explicit libvpx decoder is needed to actually expose VP9 alpha.
+        first=subprocess.run(
+            ["ffmpeg","-v","error","-c:v","libvpx-vp9","-i",webm_job["webm_file"],
+             "-frames:v","1","-pix_fmt","rgba","-f","rawvideo","pipe:1"],
+            capture_output=True,check=True,timeout=35)
+        self.assertGreaterEqual(len(first.stdout),720*1280*4)
+        self.assertEqual(first.stdout[3],0,"The WebM upper-left corner must be transparent.")
+        center_bottom=((1280-100)*720+360)*4+3
+        self.assertEqual(first.stdout[center_bottom],255,
+                         "The character body must remain opaque over transparent canvas.")
+        self.assertTrue(Path(main.record("generations",ident)["video_file"]).is_file(),
+                        "Generating WebM must not delete the already rendered MP4.")
+        # Retiming must invalidate both videos but keep the Fish MP3.
+        settings={"mouth_intensity":65,"voice_delay":-20,"auto_blink":True}
+        recal=self.client.post("/api/generations/"+ident+"/retime",json=settings)
+        self.assertEqual(recal.status_code,200,recal.text)
+        updated=main.record("generations",ident)
+        self.assertFalse(updated["video_file"])
+        self.assertFalse(updated["webm_file"])
+        self.assertTrue(Path(updated["audio_file"]).is_file())
+
 
 if __name__=="__main__":
     unittest.main(verbosity=2)
