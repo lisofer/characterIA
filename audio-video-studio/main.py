@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import hmac
 import json
 import uuid
@@ -24,6 +25,7 @@ from PIL import Image, ImageOps, ImageDraw, UnidentifiedImageError
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
+from typing import Literal
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("DATA_DIR") or os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or BASE / "data").resolve()
@@ -77,7 +79,13 @@ def init_db():
             "characters": [
                 ("mouth_intensity", "INTEGER NOT NULL DEFAULT 45"),
                 ("voice_delay", "INTEGER NOT NULL DEFAULT 0"),
-                ("auto_blink", "INTEGER NOT NULL DEFAULT 1")],
+                ("auto_blink", "INTEGER NOT NULL DEFAULT 1"),
+                ("fish_temperature", "REAL NOT NULL DEFAULT 0.7"),
+                ("fish_top_p", "REAL NOT NULL DEFAULT 0.7"),
+                ("fish_speed", "REAL NOT NULL DEFAULT 1.0"),
+                ("fish_volume", "REAL NOT NULL DEFAULT 0.0"),
+                ("fish_latency", "TEXT NOT NULL DEFAULT 'balanced'"),
+                ("fish_tags", "TEXT NOT NULL DEFAULT ''")],
             "generations": [("sync_file", "TEXT NOT NULL DEFAULT ''"),
                             ("webm_file", "TEXT NOT NULL DEFAULT ''"),
                             ("mp4_shape", "TEXT NOT NULL DEFAULT 'fit'"),
@@ -136,6 +144,35 @@ def auth(request: Request):
 
 login_attempts = {}
 login_lock = threading.Lock()
+
+
+FISH_TAG_PATTERN = re.compile(r"^(?:\[[a-zA-Z][a-zA-Z -]{0,44}\]\s*){0,3}$")
+
+def validated_fish_tags(tags: str) -> str:
+    """S2 style cues are square-bracket directives; not free-form speech text."""
+    value = tags.strip()
+    if value and not FISH_TAG_PATTERN.fullmatch(value):
+        raise ValueError("Usá hasta tres etiquetas Fish como [confident] [whispering].")
+    return value
+
+def fish_tts_parameters(character: dict, original_text: str) -> dict:
+    # Fish's 'temperature' is variation rather than a guaranteed emotion intensity.
+    # Fish's prosody.volume is measured in dB, not a 0-1 volume multiplier.
+    tag_prefix = validated_fish_tags(character["fish_tags"])
+    speech = (tag_prefix + " " + original_text).strip() if tag_prefix else original_text
+    return {
+        "text": speech,
+        "format": "mp3",
+        "latency": character["fish_latency"],
+        "chunk_length": 150,
+        "prosody": {
+            "speed": round(float(character["fish_speed"]), 2),
+            "volume": round(float(character["fish_volume"]), 1),
+            "normalize_loudness": True
+        },
+        "temperature": round(float(character["fish_temperature"]), 2),
+        "top_p": round(float(character["fish_top_p"]), 2)
+    }
 
 class Login(BaseModel):
     password: str
@@ -202,9 +239,20 @@ async def character_create(name: str = Form(...), voice_id: str = Form(""),
                            reference: UploadFile | None = File(None),
                            mouth_intensity: int = Form(45), voice_delay: int = Form(0),
                            auto_blink: bool = Form(False),
+                           fish_temperature: float = Form(0.7), fish_top_p: float = Form(0.7),
+                           fish_speed: float = Form(1.0), fish_volume: float = Form(0.0),
+                           fish_latency: Literal["normal","balanced"] = Form("balanced"),
+                           fish_tags: str = Form(""),
                            _: None = Depends(auth)):
     if not 20 <= mouth_intensity <= 85 or not -100 <= voice_delay <= 160:
         raise HTTPException(400, "Ajustes de sincronización fuera del rango permitido.")
+    if not (0.1 <= fish_temperature <= 1 and 0.1 <= fish_top_p <= 1
+            and 0.5 <= fish_speed <= 2 and -20 <= fish_volume <= 20):
+        raise HTTPException(400, "Ajustes Fish fuera del rango permitido.")
+    try:
+        fish_tags = validated_fish_tags(fish_tags)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
     name = name.strip()[:80]
     voice_id = voice_id.strip()[:150]
     reference_text = reference_text.strip()[:2500]
@@ -223,9 +271,10 @@ async def character_create(name: str = Form(...), voice_id: str = Form(""),
         directory.mkdir(parents=True, exist_ok=True)
         ref_file = str(directory / ("reference" + ext))
         Path(ref_file).write_bytes(raw)
-    change("INSERT INTO characters (id,name,voice_id,reference_file,reference_text,notes,created_at,mouth_intensity,voice_delay,auto_blink) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    change("INSERT INTO characters (id,name,voice_id,reference_file,reference_text,notes,created_at,mouth_intensity,voice_delay,auto_blink,fish_temperature,fish_top_p,fish_speed,fish_volume,fish_latency,fish_tags) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
            (char_id, name, voice_id, ref_file, reference_text, notes.strip()[:1200], time.time(),
-            mouth_intensity, voice_delay, int(auto_blink)))
+            mouth_intensity, voice_delay, int(auto_blink), fish_temperature, fish_top_p,
+            fish_speed, fish_volume, fish_latency, fish_tags))
     return {"id": char_id}
 
 class EditCharacter(BaseModel):
@@ -236,15 +285,27 @@ class EditCharacter(BaseModel):
     mouth_intensity: int = Field(default=45, ge=20, le=85)
     voice_delay: int = Field(default=0, ge=-100, le=160)
     auto_blink: bool = True
+    fish_temperature: float = Field(default=0.7, ge=0.1, le=1.0)
+    fish_top_p: float = Field(default=0.7, ge=0.1, le=1.0)
+    fish_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    fish_volume: float = Field(default=0.0, ge=-20, le=20)
+    fish_latency: Literal["normal", "balanced"] = "balanced"
+    fish_tags: str = Field(default="", max_length=120)
 
 @app.put("/api/characters/{char_id}")
 def character_edit(char_id: str, payload: EditCharacter, _: None = Depends(auth)):
     char = record("characters", char_id)
     if not payload.voice_id.strip() and not char["reference_file"]:
         raise HTTPException(400, "Este personaje necesita ID de voz o muestra.")
-    change("UPDATE characters SET name=?, voice_id=?, reference_text=?, notes=?, mouth_intensity=?, voice_delay=?, auto_blink=? WHERE id=?",
+    try:
+        fish_tags = validated_fish_tags(payload.fish_tags)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    change("UPDATE characters SET name=?, voice_id=?, reference_text=?, notes=?, mouth_intensity=?, voice_delay=?, auto_blink=?, fish_temperature=?, fish_top_p=?, fish_speed=?, fish_volume=?, fish_latency=?, fish_tags=? WHERE id=?",
            (payload.name.strip(), payload.voice_id.strip(), payload.reference_text.strip(), payload.notes.strip(),
-            payload.mouth_intensity, payload.voice_delay, int(payload.auto_blink), char_id))
+            payload.mouth_intensity, payload.voice_delay, int(payload.auto_blink),
+            payload.fish_temperature, payload.fish_top_p, payload.fish_speed, payload.fish_volume,
+            payload.fish_latency, fish_tags, char_id))
     return {"ok": True}
 
 @app.post("/api/characters/{char_id}/reference")
@@ -399,9 +460,7 @@ def generate_speech(ident: str):
         job = record("generations", ident)
         character = record("characters", job["character_id"])
         change("UPDATE generations SET status='generating', error='' WHERE id=?", (ident,))
-        params = {"text": job["text"], "format": "mp3", "latency": "balanced",
-                  "chunk_length": 150, "prosody": {"speed": 1, "volume": 0, "normalize_loudness": True},
-                  "temperature": .7, "top_p": .7}
+        params = fish_tts_parameters(character, job["text"])
         headers = {"Authorization": "Bearer " + FISH_KEY, "model": FISH_MODEL}
         if character["voice_id"]:
             params["reference_id"] = character["voice_id"]
