@@ -1,6 +1,6 @@
 # Persona Studio — Audio & Video
 
-Una aplicación separada y **mobile-first** para generar MP3 con Fish Audio y MP4 vertical con 8 imágenes PNG por conjunto.
+Una aplicación separada y **mobile-first** para generar MP3 con Fish Audio, MP4 convencional o WebM con transparencia real a partir de ocho imágenes PNG por conjunto.
 
 ## Funciones
 
@@ -9,8 +9,10 @@ Una aplicación separada y **mobile-first** para generar MP3 con Fish Audio y MP
 - Varios conjuntos de **8 casillas PNG** por personaje, cargadas individualmente. Orden compatible con Persona Studio 3.1: 01 ojos cerrados/boca A, 02 ojos abiertos/boca A, 03 ojos cerrados/reposo, 04 ojos abiertos/reposo, 05 ojos cerrados/boca O, 06 ojos abiertos/boca O, 07 ojos cerrados/boca E, 08 ojos abiertos/boca E.
 - Biblioteca global de fondos de imagen, reutilizables entre personajes.
 - Guiones escritos manualmente o asistidos opcionalmente por Gemini.
-- Generación MP3 guardada con el texto exacto, el personaje, conjunto y fondo. MP4 a demanda.
-- MP4 vertical de 720×1280, H.264/AAC, optimizado para teléfono; usa visemas A/O/E desde el texto y pausas/actividad del audio real de Fish. La vista previa y el MP4 comparten exactamente la misma línea de tiempo, evitando desajustes entre ambos reproductores.
+- Generación MP3 guardada con el texto exacto, el personaje, conjunto y fondo. Exportación MP4 y WebM a demanda, desde el mismo audio sin regenerar la voz.
+- MP4 vertical de 720×1280, H.264/AAC, con el fondo seleccionado (o color sólido si se elige «Sin fondo»).
+- WebM vertical de 720×1280 con VP9 alpha (YUVA) y audio Opus. El WebM **siempre es transparente**, aunque se haya seleccionado un fondo para la vista previa/MP4. Su compatibilidad puede variar entre editores y reproductores.
+- MP4 y WebM comparten la secuencia de visemas A/O/E y pausas/actividad del audio real de Fish; la vista previa usa esa misma línea de tiempo.
 - Configuración persistente por personaje: actividad labial 20–85% (45% por defecto), adelanto visual −100 a +160ms (0ms por defecto), parpadeo espontáneo. Prueba Fish real y reajuste de MP3 existente sin regenerarlo.
 - Historial y archivos persistentes en SQLite y el directorio de datos. Exportación MP4 en segundo plano dentro del servicio.
 
@@ -62,6 +64,7 @@ Tener ffmpeg instalado localmente. Abrir http://localhost:3000.
     backgrounds/<id>.png
   outputs/<generation-id>.mp3
   outputs/<generation-id>.mp4
+  outputs/<generation-id>.webm
   outputs/<generation-id>.sync.json
   tmp/ (archivos temporales de render)
 ```
