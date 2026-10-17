@@ -10,7 +10,8 @@ Una aplicación separada y **mobile-first** para generar MP3 con Fish Audio, MP4
 - Biblioteca global de fondos de imagen, reutilizables entre personajes.
 - Guiones escritos manualmente o asistidos opcionalmente por Gemini.
 - Generación MP3 guardada con el texto exacto, el personaje, conjunto y fondo. Exportación MP4 y WebM a demanda, desde el mismo audio sin regenerar la voz.
-- MP4 vertical de 720×1280, H.264/AAC, con el fondo seleccionado (o color sólido si se elige «Sin fondo»).
+- MP4 H.264/AAC con tres encuadres: **Ajustar a la forma** (vertical 720 × 1280, predeterminado), **Cuadrado** (1080 × 1080, posición vertical ajustable de −100 a +100) y **Círculo** (1080 × 1080 con máscara circular de diámetro 55 a 100%). El MP4 mantiene el fondo seleccionado o un color sólido. Como H.264 no tiene canal alfa, el exterior del círculo es oscuro: para transparencia real se utiliza WebM.
+- Los ajustes de MP4 se guardan junto a cada generación. Si cambiás la forma, se vuelve a exportar únicamente el MP4: se conservan el MP3 de Fish y cualquier WebM transparente que ya exista.
 - WebM vertical de 720×1280 con VP9 alpha (YUVA) y audio Opus. El WebM **siempre es transparente**, aunque se haya seleccionado un fondo para la vista previa/MP4. Su compatibilidad puede variar entre editores y reproductores.
 - MP4 y WebM comparten la secuencia de visemas A/O/E y pausas/actividad del audio real de Fish; la vista previa usa esa misma línea de tiempo.
 - Configuración persistente por personaje: actividad labial 20–85% (45% por defecto), adelanto visual −100 a +160ms (0ms por defecto), parpadeo espontáneo. Prueba Fish real y reajuste de MP3 existente sin regenerarlo.
