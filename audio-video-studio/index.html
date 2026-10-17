@@ -408,8 +408,8 @@ setupPlayer();
 })();
 setInterval(async()=>{
  if($("app").hidden)return;
- if(data.generations.some(j=>["queued","generating","rendering"].includes(j.status))||
-    pendingAutoPlayJob||pendingVideoDownloadJob){
+ if(data.generations.some(j=>["queued","generating","rendering","rendering_webm"].includes(j.status))||
+    pendingAutoPlayJob||pendingVideoDownloadJob||pendingWebmDownloadJob){
   try{await refreshJobs()}catch(err){console.warn("Revisando generación",err)}
  }
 },1300);
