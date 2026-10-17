@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import msgpack
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps, ImageDraw, UnidentifiedImageError
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
@@ -79,7 +79,10 @@ def init_db():
                 ("voice_delay", "INTEGER NOT NULL DEFAULT 0"),
                 ("auto_blink", "INTEGER NOT NULL DEFAULT 1")],
             "generations": [("sync_file", "TEXT NOT NULL DEFAULT ''"),
-                            ("webm_file", "TEXT NOT NULL DEFAULT ''")]
+                            ("webm_file", "TEXT NOT NULL DEFAULT ''"),
+                            ("mp4_shape", "TEXT NOT NULL DEFAULT 'fit'"),
+                            ("mp4_vertical", "INTEGER NOT NULL DEFAULT 0"),
+                            ("mp4_circle", "INTEGER NOT NULL DEFAULT 100")]
         }.items():
             existing = {row[1] for row in db.execute("PRAGMA table_info(" + table + ")")}
             for name, sql_type in columns:
@@ -357,7 +360,12 @@ def image_background(ident: str, _: None = Depends(auth)):
     bg = record("backgrounds", ident)
     return FileResponse(bg["file"], media_type="image/png")
 
-class GenerationInput(BaseModel):
+class FramingInput(BaseModel):
+    shape: str = Field(default="fit", pattern="^(fit|square|circle)$")
+    vertical: int = Field(default=0, ge=-100, le=100)
+    circle_size: int = Field(default=100, ge=55, le=100)
+
+class GenerationInput(FramingInput):
     character_id: str
     outfit_id: str
     background_id: str = ""
@@ -380,9 +388,9 @@ def generation_create(item: GenerationInput, _: None = Depends(auth)):
     if not text:
         raise HTTPException(400, "El texto está vacío.")
     ident = new_id()
-    change("INSERT INTO generations (id,character_id,outfit_id,background_id,text,status,error,audio_file,video_file,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    change("INSERT INTO generations (id,character_id,outfit_id,background_id,text,status,error,audio_file,video_file,created_at,mp4_shape,mp4_vertical,mp4_circle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
            (ident, item.character_id, item.outfit_id, item.background_id, text,
-            "queued", "", "", "", time.time()))
+            "queued", "", "", "", time.time(), item.shape, item.vertical, item.circle_size))
     executor.submit(generate_speech, ident)
     return {"id": ident}
 
@@ -474,12 +482,54 @@ def sync_retime(ident: str, settings: SyncSettings, _: None = Depends(auth)):
            (str(path), ident))
     return {"ok": True, "timeline": json.loads(path.read_text("utf-8"))}
 
-def render_video(ident: str, kind: str = "mp4"):
-    """Reuses the same saved audio and phoneme timeline for MP4 and alpha WebM.
+def _export_canvas(job: dict, outfit: dict, transparent: bool, index: int) -> Image.Image:
+    """Render an image to match the selected export shape, keeping A/O/E gestures aligned."""
+    shape = "fit" if transparent else job["mp4_shape"]
+    square = shape in ("square", "circle")
+    width, height = (1080, 1920) if square else (720, 1280)
+    if transparent:
+        base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    elif job["background_id"]:
+        bg = record("backgrounds", job["background_id"])
+        with Image.open(bg["file"]) as image:
+            base = ImageOps.fit(image.convert("RGB"), (width, height),
+                                method=Image.Resampling.LANCZOS).convert("RGBA")
+    else:
+        base = Image.new("RGBA", (width, height), "#131722")
+    with Image.open(outfit_dir(outfit) / f"{index:02d}.png") as source:
+        sprite = source.convert("RGBA")
+        sprite.thumbnail((width, height), Image.Resampling.LANCZOS)
+    base.alpha_composite(sprite, ((width - sprite.width)//2, height - sprite.height))
+    if not square:
+        return base if transparent else base.convert("RGB")
 
-    The transparent WebM deliberately ignores the selected background; MP4
-    retains the selected background (or the solid fallback).
-    """
+    # Crop a 1080x1080 window of the 1080x1920 portrait. A +100 offset
+    # moves the window down, showing the character lower in the source.
+    offset = job["mp4_vertical"] if shape == "square" else 0
+    max_move = (height - 1080) // 2
+    top = max_move + round(offset * max_move / 100)
+    top = max(0, min(height - 1080, top))
+    cropped = base.crop((0, top, 1080, top + 1080)).convert("RGB")
+    if shape == "square":
+        return cropped
+    # H.264 has no alpha: the circular shape is genuinely clipped, but
+    # the rest of the square video frame is an opaque dark canvas.
+    size = max(55, min(100, int(job["mp4_circle"])))
+    supersample = 2
+    mask = Image.new("L", (1080 * supersample, 1080 * supersample), 0)
+    draw = ImageDraw.Draw(mask)
+    radius = (1080 * supersample * size / 100) / 2
+    center = 540 * supersample
+    box = (round(center-radius), round(center-radius),
+           round(center+radius)-1, round(center+radius)-1)
+    draw.ellipse(box, fill=255)
+    mask = mask.resize((1080, 1080), Image.Resampling.LANCZOS)
+    dark = Image.new("RGB", (1080, 1080), "#131722")
+    return Image.composite(cropped, dark, mask)
+
+
+def render_video(ident: str, kind: str = "mp4"):
+    """Render MP4 fit/square/circle or transparent WebM from the same synchronized MP3."""
     if kind not in ("mp4", "webm"):
         raise ValueError("Formato de video no compatible")
     folder = None
@@ -497,30 +547,10 @@ def render_video(ident: str, kind: str = "mp4"):
                ("rendering_webm" if transparent else "rendering", ident))
         plan = load_sync(job)
         folder = Path(tempfile.mkdtemp(prefix=f"render_{kind}_", dir=TEMP))
-        width, height = 720, 1280
-        if transparent:
-            # Keep RGBA all the way from the original PNG to the VP9 alpha encoder.
-            # Never blend the selected background into a transparent export.
-            base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        elif job["background_id"]:
-            bg = record("backgrounds", job["background_id"])
-            with Image.open(bg["file"]) as im:
-                base = ImageOps.fit(im.convert("RGB"), (width, height),
-                                    method=Image.Resampling.LANCZOS).convert("RGBA")
-        else:
-            base = Image.new("RGBA", (width, height), "#131722")
-
-        outfit_folder = outfit_dir(outfit)
         for index in range(8):
-            with Image.open(outfit_folder / f"{index:02d}.png") as source:
-                sprite = source.convert("RGBA")
-                sprite.thumbnail((width, height), Image.Resampling.LANCZOS)
-            composed = base.copy()
-            composed.alpha_composite(sprite, ((width - sprite.width) // 2, height - sprite.height))
-            # FFmpeg's VP9 alpha support relies on the frame still being RGBA here.
-            composed.save(folder / f"frame_{index}.png", optimize=False) if transparent else (
-                composed.convert("RGB").save(folder / f"frame_{index}.png", optimize=False)
-            )
+            image = _export_canvas(job, outfit, transparent, index)
+            image.save(folder / f"frame_{index}.png", optimize=False)
+
         lines = ["ffconcat version 1.0"]
         for pose, duration in event_durations(plan):
             frame_path = (folder / f"frame_{pose}.png").as_posix()
@@ -537,8 +567,6 @@ def render_video(ident: str, kind: str = "mp4"):
             "-i", job["audio_file"], "-map", "0:v:0", "-map", "1:a:0",
         ]
         if transparent:
-            # libvpx-vp9 with yuva420p + disabled alt-ref preserves PNG alpha.
-            # libopus ensures the speaking voice is included in WebM.
             encode = [
                 "-vf", "fps=25,format=yuva420p",
                 "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
@@ -568,6 +596,7 @@ def render_video(ident: str, kind: str = "mp4"):
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
 
+
 export_lock = threading.Lock()
 
 def queue_video(ident: str, kind: str):
@@ -591,6 +620,24 @@ def queue_video(ident: str, kind: str):
         change("UPDATE generations SET status=?, error='' WHERE id=?", (status, ident))
         executor.submit(render_video, ident, kind)
         return {"ok": True, "status": status}
+
+@app.post("/api/generations/{ident}/framing")
+def update_framing(ident: str, setting: FramingInput, _: None = Depends(auth)):
+    with export_lock:
+        job = record("generations", ident)
+        if job["status"] in ("rendering", "rendering_webm"):
+            raise HTTPException(409, "Esperá a que termine la exportación actual.")
+        if (job["mp4_shape"], job["mp4_vertical"], job["mp4_circle"]) == (
+                setting.shape, setting.vertical, setting.circle_size):
+            return {"ok": True, "changed": False}
+        # Re-render the MP4 only. The Fish MP3 and transparent WebM stay intact.
+        if job["video_file"]:
+            Path(job["video_file"]).unlink(missing_ok=True)
+        new_status = "ready" if job["audio_file"] else job["status"]
+        change("UPDATE generations SET mp4_shape=?, mp4_vertical=?, mp4_circle=?,"
+               " video_file='', status=?, error='' WHERE id=?",
+               (setting.shape, setting.vertical, setting.circle_size, new_status, ident))
+        return {"ok": True, "changed": True}
 
 @app.post("/api/generations/{ident}/video")
 def video_start(ident: str, _: None = Depends(auth)):
