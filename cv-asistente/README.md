@@ -11,7 +11,7 @@ Aplicación independiente alojada en la rama `cv-asistente-accesible` de `lisofe
 6. Entrar a `/admin`, configurar el personaje (8 PNG en orden), modelo, voz, personalidad, plantillas y texto de bienvenida; pulsar guardar.
 
 ## Voz y micrófono
-- Fish Audio se llama desde el servidor usando `FISH_API_KEY`. Para voces clonadas se requiere un `reference_id` válido en Fish; el modelo de voz se configura desde el panel.
+- Fish Audio se llama desde el servidor (modelo configurable por encabezado HTTP, inicialmente `s2.1-pro-free`) usando `FISH_API_KEY`. Para voces clonadas se requiere un `reference_id` válido en Fish; el modelo de voz se configura desde el panel.
 - Reconocimiento del micrófono: `SpeechRecognition / webkitSpeechRecognition` **del navegador**. Puede no estar disponible en todos los navegadores y el proveedor del navegador podría procesar voz en sus servidores. Siempre hay teclado como alternativa. Fish **sintetiza**, no transcribe, en esta versión.
 - Los navegadores bloquean la reproducción automática hasta que el usuario interactúa; la bienvenida se muestra en texto y la voz se intenta reproducir, con reintento al primer toque.
 
