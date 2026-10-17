@@ -458,8 +458,8 @@ class SyncSettings(BaseModel):
 @app.post("/api/generations/{ident}/retime")
 def sync_retime(ident: str, settings: SyncSettings, _: None = Depends(auth)):
     job = record("generations", ident)
-    if job["status"] == "rendering":
-        raise HTTPException(409, "Esperá a que termine el video antes de ajustar.")
+    if job["status"] in ("rendering", "rendering_webm"):
+        raise HTTPException(409, "Esperá a que termine la exportación antes de ajustar.")
     if not job["audio_file"] or not Path(job["audio_file"]).is_file():
         raise HTTPException(409, "Primero se necesita el MP3.")
     change("UPDATE characters SET mouth_intensity=?, voice_delay=?, auto_blink=? WHERE id=?",
