@@ -78,13 +78,16 @@ def init_db():
                 ("mouth_intensity", "INTEGER NOT NULL DEFAULT 45"),
                 ("voice_delay", "INTEGER NOT NULL DEFAULT 0"),
                 ("auto_blink", "INTEGER NOT NULL DEFAULT 1")],
-            "generations": [("sync_file", "TEXT NOT NULL DEFAULT ''")]
+            "generations": [("sync_file", "TEXT NOT NULL DEFAULT ''"),
+                            ("webm_file", "TEXT NOT NULL DEFAULT ''")]
         }.items():
             existing = {row[1] for row in db.execute("PRAGMA table_info(" + table + ")")}
             for name, sql_type in columns:
                 if name not in existing:
                     db.execute("ALTER TABLE " + table + " ADD COLUMN " + name + " " + sql_type)
-        db.execute("UPDATE generations SET status='interrupted', error='Trabajo interrumpido por un reinicio; podés reintentarlo.' WHERE status IN ('queued','generating','rendering')")
+        db.execute("UPDATE generations SET status='interrupted', error='Trabajo interrumpido por un reinicio; podés reintentarlo.' WHERE status IN ('queued','generating')")
+        db.execute("UPDATE generations SET status='video_failed', error='Exportación MP4 interrumpida por un reinicio.' WHERE status='rendering'")
+        db.execute("UPDATE generations SET status='webm_failed', error='Exportación WebM interrumpida por un reinicio.' WHERE status='rendering_webm'")
 init_db()
 
 def record(table, ident):
@@ -465,12 +468,23 @@ def sync_retime(ident: str, settings: SyncSettings, _: None = Depends(auth)):
     path = create_sync(job, Path(job["audio_file"]), updated_character)
     if job["video_file"]:
         Path(job["video_file"]).unlink(missing_ok=True)
-    change("UPDATE generations SET status='ready', video_file='', sync_file=?, error='' WHERE id=?",
+    if job["webm_file"]:
+        Path(job["webm_file"]).unlink(missing_ok=True)
+    change("UPDATE generations SET status='ready', video_file='', webm_file='', sync_file=?, error='' WHERE id=?",
            (str(path), ident))
     return {"ok": True, "timeline": json.loads(path.read_text("utf-8"))}
 
-def render_video(ident: str):
+def render_video(ident: str, kind: str = "mp4"):
+    """Reuses the same saved audio and phoneme timeline for MP4 and alpha WebM.
+
+    The transparent WebM deliberately ignores the selected background; MP4
+    retains the selected background (or the solid fallback).
+    """
+    if kind not in ("mp4", "webm"):
+        raise ValueError("Formato de video no compatible")
     folder = None
+    transparent = kind == "webm"
+    file_column = "webm_file" if transparent else "video_file"
     try:
         job = record("generations", ident)
         outfit = record("outfits", job["outfit_id"])
@@ -479,17 +493,23 @@ def render_video(ident: str):
         missing = [SLOTS[i] for i in range(8) if not (outfit_dir(outfit) / f"{i:02d}.png").is_file()]
         if missing:
             raise RuntimeError("Faltan imágenes para exportar: " + ", ".join(missing))
-        change("UPDATE generations SET status='rendering', error='' WHERE id=?", (ident,))
+        change("UPDATE generations SET status=?, error='' WHERE id=?",
+               ("rendering_webm" if transparent else "rendering", ident))
         plan = load_sync(job)
-        folder = Path(tempfile.mkdtemp(prefix="render_", dir=TEMP))
+        folder = Path(tempfile.mkdtemp(prefix=f"render_{kind}_", dir=TEMP))
         width, height = 720, 1280
-        if job["background_id"]:
+        if transparent:
+            # Keep RGBA all the way from the original PNG to the VP9 alpha encoder.
+            # Never blend the selected background into a transparent export.
+            base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        elif job["background_id"]:
             bg = record("backgrounds", job["background_id"])
             with Image.open(bg["file"]) as im:
                 base = ImageOps.fit(im.convert("RGB"), (width, height),
                                     method=Image.Resampling.LANCZOS).convert("RGBA")
         else:
             base = Image.new("RGBA", (width, height), "#131722")
+
         outfit_folder = outfit_dir(outfit)
         for index in range(8):
             with Image.open(outfit_folder / f"{index:02d}.png") as source:
@@ -497,8 +517,10 @@ def render_video(ident: str):
                 sprite.thumbnail((width, height), Image.Resampling.LANCZOS)
             composed = base.copy()
             composed.alpha_composite(sprite, ((width - sprite.width) // 2, height - sprite.height))
-            composed.convert("RGB").save(folder / f"frame_{index}.png", optimize=False)
-
+            # FFmpeg's VP9 alpha support relies on the frame still being RGBA here.
+            composed.save(folder / f"frame_{index}.png", optimize=False) if transparent else (
+                composed.convert("RGB").save(folder / f"frame_{index}.png", optimize=False)
+            )
         lines = ["ffconcat version 1.0"]
         for pose, duration in event_durations(plan):
             frame_path = (folder / f"frame_{pose}.png").as_posix()
@@ -507,40 +529,76 @@ def render_video(ident: str):
         lines.append(f"file '{(folder / f'frame_{last_pose}.png').as_posix()}'")
         seq = folder / "timeline.ffconcat"
         seq.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        output = OUTPUTS / (ident + ".mp4")
-        stage = OUTPUTS / (ident + ".pending.mp4")
-        process = subprocess.run(
-            ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-             "-f", "concat", "-safe", "0", "-i", str(seq),
-             "-i", job["audio_file"], "-vf", "fps=25,format=yuv420p",
-             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
-             "-preset", "veryfast", "-crf", "23", "-threads", "2",
-             "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-             "-t", f"{plan['duration']:.5f}", str(stage)],
-            capture_output=True, text=True, timeout=600)
+        output = OUTPUTS / (ident + f".{kind}")
+        stage = OUTPUTS / (ident + f".pending.{kind}")
+        base_command = [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(seq),
+            "-i", job["audio_file"], "-map", "0:v:0", "-map", "1:a:0",
+        ]
+        if transparent:
+            # libvpx-vp9 with yuva420p + disabled alt-ref preserves PNG alpha.
+            # libopus ensures the speaking voice is included in WebM.
+            encode = [
+                "-vf", "fps=25,format=yuva420p",
+                "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+                "-auto-alt-ref", "0", "-deadline", "good", "-cpu-used", "5",
+                "-crf", "33", "-b:v", "0", "-threads", "2", "-row-mt", "1",
+                "-c:a", "libopus", "-b:a", "128k", "-metadata:s:v:0", "alpha_mode=1",
+            ]
+        else:
+            encode = [
+                "-vf", "fps=25,format=yuv420p",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-threads", "2", "-c:a", "aac", "-b:a", "160k",
+                "-movflags", "+faststart",
+            ]
+        process = subprocess.run(base_command + encode +
+            ["-t", f"{plan['duration']:.5f}", str(stage)],
+            capture_output=True, text=True, timeout=900 if transparent else 600)
         if process.returncode or not stage.exists() or stage.stat().st_size < 1000:
-            raise RuntimeError("FFmpeg: " + process.stderr[-400:])
+            raise RuntimeError("FFmpeg: " + process.stderr[-450:])
         stage.replace(output)
-        change("UPDATE generations SET status='ready', video_file=? WHERE id=?", (str(output), ident))
+        change(f"UPDATE generations SET status='ready', {file_column}=? WHERE id=?",
+               (str(output), ident))
     except Exception as error:
-        change("UPDATE generations SET status='video_failed', error=? WHERE id=?",
-               (str(error)[:500], ident))
+        change("UPDATE generations SET status=?, error=? WHERE id=?",
+               ("webm_failed" if transparent else "video_failed", str(error)[:500], ident))
     finally:
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
 
+export_lock = threading.Lock()
+
+def queue_video(ident: str, kind: str):
+    # Lock serializes check + status transition to avoid duplicate concurrent jobs.
+    with export_lock:
+        job = record("generations", ident)
+        file_column = "webm_file" if kind == "webm" else "video_file"
+        filename = job[file_column]
+        if filename and Path(filename).is_file():
+            return {"ok": True, "status": "ready"}
+        if job["status"] in ("rendering", "rendering_webm"):
+            if job["status"] == ("rendering_webm" if kind == "webm" else "rendering"):
+                return {"ok": True, "status": job["status"]}
+            raise HTTPException(409, "Ya se está preparando otro formato. Esperá a que termine.")
+        if not job["audio_file"] or not Path(job["audio_file"]).is_file():
+            raise HTTPException(409, "Primero esperá a que termine el MP3.")
+        outfit = record("outfits", job["outfit_id"])
+        if not all((outfit_dir(outfit) / f"{i:02d}.png").is_file() for i in range(8)):
+            raise HTTPException(400, "Completá los ocho PNG antes de exportar video.")
+        status = "rendering_webm" if kind == "webm" else "rendering"
+        change("UPDATE generations SET status=?, error='' WHERE id=?", (status, ident))
+        executor.submit(render_video, ident, kind)
+        return {"ok": True, "status": status}
+
 @app.post("/api/generations/{ident}/video")
 def video_start(ident: str, _: None = Depends(auth)):
-    job = record("generations", ident)
-    if job["video_file"] and Path(job["video_file"]).is_file():
-        return {"ok": True, "status": "ready"}
-    if job["status"] == "rendering":
-        return {"ok": True, "status": "rendering"}
-    if not job["audio_file"] or not Path(job["audio_file"]).is_file():
-        raise HTTPException(409, "Primero esperá a que termine el MP3.")
-    change("UPDATE generations SET status='rendering', error='' WHERE id=?", (ident,))
-    executor.submit(render_video, ident)
-    return {"ok": True, "status": "rendering"}
+    return queue_video(ident, "mp4")
+
+@app.post("/api/generations/{ident}/webm")
+def webm_start(ident: str, _: None = Depends(auth)):
+    return queue_video(ident, "webm")
 
 @app.post("/api/generations/{ident}/retry")
 def retry_generation(ident: str, _: None = Depends(auth)):
@@ -556,15 +614,15 @@ def retry_generation(ident: str, _: None = Depends(auth)):
 @app.get("/api/generations/{ident}/file/{kind}")
 def output_file(ident: str, kind: str, download: int = 0, _: None = Depends(auth)):
     job = record("generations", ident)
-    if kind not in ("mp3", "mp4"):
+    if kind not in ("mp3", "mp4", "webm"):
         raise HTTPException(404, "Formato desconocido.")
-    filename = job["audio_file"] if kind == "mp3" else job["video_file"]
+    filename = {"mp3":job["audio_file"], "mp4":job["video_file"], "webm":job["webm_file"]}[kind]
     if not filename:
         raise HTTPException(404, "Archivo todavía no disponible.")
     path = Path(filename)
     if not path.is_file():
         raise HTTPException(404, "Archivo todavía no disponible.")
-    return FileResponse(path, media_type="audio/mpeg" if kind == "mp3" else "video/mp4",
+    return FileResponse(path, media_type={"mp3":"audio/mpeg", "mp4":"video/mp4", "webm":"video/webm"}[kind],
                         filename=f"{ident[:8]}.{kind}" if download else None,
                         content_disposition_type="attachment" if download else "inline")
 
