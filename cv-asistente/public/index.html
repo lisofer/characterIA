@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#e9eef6"><title>Mi primer CV</title><link rel="stylesheet" href="/styles.css"></head>
+<body class="student">
+<main id="loginView" class="gate card" aria-labelledby="gateTitle">
+ <div class="logo">CV</div><h1 id="gateTitle">Mi primer CV</h1><p>Un asistente conversacional para aprender a preparar tu currículum.</p>
+ <form id="loginForm"><label for="accessKey">Clave de acceso</label><input id="accessKey" type="password" autocomplete="off" required minlength="10" placeholder="Ingresá la clave compartida"><label class="consent"><input type="checkbox" id="consent" required> Entiendo que mis respuestas se procesarán con servicios de IA para armar el CV. Para esta prueba puedo usar datos ficticios. El administrador de la experiencia podrá revisar y borrar los currículums generados.</label><button class="primary" type="submit">Ingresar</button></form>
+ <p class="muted small">El micrófono es opcional. Si lo usás, tu navegador podría solicitar permiso y procesar tu voz para transcribirla. Al final se descargará un archivo PDF.</p><p id="loginError" class="error" role="alert"></p>
+</main>
+<section id="studentView" hidden aria-label="Entrevista para crear un CV">
+ <header class="student-header"><div class="brand"><div class="mini-logo">CV</div><span id="appTitle">Mi primer CV</span></div><span class="duration" id="duration">Una entrevista breve</span></header>
+ <section class="character-area">
+   <button id="avatarButton" class="avatar-button" type="button" aria-label="Escuchar de nuevo al asistente"><img id="avatar" alt="Personaje acompañante" hidden><div id="avatarPlaceholder" class="avatar-fallback" aria-hidden="true"><div class="face"><span class="eyes">● ●</span><span id="fallbackMouth">ᴗ</span></div></div></button>
+   <div class="bubble"><p id="subtitle" aria-live="polite">Hola, vamos a crear tu CV.</p></div>
+ </section>
+ <div class="session-bottom">
+  <p id="status" class="status" role="status">Podés responder con el micrófono o el teclado.</p>
+  <form id="textForm" hidden><label class="sr-only" for="answer">Tu respuesta</label><textarea id="answer" rows="3" placeholder="Escribí tu respuesta..." maxlength="850"></textarea><button class="primary" type="submit">Enviar</button></form>
+  <div class="actions"><button id="micButton" class="circle-button" type="button" aria-label="Hablar con el micrófono" title="Hablar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></button><button id="keyboardButton" class="circle-button light" type="button" aria-label="Escribir con el teclado" title="Teclado"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5 9h1m3 0h1m3 0h1m3 0h1M5 12h1m3 0h1m3 0h1m3 0h1M7 16h10"/></svg></button></div>
+  <div id="complete" hidden class="complete"><a id="downloadLink" class="primary button-link" href="/api/student/pdf" download="Mi-CV.pdf">Descargar mi CV</a><button class="secondary" id="restartButton" type="button">Crear otro CV</button></div>
+  <details id="logDetails"><summary>Leer conversación</summary><div id="conversation" class="log" aria-label="Historial de preguntas y respuestas"></div></details>
+ </div>
+</section>
+<script src="/student.js" defer></script></body></html>
