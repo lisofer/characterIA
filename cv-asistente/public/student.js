@@ -9,6 +9,8 @@ const json=(method,body)=>({method,headers:{'content-type':'application/json'},b
 function tell(msg){statusEl.textContent=msg}
 function imageState(i){const src=config?.images?.[String(i)]||config?.images?.[i];const idle=config?.images?.['0'];const img=$('avatar');if(!src&&!idle){img.hidden=true;$('avatarPlaceholder').hidden=false;return}const target=src||idle;const url=new URL(target,location.href).href;if(img.src!==url)img.src=url;img.hidden=false;$('avatarPlaceholder').hidden=true}
 
+const spritePreloads=[];
+function preloadSprites(){spritePreloads.length=0;for(let i=0;i<8;i++){const path=config?.images?.[String(i)];if(!path)continue;const img=new Image();img.src=path;spritePreloads.push(img)}}
 function applyAppearance(){
  const f=$('avatarButton'),settings=config?.appearance||{};
  f.style.setProperty('--sprite-scale',String(settings.scale??1));
@@ -124,7 +126,7 @@ function startListening(){
  r.onend=()=>{if(id===micSessionId)finishMic(id)};
  try{r.start()}catch{micError='No pude activar el micrófono. Probá otra vez o usá el teclado.';finishMic(id)}
 }
-async function loadStudent(){config=await api('/api/bootstrap');session=await api('/api/student/session');$('appTitle').textContent=config.title;document.title=config.title;$('duration').textContent='Unos '+config.durationMinutes+' minutos';loginView.hidden=true;studentView.hidden=false;$('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);const text=session.lastAssistant||config.introText;updateSubtitle(text,!(session.history||[]).length);showComplete();applyAppearance();animate();if(session.stage!=='done'){tell('Tocá el micrófono para hablar, o el teclado para escribir.');speak(text)}else tell('Tu CV está listo para descargar.')}
+async function loadStudent(){config=await api('/api/bootstrap');session=await api('/api/student/session');$('appTitle').textContent=config.title;document.title=config.title;$('duration').textContent='Unos '+config.durationMinutes+' minutos';loginView.hidden=true;studentView.hidden=false;$('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);const text=session.lastAssistant||config.introText;updateSubtitle(text,!(session.history||[]).length);showComplete();preloadSprites();applyAppearance();animate();if(session.stage!=='done'){tell('Tocá el micrófono para hablar, o el teclado para escribir.');speak(text)}else tell('Tu CV está listo para descargar.')}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/api/login',json('POST',{role:'student',password:$('accessKey').value}));await loadStudent()}catch(err){$('loginError').textContent=err.message}});
 $('textForm').addEventListener('submit',e=>{e.preventDefault();sendAnswer($('answer').value)});
 $('keyboardButton').addEventListener('click',inputMode);
