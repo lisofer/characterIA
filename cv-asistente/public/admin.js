@@ -80,7 +80,7 @@ const del=document.createElement('button');del.className='secondary';del.type='b
 catch(e){$('sessionsList').textContent='No se pudieron cargar los registros: '+e.message}}
 async function openPanel(){const c=await api('/api/admin/config');$('adminLogin').hidden=true;$('adminPanel').hidden=false;setConfig(c);$('shareLink').value=location.origin+'/';await showUsage()}
 $('adminLoginForm').addEventListener('submit',async e=>{e.preventDefault();$('adminLoginError').textContent='';try{await api('/api/login',json('POST',{role:'admin',password:$('adminPassword').value}));await openPanel()}catch(err){$('adminLoginError').textContent=err.message}});
-$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();$('saveStatus').textContent='Guardando…';try{const d=await api('/api/admin/config',json('PUT',collect()));config={...d.config,env:config.env,hasVoiceSample:config.hasVoiceSample,storage:config.storage};$('saveStatus').textContent='Configuración guardada correctamente (almacenamiento temporal de Render Free)';setTimeout(()=>{$('saveStatus').textContent=''},5000)}catch(err){$('saveStatus').textContent=err.message}});
+$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();$('saveStatus').textContent='Guardando…';try{const d=await api('/api/admin/config',json('PUT',collect()));config={...d.config,env:config.env,hasVoiceSample:config.hasVoiceSample,storage:config.storage};$('saveStatus').textContent=config.storage?.connected?'Configuración guardada de forma permanente en Supabase.':'Configuración guardada temporalmente.';setTimeout(()=>{$('saveStatus').textContent=''},5000)}catch(err){$('saveStatus').textContent=err.message}});
 for(const name of ['fish.temperature','fish.topP','fish.speed','fish.volume','appearance.scale','appearance.offsetX','appearance.offsetY','lipSync.intensity','lipSync.delay','lipSync.blinkInterval','microphone.silenceMs'])$('settingsForm').elements.namedItem(name).addEventListener('input',updateRange);
 $('resetAppearance').addEventListener('click',()=>{for(const [key,v] of [['scale',1],['offsetX',0],['offsetY',0]])val($('settingsForm'),'appearance.'+key,v);updateRange()});
 $('uploadVoiceSample').addEventListener('click',async()=>{
@@ -106,7 +106,23 @@ $('deleteVoiceSample').addEventListener('click',async()=>{
  catch(e){$('voiceSampleStatus').textContent=e.message}
 });
 $('refreshUsage').addEventListener('click',showUsage);
-$('testVoice').addEventListener('click',async()=>{const btn=$('testVoice');btn.disabled=true;$('previewStatus').textContent='Generando audio…';try{const r=await fetch('/api/admin/preview-voice',json('POST',{text:$('previewText').value}));if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Falló Fish');const audio=$('previewAudio');if(audio.dataset.blobUrl)URL.revokeObjectURL(audio.dataset.blobUrl);audio.src=URL.createObjectURL(await r.blob());audio.dataset.blobUrl=audio.src;audio.hidden=false;await audio.play();$('previewStatus').textContent='Voz de prueba generada con la configuración guardada.'}catch(e){$('previewStatus').textContent=e.message}finally{btn.disabled=false}});
+$('testVoice').addEventListener('click',async()=>{
+ const btn=$('testVoice'),mode=$('voiceTestMode').value;
+ btn.disabled=true;$('previewStatus').textContent='Probando '+({sample:'la muestra de voz',id:'el Voice ID',default:'la voz predeterminada',auto:'el modo automático'}[mode]||'Fish')+'…';
+ try{
+  const r=await fetch('/api/admin/preview-voice',json('POST',{text:$('previewText').value,mode}));
+  if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Falló Fish');
+  const audio=$('previewAudio');if(audio.dataset.blobUrl)URL.revokeObjectURL(audio.dataset.blobUrl);
+  audio.src=URL.createObjectURL(await r.blob());audio.dataset.blobUrl=audio.src;audio.hidden=false;
+  const selected=r.headers.get('X-CV-Voice-Source')||'desconocida',fallback=r.headers.get('X-CV-Voice-Fallback');
+  const names={sample:'tu muestra de audio',id:'tu Voice ID',default:'la voz predeterminada de Fish'};
+  $('previewStatus').textContent=fallback
+   ?'Fish rechazó '+(names[fallback]||fallback)+', pero generó audio con '+(names[selected]||selected)+'. Revisá la fuente original.'
+   :'Fish generó audio correctamente usando '+(names[selected]||selected)+'.';
+  try{await audio.play()}catch{$('previewStatus').textContent+=' Tocá reproducir para escuchar.'}
+ }catch(e){$('previewStatus').textContent='No funcionó esta fuente: '+e.message}
+ finally{btn.disabled=false}
+});
 $('copyLink').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('shareLink').value);$('copyLink').textContent='Enlace copiado';setTimeout(()=>$('copyLink').textContent='Copiar enlace',1800)}catch{$('shareLink').select()}});
 $('logout').addEventListener('click',async()=>{await api('/api/logout?role=admin',{method:'POST'});location.reload()});
 api('/api/me?role=admin').then(me=>{if(me.role==='admin')openPanel()}).catch(()=>{});
