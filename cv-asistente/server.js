@@ -175,6 +175,11 @@ async function start(){
   console.log('Almacenamiento Supabase listo. Archivos restaurados:',cloudBoot.restored);const media=mediaInventory();console.log('Medios restaurados: PNG',media.imagesCount+'/8, muestra de voz:',media.voiceSample?'sí':'no',', texto de referencia:',media.voiceSampleTextConfigured?'sí':'no',', Voice ID:',media.voiceIdConfigured?'sí':'no');
  }else console.warn('ALERTA: sin SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY, los archivos se borran al redesplegar Render Free.');
  app.listen(PORT,'0.0.0.0',()=>console.log('Mi primer CV: puerto '+PORT));
+ if(process.env.CV_FISH_SMOKE_TEST==='sample'&&process.env.FISH_API_KEY){
+  fishVoice.synthesize('Hola, esta es una prueba breve de voz.',config,DIR.assets,process.env.FISH_API_KEY,{mode:'sample',allowFallback:false})
+   .then(out=>console.log('Fish prueba de muestra: OK, bytes=',out.audio.length,'sin datos personales'))
+   .catch(e=>console.warn('Fish prueba de muestra: ERROR, status=',e.status||'desconocido',', detalle=',String(e.message||'').slice(0,230)));
+ }
  if(process.env.CV_FISH_SMOKE_TEST==='1'&&process.env.FISH_API_KEY){
   const diag={...config,fish:{...config.fish,referenceId:''},voiceSampleText:''};
   fishVoice.synthesize('Hola, prueba de audio.',diag,DIR.assets,process.env.FISH_API_KEY,{mode:'default',allowFallback:false})
