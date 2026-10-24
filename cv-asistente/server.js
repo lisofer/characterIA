@@ -88,7 +88,7 @@ app.post('/api/student/reset',auth,student,asyncRoute(async(req,res)=>{const old
 function apply(cv,updates){if(!updates||typeof updates!=='object'||Array.isArray(updates))return;for(const k of fields){if(!Object.hasOwn(updates,k))continue;const v=updates[k];if(lists.has(k)){if(Array.isArray(v))cv[k]=[...new Set(v.map(x=>clip(x,180)).filter(Boolean))].slice(0,15)}else if(v===null)cv[k]='';else if(typeof v==='string')cv[k]=clip(v,k==='profile'?550:180)}}
 function review(cv){const v=[['Nombre',cv.full_name],['Localidad',cv.city],['Teléfono',cv.phone],['Correo',cv.email],['Presentación',cv.profile],['Estudios',cv.education.join('; ')],['Experiencias',cv.experience.join('; ')],['Habilidades',cv.skills.join('; ')],['Cursos',cv.courses.join('; ')],['Idiomas',cv.languages.join('; ')]];return 'Voy a leer lo que escribimos, apartado por apartado. '+v.filter(x=>x[1]).map(x=>x[0]+': '+String(x[1]).slice(0,145)+(String(x[1]).length>145?' (hay más información registrada)':'')+'.').join(' ')+' ¿Está todo bien y querés descargar el PDF? Si algo no está bien, lo corregimos.'}
 function confirmed(s){const t=s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');return !/\b(no|espera|falta|todavia|corregir|cambiar)\b/.test(t)&&/(^si\b|^dale\b|^claro\b|^perfecto\b|^listo\b|^confirmo\b|^correcto\b|esta bien|todo bien|descargalo|generalo|terminamos)/.test(t)}
-async function gemini(s,message,modelOverride=null){if(!process.env.GEMINI_API_KEY)throw Object.assign(Error('Falta GEMINI_API_KEY'),{status:503});
+async function gemini(s,message,modelOverride=null){const started=Date.now();if(!process.env.GEMINI_API_KEY)throw Object.assign(Error('Falta GEMINI_API_KEY'),{status:503});
 const system=['Sos '+config.characterName+', asistente pedagógico para enseñar a elaborar CV. Usás español rioplatense. '+config.personality,config.pedagogy,
 'Explicá para qué sirve cada apartado. Hablá como en una llamada: respuestas naturales, ágiles, con carisma, creatividad y algún toque de humor sutil cuando corresponda. No repitas fórmulas prefabricadas. Preguntá una cosa por turno, reformulá sin infantilizar y nunca inventes experiencias, lugares o habilidades. Permití omitir.',
 'No solicites DNI, edad, fecha de nacimiento, dirección exacta ni salud. Interpretá datos espontáneos aunque la pregunta haya sido distinta. Corregí cuando el usuario rectifique. No inventes un archivo.',
@@ -100,7 +100,7 @@ const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json
 const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error('Gemini: '+(j.error?.message||r.status)),{status:502});
 let obj;try{obj=JSON.parse(j.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'')}catch{throw Object.assign(Error('Gemini no devolvió JSON válido'),{status:502})}
 if(typeof obj.reply!=='string')throw Object.assign(Error('Respuesta incompleta de Gemini'),{status:502});
-return {obj,usage:j.usageMetadata||{}}}
+console.info('Latencia Gemini:',Date.now()-started,'ms, modelo:',modelOverride||config.geminiModel);return {obj,usage:j.usageMetadata||{}}}
 function makePDF(s){return new Promise((resolve,reject)=>{const file=path.join(DIR.cvs,s.id+'.pdf'),tmp=file+'.tmp',d=new PDFDocument({size:'A4',margin:48,info:{Title:'Currículum vitae'}}),out=fs.createWriteStream(tmp),c=s.cv;d.pipe(out);const accent=config.template.accent;
 d.fillColor(config.template.style==='minimalista'?'#232c39':accent).font('Helvetica-Bold').fontSize(config.template.style==='minimalista'?19:22).text((c.full_name||'Currículum vitae').toUpperCase());d.moveDown(.3);
 const contact=[c.city,c.phone,c.email].filter(Boolean).join(' · ');if(contact)d.font('Helvetica').fontSize(10).fillColor('#333333').text(contact);d.moveDown(1);
@@ -130,7 +130,9 @@ app.get('/api/tts-stream',auth,student,rateLimit({windowMs:3600000,limit:70}),as
  if(!process.env.FISH_API_KEY)return res.status(503).json({error:'FISH_API_KEY sin configurar'});
  if(s.usage.ttsChars+t.length>30000)return res.status(429).json({error:'Límite de voz de esta entrevista alcanzado'});
  try{
+  const fishStarted=Date.now();
   const info=await fishVoice.synthesizeStream(t,config,DIR.assets,process.env.FISH_API_KEY);
+  console.info('Latencia Fish hasta iniciar audio:',Date.now()-fishStarted,'ms, fuente:',info.source);
   res.status(200).set({'Content-Type':'audio/mpeg','Cache-Control':'no-store,no-cache','X-CV-Voice-Source':info.source,'X-CV-Voice-Fallback':info.fallbackFrom||''});
   res.flushHeaders();
   const stream=Readable.fromWeb(info.response.body);
