@@ -19,11 +19,11 @@
   for(let i=0;i<words.length;i++){
    const word=words[i], next=words[i+1];
    const duration=Math.max(150,Math.min(800,115+word.text.length*47));
-   entries.push({start:pos,duration,gesture:gestures(word.text)});
+   entries.push({start:pos,duration,gesture:gestures(word.text),word:word.text,endIndex:word.index+word.text.length,index:word.index});
    pos+=duration;
    if(next){const between=text.slice(word.index+word.text.length,next.index);pos+=/[.!?…]/.test(between)?260:/[,;:]/.test(between)?100:0}
   }
-  return {entries,total:Math.max(1,pos)};
+  return {entries,total:Math.max(1,pos),text:String(text||'')};
  }
  function pose(plan,positionMs,durationMs,opts={}){
   if(!plan?.entries?.length||!Number.isFinite(positionMs))return 0;
@@ -40,5 +40,35 @@
   if(dur>390&&age>attack+hold+70&&age<Math.min(dur-16,attack+hold+70+Math.min(155,dur*.22)))return current.gesture[1]||current.gesture[0]||0;
   return 0;
  }
- window.PersonaLipSync={build,pose};
+ function captions(plan){
+  const entries=plan?.entries||[];if(!entries.length)return [];
+  const chunks=[];let words=[],begin=0;
+  function finish(i){
+   if(!words.length)return;
+   const first=entries[begin],last=entries[i];
+   const raw=plan.text.slice(first.index,last.endIndex).trim().replace(/\s+/g,' ');
+   chunks.push({start:first.start,end:last.start+last.duration,text:raw});
+   words=[];begin=i+1;
+  }
+  for(let i=0;i<entries.length;i++){
+   const entry=entries[i],candidate=[...words,entry.word];
+   if(words.length&&((candidate.join(' ').length>65)||words.length>=11))finish(i-1);
+   if(!words.length)begin=i;
+   words.push(entry.word);
+   const between=(plan.text||'').slice(entry.endIndex,entries[i+1]?.index??(plan.text||'').length);
+   if(i===entries.length-1||/[.!?…]\s*$/.test(between)&&words.join(' ').length>=25)finish(i);
+  }
+  return chunks;
+ }
+ function caption(plan,elapsedMs,totalMs){
+  if(!plan?.entries?.length)return '';
+  const groups=plan.captions||(plan.captions=captions(plan));
+  if(!groups.length)return '';
+  const duration=Number.isFinite(totalMs)&&totalMs>200?totalMs:plan.total;
+  const logical=Math.max(0,elapsedMs)*(plan.total/duration);
+  const chunk=groups.find(g=>logical>=g.start&&logical<=g.end)
+   ||(logical<groups[0].start?groups[0]:groups.reduce((p,g)=>g.start<=logical?g:p,groups[0]));
+  return chunk.text;
+ }
+ window.PersonaLipSync={build,pose,caption,captions};
 })();
