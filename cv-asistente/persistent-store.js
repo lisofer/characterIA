@@ -11,7 +11,7 @@ const namespace='appdata';
 let ready=false;
 const headers=()=>({apikey:key,Authorization:'Bearer '+key});
 function safeRelative(name){
- if(!/^(settings\.json|assets\/[A-Za-z0-9_.-]+|sessions\/[a-f0-9-]{36}\.json|cvs\/[a-f0-9-]{36}\.pdf)$/.test(name))
+ if(name.split('/').some(part=>part==='.'||part==='..')||!/^(settings\.json|assets\/[A-Za-z0-9_.-]+|sessions\/[a-f0-9-]{36}\.json|cvs\/[a-f0-9-]{36}\.pdf)$/.test(name))
   throw Error('Nombre de archivo no autorizado para almacenamiento externo');
  return name;
 }
@@ -27,6 +27,7 @@ async function remote(method,url,body=null,contentType=null,missingOK=false){
 function configured(){return enabled}
 function active(){return ready}
 async function prepare(root){
+ if(Boolean(base)!==Boolean(key))throw Error('Configurá tanto SUPABASE_URL como SUPABASE_SERVICE_ROLE_KEY en Render');
  if(!enabled)return {enabled:false,restored:0};
  if(!/^https:\/\/[a-z0-9.-]+$/i.test(base))throw Error('SUPABASE_URL debe ser una dirección HTTPS válida');
  const bucketEndpoint=urlFor('bucket/'+encodeURIComponent(bucket));
