@@ -35,4 +35,4 @@ $('keyboardButton').addEventListener('click',inputMode);
 $('micButton').addEventListener('click',startListening);
 $('avatarButton').addEventListener('click',()=>{if(!busy){const t=lastPrompt||config?.introText;if(t)speak(t)}});
 $('restartButton').addEventListener('click',async()=>{if(!confirm('¿Querés empezar una nueva entrevista? Se borrarán los datos y el PDF de esta entrevista; descargalo antes si querés conservarlo.'))return;await api('/api/student/reset',{method:'POST'});await loadStudent()});
-api('/api/me').then(me=>{if(me.role==='student')loadStudent()}).catch(()=>{});
+api('/api/me?role=student').then(me=>{if(me.role==='student')loadStudent()}).catch(()=>{});
