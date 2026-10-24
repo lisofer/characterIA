@@ -89,7 +89,7 @@ $('uploadVoiceSample').addEventListener('click',async()=>{
  if(file.size>4*1024*1024){$('voiceSampleStatus').textContent='La muestra debe ocupar menos de 4 MB.';return}
  $('voiceSampleStatus').textContent='Subiendo muestra…';
  try{const fd=new FormData();fd.append('audio',file);const info=await api('/api/admin/voice-sample',{method:'POST',body:fd});
- config.hasVoiceSample=true;$('voiceSampleStatus').textContent='Muestra guardada: '+info.name+' · '+(info.size/1024).toFixed(0)+' KB. Guardá también la transcripción.'}
+ config.hasVoiceSample=true;$('voiceSampleStatus').textContent='Muestra convertida a WAV y guardada: '+info.name+' · '+info.duration+' segundos. Guardá también el texto exacto de la muestra.'}
  catch(e){$('voiceSampleStatus').textContent='Error al subir: '+e.message}
 });
 $('listenVoiceSample').addEventListener('click',async()=>{
