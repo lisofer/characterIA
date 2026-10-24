@@ -1,6 +1,10 @@
 'use strict';
 const express=require('express'),helmet=require('helmet'),rateLimit=require('express-rate-limit'),multer=require('multer'),PDFDocument=require('pdfkit');
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const fishVoice=require('./fish-voice');
+const cloud=require('./persistent-store');
+const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
+
 const app=express();app.set('trust proxy',1);app.disable('x-powered-by');
 const ROOT=process.env.DATA_DIR||path.join(__dirname,'.data'),DIR={sessions:path.join(ROOT,'sessions'),cvs:path.join(ROOT,'cvs'),assets:path.join(ROOT,'assets')};
 for(const p of [ROOT,...Object.values(DIR)])fs.mkdirSync(p,{recursive:true});
@@ -11,7 +15,10 @@ const defaults={title:'Mi primer CV',characterName:'Alex',durationMinutes:12,int
 const configFile=path.join(ROOT,'settings.json');
 const load=(p,fallback)=>{try{return JSON.parse(fs.readFileSync(p,'utf8'))}catch{return fallback}};
 const put=(p,data)=>{const tmp=p+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(data,null,2));fs.renameSync(tmp,p)};
-let config={...defaults,...load(configFile,{})};config.fish={...defaults.fish,...config.fish};config.template={...defaults.template,...config.template};if(config.geminiModel==='gemini-3.8-flash')config.geminiModel='gemini-3.5-flash-lite';config.images=config.images||{};config.appearance={...defaults.appearance,...config.appearance};config.lipSync={...defaults.lipSync,...config.lipSync};config.microphone={...defaults.microphone,...config.microphone};
+let config={...defaults,...load(configFile,{})};
+const cloudSave=relative=>cloud.persist(ROOT,relative);
+const cloudRemove=relative=>cloud.remove(relative);
+let cloudBoot={enabled:false,restored:0};config.fish={...defaults.fish,...config.fish};config.template={...defaults.template,...config.template};if(config.geminiModel==='gemini-3.8-flash')config.geminiModel='gemini-3.5-flash-lite';config.images=config.images||{};config.appearance={...defaults.appearance,...config.appearance};config.lipSync={...defaults.lipSync,...config.lipSync};config.microphone={...defaults.microphone,...config.microphone};
 const clip=(v,n=900)=>typeof v==='string'?v.trim().slice(0,n):'';
 const limit=(v,a,b,d)=>Number.isFinite(+v)?Math.max(a,Math.min(b,+v)):d;
 const same=(a,b)=>{if(!a||!b)return false;const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y)};
@@ -40,16 +47,17 @@ const admin=(req,res,next)=>req.auth.role==='admin'?next():res.sendStatus(403),s
 app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'"],imgSrc:["'self'","blob:","data:"],mediaSrc:["'self'","blob:"],connectSrc:["'self'"],objectSrc:["'none'"],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}}}));
 app.use(express.json({limit:'70kb'}));app.use('/api',rateLimit({windowMs:60000,limit:100,standardHeaders:'draft-7',legacyHeaders:false}));
 app.use((req,res,next)=>{if(!['POST','PUT','PATCH','DELETE'].includes(req.method)||!req.headers.origin)return next();try{const incomingHost=String(req.headers['x-forwarded-host']||req.headers.host||'').split(',')[0].trim().toLowerCase();const originHost=new URL(req.headers.origin).host.toLowerCase();if(originHost!==incomingHost)return res.status(403).json({error:'Origen distinto al sitio. Abrí el panel desde el enlace oficial de Render.'})}catch{return res.status(403).json({error:'No se pudo verificar el origen de la solicitud.'})}next()});
-app.get('/health',(_,res)=>res.json({ok:true}));
+app.get('/health',(_,res)=>res.json({ok:true,storage:cloud.active()?'persistent':cloud.configured()?'connecting':'ephemeral'}));
 app.use(express.static(path.join(__dirname,'public'),{index:'index.html'}));
 app.get('/admin',(_,res)=>res.sendFile(path.join(__dirname,'public','admin.html')));
-app.post('/api/login',rateLimit({windowMs:900000,limit:12}), (req,res)=>{if(SECRET.length<32)return res.status(503).json({error:'Falta SESSION_SECRET en Railway'});const role=req.body.role==='admin'?'admin':'student',expected=role==='admin'?process.env.ADMIN_PASSWORD:process.env.STUDENT_ACCESS_KEY;if(!expected||expected.length<10)return res.status(503).json({error:'Configurá una clave de 10+ caracteres en Railway'});if(!same(clip(req.body.password,300),expected))return res.status(401).json({error:'Clave incorrecta'});const id=crypto.randomUUID();res.cookie(role==='admin'?'cv_admin':'cv_student',sign(role,id),{httpOnly:true,sameSite:'lax',secure:req.secure,path:'/',expires:new Date(Date.now()+12*3600000)});if(role==='student')fresh(id);res.json({role})});
+app.post('/api/login',rateLimit({windowMs:900000,limit:12}), asyncRoute(async(req,res)=>{if(SECRET.length<32)return res.status(503).json({error:'Falta SESSION_SECRET en Railway'});const role=req.body.role==='admin'?'admin':'student',expected=role==='admin'?process.env.ADMIN_PASSWORD:process.env.STUDENT_ACCESS_KEY;if(!expected||expected.length<10)return res.status(503).json({error:'Configurá una clave de 10+ caracteres en Railway'});if(!same(clip(req.body.password,300),expected))return res.status(401).json({error:'Clave incorrecta'});const id=crypto.randomUUID();res.cookie(role==='admin'?'cv_admin':'cv_student',sign(role,id),{httpOnly:true,sameSite:'lax',secure:req.secure,path:'/',expires:new Date(Date.now()+12*3600000)});if(role==='student'){fresh(id);await cloudSave('sessions/'+id+'.json')}res.json({role})}));
 app.post('/api/logout',auth,(req,res)=>{res.clearCookie(req.auth.role==='admin'?'cv_admin':'cv_student',{path:'/'});res.clearCookie('cv_session',{path:'/'});res.json({ok:true})});
 app.get('/api/me',auth,(req,res)=>res.json({role:req.auth.role}));
 app.get('/api/bootstrap',auth,(_req,res)=>res.json({title:config.title,characterName:config.characterName,durationMinutes:config.durationMinutes,introText:config.introText,images:Object.fromEntries(Object.keys(config.images).map(k=>[k,'/api/assets/'+k+'?v='+config.images[k]])),appearance:config.appearance,lipSync:config.lipSync,microphone:config.microphone,voiceConfigured:!!process.env.FISH_API_KEY}));
 app.get('/api/assets/:slot',auth,(req,res)=>{const n=+req.params.slot;if(!Number.isInteger(n)||n<0||n>7)return res.sendStatus(404);const file=path.join(DIR.assets,'state-'+n+'.png');if(!fs.existsSync(file))return res.sendStatus(404);res.type('png').sendFile(file)});
-app.get('/api/admin/config',auth,admin,(_req,res)=>res.json({...config,env:{gemini:!!process.env.GEMINI_API_KEY,fish:!!process.env.FISH_API_KEY},hasVoiceSample:fs.existsSync(path.join(DIR.assets,'voice-sample.bin'))}));
-app.put('/api/admin/config',auth,admin,(req,res)=>{const q=req.body||{},next={...config};
+app.get('/api/admin/storage-status',auth,admin,(_req,res)=>res.json({connected:cloud.active(),configured:cloud.configured(),filesRestored:cloudBoot.restored,provider:cloud.active()?'Supabase (privado)':'Render (temporal)'}));
+app.get('/api/admin/config',auth,admin,(_req,res)=>res.json({...config,storage:{connected:cloud.active(),provider:cloud.active()?'Supabase':'Temporal'},env:{gemini:!!process.env.GEMINI_API_KEY,fish:!!process.env.FISH_API_KEY},hasVoiceSample:fs.existsSync(path.join(DIR.assets,'voice-sample.bin'))}));
+app.put('/api/admin/config',auth,admin,asyncRoute(async(req,res)=>{const q=req.body||{},next={...config};
 for(const k of ['title','characterName','introText','personality','pedagogy'])if(typeof q[k]==='string')next[k]=clip(q[k],k==='introText'?2200:k==='title'?80:k==='characterName'?60:3000);
 if(q.durationMinutes!==undefined)next.durationMinutes=limit(q.durationMinutes,3,40,12);
 if(typeof q.geminiModel==='string'&&/^[a-z0-9_.-]{4,80}$/i.test(q.geminiModel))next.geminiModel=q.geminiModel;
@@ -59,28 +67,23 @@ if(q.lipSync&&typeof q.lipSync==='object')next.lipSync={intensity:limit(q.lipSyn
 if(q.microphone&&typeof q.microphone==='object')next.microphone={silenceMs:limit(q.microphone.silenceMs,900,4500,2200),language:['es-AR','es-ES'].includes(q.microphone.language)?q.microphone.language:'es-AR'};
 if(typeof q.voiceSampleText==='string')next.voiceSampleText=clip(q.voiceSampleText,1200);
 if(q.template&&typeof q.template==='object')next.template={accent:/^#[0-9a-f]{6}$/i.test(q.template.accent)?q.template.accent:config.template.accent,style:['clasico','minimalista'].includes(q.template.style)?q.template.style:'clasico'};
-config=next;put(configFile,config);res.json({ok:true,config})});
+config=next;put(configFile,config);await cloudSave('settings.json');res.json({ok:true,config})}));
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:1},fileFilter:(_req,file,cb)=>cb(null,file.mimetype==='image/png')});
-app.post('/api/admin/images/:slot',auth,admin,upload.single('image'),(req,res)=>{const n=+req.params.slot;if(!Number.isInteger(n)||n<0||n>7||!req.file||!req.file.buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return res.status(400).json({error:'Subí una imagen PNG válida, de hasta 5 MB.'});fs.writeFileSync(path.join(DIR.assets,'state-'+n+'.png'),req.file.buffer);config.images[String(n)]=Date.now();put(configFile,config);res.json({ok:true,url:'/api/assets/'+n+'?v='+config.images[String(n)]})});
+app.post('/api/admin/images/:slot',auth,admin,upload.single('image'),asyncRoute(async(req,res)=>{const n=+req.params.slot;if(!Number.isInteger(n)||n<0||n>7||!req.file||!req.file.buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return res.status(400).json({error:'Subí una imagen PNG válida, de hasta 5 MB.'});fs.writeFileSync(path.join(DIR.assets,'state-'+n+'.png'),req.file.buffer);config.images[String(n)]=Date.now();put(configFile,config);await cloudSave('assets/state-'+n+'.png');await cloudSave('settings.json');res.json({ok:true,url:'/api/assets/'+n+'?v='+config.images[String(n)]})}));
 const voiceUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:4*1024*1024,files:1},fileFilter:(_req,file,cb)=>cb(null,['audio/mpeg','audio/mp3','audio/wav','audio/x-wav','audio/webm','audio/mp4','audio/ogg'].includes(file.mimetype))});
-app.post('/api/admin/voice-sample',auth,admin,voiceUpload.single('audio'),(req,res)=>{
- if(!req.file||req.file.size<400)return res.status(400).json({error:'Elegí un archivo de audio MP3, WAV, WEBM, M4A u OGG válido (máx. 4 MB)'});
- fs.writeFileSync(path.join(DIR.assets,'voice-sample.bin'),req.file.buffer);
- fs.writeFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),req.file.mimetype);
- res.json({ok:true,name:req.file.originalname,size:req.file.size});
-});
-app.delete('/api/admin/voice-sample',auth,admin,(_req,res)=>{for(const name of ['voice-sample.bin','voice-sample-mime.txt']){const p=path.join(DIR.assets,name);if(fs.existsSync(p))fs.unlinkSync(p)}res.json({ok:true})});
+app.post('/api/admin/voice-sample',auth,admin,voiceUpload.single('audio'),asyncRoute(async(req,res)=>{
+ if(!req.file||req.file.size<400)return res.status(400).json({error:'Elegí un audio de voz válido (máximo 4 MB).'});
+ let clean;
+ try{clean=await fishVoice.normalizeSample(req.file.buffer)}catch(e){return res.status(422).json({error:e.message})}
+ fs.writeFileSync(path.join(DIR.assets,'voice-sample.bin'),clean.buffer);
+ fs.writeFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),clean.mime);
+ await cloudSave('assets/voice-sample.bin');await cloudSave('assets/voice-sample-mime.txt');
+ res.json({ok:true,name:req.file.originalname,size:clean.buffer.length,duration:clean.duration,normalized:true});
+}));
+app.delete('/api/admin/voice-sample',auth,admin,asyncRoute(async(_req,res)=>{for(const name of ['voice-sample.bin','voice-sample-mime.txt']){const p=path.join(DIR.assets,name);await cloudRemove('assets/'+name);if(fs.existsSync(p))fs.unlinkSync(p)}res.json({ok:true})}));
 app.get('/api/admin/voice-sample',auth,admin,(_req,res)=>{const p=path.join(DIR.assets,'voice-sample.bin');if(!fs.existsSync(p))return res.status(404).json({error:'No hay muestra de voz'});res.set('Cache-Control','no-store').type(fs.existsSync(path.join(DIR.assets,'voice-sample-mime.txt'))?fs.readFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),'utf8'):'audio/mpeg').sendFile(p)});
-function fishVoiceBody(text){
- const payload={text,format:'mp3',temperature:config.fish.temperature,top_p:config.fish.topP,prosody:{speed:config.fish.speed,volume:config.fish.volume}};
- const p=path.join(DIR.assets,'voice-sample.bin');
- if(fs.existsSync(p)&&config.voiceSampleText?.trim()){
-  payload.references=[{audio:fs.readFileSync(p).toString('base64'),text:config.voiceSampleText.trim()}];
- }else if(config.fish.referenceId)payload.reference_id=config.fish.referenceId;
- return payload;
-}
-app.get('/api/student/session',auth,student,(req,res)=>{const s=getSession(req.auth.id)||fresh(req.auth.id);res.json({cv:s.cv,stage:s.stage,reviewed:s.reviewed,history:s.history.slice(-22),lastAssistant:s.lastAssistant,pdfCreated:s.pdfCreated})});
-app.post('/api/student/reset',auth,student,(req,res)=>{const old=path.join(DIR.cvs,req.auth.id+'.pdf');if(fs.existsSync(old))fs.unlinkSync(old);fresh(req.auth.id);res.json({ok:true})});
+app.get('/api/student/session',auth,student,asyncRoute(async(req,res)=>{let s=getSession(req.auth.id);if(!s){s=fresh(req.auth.id);await cloudSave('sessions/'+s.id+'.json')}res.json({cv:s.cv,stage:s.stage,reviewed:s.reviewed,history:s.history.slice(-22),lastAssistant:s.lastAssistant,pdfCreated:s.pdfCreated})}));
+app.post('/api/student/reset',auth,student,asyncRoute(async(req,res)=>{const old=path.join(DIR.cvs,req.auth.id+'.pdf');if(fs.existsSync(old)){await cloudRemove('cvs/'+req.auth.id+'.pdf');fs.unlinkSync(old)}fresh(req.auth.id);await cloudSave('sessions/'+req.auth.id+'.json');res.json({ok:true})}));
 function apply(cv,updates){if(!updates||typeof updates!=='object'||Array.isArray(updates))return;for(const k of fields){if(!Object.hasOwn(updates,k))continue;const v=updates[k];if(lists.has(k)){if(Array.isArray(v))cv[k]=[...new Set(v.map(x=>clip(x,180)).filter(Boolean))].slice(0,15)}else if(v===null)cv[k]='';else if(typeof v==='string')cv[k]=clip(v,k==='profile'?550:180)}}
 function review(cv){const v=[['Nombre',cv.full_name],['Localidad',cv.city],['Teléfono',cv.phone],['Correo',cv.email],['Presentación',cv.profile],['Estudios',cv.education.join('; ')],['Experiencias',cv.experience.join('; ')],['Habilidades',cv.skills.join('; ')],['Cursos',cv.courses.join('; ')],['Idiomas',cv.languages.join('; ')]];return 'Voy a leer lo que escribimos, apartado por apartado. '+v.filter(x=>x[1]).map(x=>x[0]+': '+String(x[1]).slice(0,145)+(String(x[1]).length>145?' (hay más información registrada)':'')+'.').join(' ')+' ¿Está todo bien y querés descargar el PDF? Si algo no está bien, lo corregimos.'}
 function confirmed(s){const t=s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');return !/\b(no|espera|falta|todavia|corregir|cambiar)\b/.test(t)&&/(^si\b|^dale\b|^claro\b|^perfecto\b|^listo\b|^confirmo\b|^correcto\b|esta bien|todo bien|descargalo|generalo|terminamos)/.test(t)}
@@ -112,20 +115,30 @@ if(wasReviewed&&!changed&&confirmed(message))action='generate';
 if(action==='generate'&&(!s.reviewed||!confirmed(message)))action='review';
 if(action==='review'){if(!s.cv.full_name){reply='¿Cómo querés que figure tu nombre completo en el currículum?';s.reviewed=false}else{reply=review(s.cv);s.reviewed=true;s.stage='review'}}
 if(action==='generate'){await makePDF(s);s.stage='done';s.pdfCreated=true;download=true;reply='¡Listo! Tu currículum está preparado. Ahora se descargará el PDF. Si querés hacer cambios, podemos empezar una nueva entrevista.'}
-s.history.push({role:'user',text:message},{role:'assistant',text:reply});s.history=s.history.slice(-36);s.lastAssistant=reply;save(s);res.json({reply,action,stage:s.stage,cv:s.cv,reviewed:s.reviewed,download})}
+s.history.push({role:'user',text:message},{role:'assistant',text:reply});s.history=s.history.slice(-36);s.lastAssistant=reply;save(s);if(download)await cloudSave('cvs/'+s.id+'.pdf');await cloudSave('sessions/'+s.id+'.json');res.json({reply,action,stage:s.stage,cv:s.cv,reviewed:s.reviewed,download})}
 catch(e){console.error('Chat:',e.message);const temporary=/timeout|high demand|overload|503|unavailable/i.test(String(e.message))||e.name==='TimeoutError';res.status(temporary?503:(e.status||500)).json({error:temporary?'Gemini está ocupado. Podés volver a intentar la misma respuesta.':e.message||'No se pudo procesar la respuesta.',retryable:temporary})}});
 app.get('/api/student/pdf',auth,student,(req,res)=>{const s=getSession(req.auth.id);if(!s?.pdfCreated)return res.sendStatus(404);res.download(path.join(DIR.cvs,s.id+'.pdf'),'Mi-CV.pdf')});
 app.post('/api/tts',auth,student,rateLimit({windowMs:3600000,limit:70}),async(req,res)=>{const s=getSession(req.auth.id),t=clip(req.body.text,2200);if(!s||!t)return res.sendStatus(400);const allowed=t===config.introText||s.lastAssistant===t||s.history.slice(-14).some(h=>h.role==='assistant'&&h.text===t);if(!allowed)return res.sendStatus(403);if(s.usage.ttsChars+t.length>30000)return res.status(429).json({error:'Límite de voz alcanzado'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});
-try{const payload=fishVoiceBody(t);
-const r=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':'application/json',model:config.fish.model},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});
-if(!r.ok)throw Error('Fish Audio '+r.status+': '+(await r.text()).slice(0,200));
-const b=Buffer.from(await r.arrayBuffer());if(b.length<100)throw Error('No llegó audio');s.usage.ttsChars+=t.length;s.usage.ttsCalls++;save(s);res.set('Cache-Control','no-store');res.type('audio/mpeg').send(b)}
+try{const {audio:b}=await fishVoice.synthesize(t,config,DIR.assets,process.env.FISH_API_KEY);s.usage.ttsChars+=t.length;s.usage.ttsCalls++;save(s);await cloudSave('sessions/'+s.id+'.json');res.set('Cache-Control','no-store');res.type('audio/mpeg').send(b)}
 catch(e){console.error('TTS:',e.message);res.status(502).json({error:e.message})}});
-app.post('/api/admin/preview-voice',auth,admin,rateLimit({windowMs:3600000,limit:15}),async(req,res)=>{const text=clip(req.body.text,800);if(!text)return res.status(400).json({error:'Escribí el texto de prueba'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});try{const payload=fishVoiceBody(text);const r=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':'application/json',model:config.fish.model},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});if(!r.ok)throw Error('Fish Audio '+r.status+': '+(await r.text()).slice(0,180));res.set('Cache-Control','no-store').type('audio/mpeg').send(Buffer.from(await r.arrayBuffer()))}catch(e){res.status(502).json({error:e.message})}});
-app.post('/api/student/usage',auth,student,(req,res)=>{const s=getSession(req.auth.id);if(!s)return res.sendStatus(404);const k=req.body.kind==='mic'?'micSeconds':req.body.kind==='audio'?'audioPlayedSeconds':null;if(!k)return res.sendStatus(400);s.usage[k]=Math.min(28800,(s.usage[k]||0)+limit(req.body.seconds,0,180,0));save(s);res.json({ok:true})});
+app.post('/api/admin/preview-voice',auth,admin,rateLimit({windowMs:3600000,limit:15}),async(req,res)=>{const text=clip(req.body.text,800);if(!text)return res.status(400).json({error:'Escribí el texto de prueba'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});try{const {audio}=await fishVoice.synthesize(text,config,DIR.assets,process.env.FISH_API_KEY);res.set('Cache-Control','no-store').type('audio/mpeg').send(audio)}catch(e){res.status(502).json({error:e.message})}});
+app.post('/api/student/usage',auth,student,asyncRoute(async(req,res)=>{const s=getSession(req.auth.id);if(!s)return res.sendStatus(404);const k=req.body.kind==='mic'?'micSeconds':req.body.kind==='audio'?'audioPlayedSeconds':null;if(!k)return res.sendStatus(400);s.usage[k]=Math.min(28800,(s.usage[k]||0)+limit(req.body.seconds,0,180,0));save(s);await cloudSave('sessions/'+s.id+'.json');res.json({ok:true})}));
 function listSessions(){return fs.readdirSync(DIR.sessions).filter(x=>x.endsWith('.json')).map(x=>load(path.join(DIR.sessions,x),null)).filter(Boolean).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
 app.get('/api/admin/usage',auth,admin,(_req,res)=>{const all=listSessions(),summary=all.reduce((u,s)=>{for(const k of ['geminiInputTokens','geminiOutputTokens','ttsChars','ttsCalls','audioPlayedSeconds','micSeconds'])u[k]+=s.usage[k]||0;u.pdfCount+=s.pdfCreated?1:0;return u},{sessions:all.length,pdfCount:0,geminiInputTokens:0,geminiOutputTokens:0,ttsChars:0,ttsCalls:0,audioPlayedSeconds:0,micSeconds:0});res.json({summary,sessions:all.map(s=>({id:s.id,name:s.cv.full_name||'(sin nombre)',createdAt:s.createdAt,updatedAt:s.updatedAt,stage:s.stage,pdfCreated:s.pdfCreated,usage:s.usage,elapsedMinutes:Math.max(0,Math.round((Date.parse(s.updatedAt)-Date.parse(s.createdAt))/60000))}))})});
 app.get('/api/admin/cvs/:id/pdf',auth,admin,(req,res)=>{if(!idOk(req.params.id))return res.sendStatus(400);const s=getSession(req.params.id);if(!s?.pdfCreated)return res.sendStatus(404);res.download(path.join(DIR.cvs,s.id+'.pdf'),'CV-'+s.id.slice(0,8)+'.pdf')});
-app.delete('/api/admin/sessions/:id',auth,admin,(req,res)=>{if(!idOk(req.params.id))return res.sendStatus(400);for(const p of [sessionPath(req.params.id),path.join(DIR.cvs,req.params.id+'.pdf')])if(fs.existsSync(p))fs.unlinkSync(p);res.json({ok:true})});
-app.use((e,req,res,next)=>{console.error(e.message);res.status(e.code==='LIMIT_FILE_SIZE'?413:500).json({error:e.code==='LIMIT_FILE_SIZE'?'PNG demasiado grande (5MB máximo)':'Error interno'})});
-app.listen(PORT,'0.0.0.0',()=>console.log('Mi primer CV: puerto '+PORT));
+app.delete('/api/admin/sessions/:id',auth,admin,asyncRoute(async(req,res)=>{if(!idOk(req.params.id))return res.sendStatus(400);for(const rel of ['sessions/'+req.params.id+'.json','cvs/'+req.params.id+'.pdf']){await cloudRemove(rel);const p=path.join(ROOT,rel);if(fs.existsSync(p))fs.unlinkSync(p)}res.json({ok:true})}));
+app.use((e,req,res,next)=>{console.error('Servidor:',e.message);const storage=/almacenamiento|supabase|persistente|guardar de forma/i.test(e.message);res.status(e.code==='LIMIT_FILE_SIZE'?413:storage?503:500).json({error:e.code==='LIMIT_FILE_SIZE'?'PNG demasiado grande (5MB máximo)':storage?'No se pudo guardar en el almacenamiento permanente. No se confirmó el cambio; volvé a intentar.':'Error interno'})});
+async function start(){
+ cloudBoot=await cloud.prepare(ROOT);
+ if(cloudBoot.enabled){
+  config={...defaults,...load(configFile,{})};
+  config.fish={...defaults.fish,...config.fish};config.template={...defaults.template,...config.template};
+  config.images=config.images||{};config.appearance={...defaults.appearance,...config.appearance};
+  config.lipSync={...defaults.lipSync,...config.lipSync};config.microphone={...defaults.microphone,...config.microphone};
+  if(config.geminiModel==='gemini-3.8-flash')config.geminiModel='gemini-3.5-flash-lite';
+  console.log('Almacenamiento Supabase listo. Archivos restaurados:',cloudBoot.restored);
+ }else console.warn('ALERTA: sin SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY, los archivos se borran al redesplegar Render Free.');
+ app.listen(PORT,'0.0.0.0',()=>console.log('Mi primer CV: puerto '+PORT));
+}
+start().catch(e=>{console.error('No se pudo recuperar el almacenamiento externo:',e.message);process.exitCode=1});
+

@@ -218,3 +218,7 @@ input::placeholder,textarea::placeholder{color:#9097ae}
 .retry-text{margin:0;flex:1 1 190px;color:#494169;font-size:12px;line-height:1.55}
 .retry-panel button{font-size:12px;white-space:normal;max-width:100%}
 @media(max-width:580px){.retry-panel{padding:10px;gap:8px}.retry-panel button{width:100%}}
+
+/* Almacenamiento persistente: estado visible sin prometer guardado en disco temporal. */
+.storage-online{padding:13px 15px;border-radius:12px;background:#eefaf2;color:#166b36;border:1px solid #bfe8cb;font-weight:800;font-size:13px}
+.storage-warning{padding:13px 15px;border-radius:12px;background:#fff6e8;color:#925308;border:1px solid #f3dbac;font-weight:800;font-size:13px}

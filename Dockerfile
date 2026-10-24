@@ -3,6 +3,7 @@
 FROM node:22-alpine
 WORKDIR /app
 COPY cv-asistente/package*.json ./
+RUN apk add --no-cache ffmpeg
 RUN npm install --omit=dev && npm cache clean --force
 COPY cv-asistente/ ./
 ENV NODE_ENV=production
