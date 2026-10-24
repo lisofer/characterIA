@@ -211,3 +211,10 @@ input::placeholder,textarea::placeholder{color:#9097ae}
  .config-subsection{padding:13px;margin-top:18px}
  .inline-actions button{flex:1 1 120px}
 }
+
+/* Respuesta fallida recuperable: una sola acción clara */
+.retry-panel{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;width:min(100%,640px);padding:12px 14px;border:1px solid #e0d9fb;border-radius:14px;background:#f7f5ff}
+.retry-panel[hidden]{display:none!important}
+.retry-text{margin:0;flex:1 1 190px;color:#494169;font-size:12px;line-height:1.55}
+.retry-panel button{font-size:12px;white-space:normal;max-width:100%}
+@media(max-width:580px){.retry-panel{padding:10px;gap:8px}.retry-panel button{width:100%}}
