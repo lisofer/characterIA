@@ -9,7 +9,7 @@ const enabled=!!(base&&key);
 const bucket=process.env.SUPABASE_BUCKET||'mi-primer-cv-privado';
 const namespace='appdata';
 let ready=false;
-const headers=()=>({apikey:key,Authorization:'Bearer '+key});
+const headers=()=>key.startsWith('sb_secret_')?{apikey:key}:{apikey:key,Authorization:'Bearer '+key};
 function safeRelative(name){
  if(name.split('/').some(part=>part==='.'||part==='..')||!/^(settings\.json|assets\/[A-Za-z0-9_.-]+|sessions\/[a-f0-9-]{36}\.json|cvs\/[a-f0-9-]{36}\.pdf)$/.test(name))
   throw Error('Nombre de archivo no autorizado para almacenamiento externo');
@@ -33,9 +33,11 @@ async function prepare(root){
  if(!/^https:\/\/[a-z0-9.-]+$/i.test(base))throw Error('SUPABASE_URL debe ser una dirección HTTPS válida');
  const bucketEndpoint=urlFor('bucket/'+encodeURIComponent(bucket));
  let existing=await fetch(bucketEndpoint,{headers:headers(),signal:AbortSignal.timeout(15000)});
- if(existing.status===404){
+ const bucketResponse=existing.ok?'':(await existing.text()).slice(0,350);
+ const bucketMissing=existing.status===404||(existing.status===400&&/bucket not found|nosuchbucket/i.test(bucketResponse));
+ if(bucketMissing){
   await remote('POST',urlFor('bucket'),JSON.stringify({id:bucket,name:bucket,public:false,file_size_limit:52428800}),'application/json');
- }else if(!existing.ok)throw Error('No se pudo acceder al bucket privado: '+existing.status);
+ }else if(!existing.ok)throw Error('No se pudo acceder al bucket privado ('+existing.status+'): '+bucketResponse.replace(/(?:sb_secret_|eyJ)[A-Za-z0-9_.-]{12,}/g,'[credencial protegida]'));
  else {const data=await existing.json();if(data.public)throw Error('El bucket debe ser PRIVADO: '+bucket)}
  let restored=0;
  async function download(name){
