@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const labels=['Reposo · abiertos','Reposo · cerrados','Boca A · abiertos','Boca A · cerrados','Boca O · abiertos','Boca O · cerrados','Boca E · abiertos','Boca E · cerrados'];
-let config=null;
+let config=null,mediaInfo=null;
 async function api(path,options={}){
  const response=await fetch(path,{credentials:'same-origin',...options});
  const raw=await response.text();
@@ -16,19 +16,19 @@ const json=(method,body)=>({method,headers:{'content-type':'application/json'},b
 function val(form,key,value){const e=form.elements.namedItem(key);if(e)e.value=value??''}
 function displayImages(){
  const root=$('imagesGrid');root.replaceChildren();
- const loaded=labels.filter((_label,i)=>config.images?.[i]||config.images?.[String(i)]).length;
+ const loaded=mediaInfo?mediaInfo.imagesCount:labels.filter((_label,i)=>config.images?.[i]||config.images?.[String(i)]).length;
  const counter=$('pngProgress');if(counter)counter.textContent=loaded+' de 8 imágenes cargadas';
  labels.forEach((title,i)=>{
   const card=document.createElement('article');card.className='image-slot';card.dataset.slot=String(i);
   const preview=document.createElement('div');preview.className='image-preview';
-  const saved=config.images?.[i]||config.images?.[String(i)];
-  if(saved){const img=document.createElement('img');img.alt='Vista previa: '+title;img.src='/api/assets/'+i+'?v='+saved;img.loading='lazy';preview.append(img);card.classList.add('is-filled')}
+  const marker=config.images?.[i]||config.images?.[String(i)];const saved=marker&&(mediaInfo?.images?.[String(i)]?.saved??true);
+  if(saved){const img=document.createElement('img');img.alt='Vista previa: '+title;img.src='/api/assets/'+i+'?v='+marker;img.loading='lazy';img.onerror=()=>{card.classList.remove('is-filled');preview.textContent='PNG no disponible';feedback.textContent='El PNG no se pudo abrir; volvé a subirlo.';feedback.classList.add('error')};preview.append(img);card.classList.add('is-filled')}
   else{const face=document.createElement('span');face.className='image-placeholder';face.setAttribute('aria-hidden','true');face.textContent='✦';preview.append(face)}
   const titleEl=document.createElement('b');titleEl.className='slot-title';titleEl.textContent=title;
   const num=document.createElement('span');num.className='slot-number';num.textContent=String(i+1).padStart(2,'0');
   const input=document.createElement('input');input.type='file';input.accept='image/png,.png';input.id='slot-file-'+i;input.className='visually-hidden-upload';input.setAttribute('aria-label','Seleccionar PNG para '+title);
   const uploadLabel=document.createElement('label');uploadLabel.htmlFor=input.id;uploadLabel.className='upload-action';uploadLabel.textContent=saved?'Reemplazar PNG':'Subir PNG';
-  const feedback=document.createElement('p');feedback.className='slot-feedback';feedback.setAttribute('role','status');feedback.textContent=saved?'Imagen cargada':'Sin imagen';
+  const feedback=document.createElement('p');feedback.className='slot-feedback';feedback.setAttribute('role','status');feedback.textContent=saved?'Imagen guardada y disponible':marker?'Falta el archivo (solo quedó el registro)':'Sin imagen';
   input.addEventListener('change',async()=>{
    const file=input.files?.[0];if(!file)return;
    if(!/\.png$/i.test(file.name)){feedback.textContent='Elegí un archivo .png';feedback.classList.add('error');input.value='';return}
@@ -39,6 +39,7 @@ function displayImages(){
    try{
     const uploaded=await api('/api/admin/images/'+i,{method:'POST',body:data});
     config.images[String(i)]=Number(new URL(uploaded.url,location.href).searchParams.get('v'))||Date.now();
+    if(mediaInfo){mediaInfo.images[String(i)]={saved:true,bytes:file.size};mediaInfo.imagesCount=Object.values(mediaInfo.images).filter(x=>x.saved).length}
     displayImages();
     const newCard=root.querySelector('[data-slot="'+i+'"]');
     if(newCard){newCard.classList.add('just-saved');const status=newCard.querySelector('.slot-feedback');if(status)status.textContent='PNG guardado correctamente'}
@@ -78,7 +79,27 @@ for(const t of data.sessions){const card=document.createElement('div');card.clas
 if(t.pdfCreated){const a=document.createElement('a');a.href='/api/admin/cvs/'+encodeURIComponent(t.id)+'/pdf';a.textContent='Descargar CV';a.download='CV-'+t.id.slice(0,8)+'.pdf';tools.append(a)}
 const del=document.createElement('button');del.className='secondary';del.type='button';del.textContent='Borrar';del.addEventListener('click',async()=>{if(!confirm('¿Borrar definitivamente esta entrevista y su PDF?'))return;try{await api('/api/admin/sessions/'+t.id,{method:'DELETE'});showUsage()}catch(e){alert(e.message)}});tools.append(del);card.append(title,date,time,usage,stage,tools);list.append(card)}}
 catch(e){$('sessionsList').textContent='No se pudieron cargar los registros: '+e.message}}
-async function openPanel(){const c=await api('/api/admin/config');$('adminLogin').hidden=true;$('adminPanel').hidden=false;setConfig(c);$('shareLink').value=location.origin+'/';await showUsage()}
+async function checkMedia(){
+ try{
+  mediaInfo=await api('/api/admin/media-status');
+  const m=mediaInfo;
+  const voice=m.voiceSample
+   ?('Muestra de voz: guardada ('+Math.round(m.voiceSampleBytes/1024)+' KB)'+(m.voiceSampleTextConfigured?' y con transcripción.':' · falta guardar su transcripción.'))
+   :('Muestra de voz: no hay archivo guardado.'+(m.voiceIdConfigured?' Hay un Voice ID configurado.':' La voz de Fish será predeterminada.'));
+  $('mediaStatus').textContent=m.imagesCount+'/8 PNG encontrados realmente en el servidor. '+voice;
+  $('mediaStatus').className='hint '+(m.imagesCount<8||!m.voiceSampleTextConfigured&&m.voiceSample?'storage-warning':'storage-online');
+  config.hasVoiceSample=m.voiceSample;
+  $('voiceSampleStatus').textContent=voice;
+  displayImages();
+ }catch(e){$('mediaStatus').textContent='No pude verificar los archivos: '+e.message}
+}
+async function openPanel(){
+ const c=await api('/api/admin/config');
+ $('adminLogin').hidden=true;$('adminPanel').hidden=false;
+ setConfig(c);$('shareLink').value=location.origin+'/';
+ await Promise.allSettled([showUsage(),checkMedia()]);
+}
+$('checkMedia').addEventListener('click',checkMedia);
 $('adminLoginForm').addEventListener('submit',async e=>{e.preventDefault();$('adminLoginError').textContent='';try{await api('/api/login',json('POST',{role:'admin',password:$('adminPassword').value}));await openPanel()}catch(err){$('adminLoginError').textContent=err.message}});
 $('settingsForm').addEventListener('submit',async e=>{e.preventDefault();$('saveStatus').textContent='Guardando…';try{const d=await api('/api/admin/config',json('PUT',collect()));config={...d.config,env:config.env,hasVoiceSample:config.hasVoiceSample,storage:config.storage};$('saveStatus').textContent=config.storage?.connected?'Configuración guardada de forma permanente en Supabase.':'Configuración guardada temporalmente.';setTimeout(()=>{$('saveStatus').textContent=''},5000)}catch(err){$('saveStatus').textContent=err.message}});
 for(const name of ['fish.temperature','fish.topP','fish.speed','fish.volume','appearance.scale','appearance.offsetX','appearance.offsetY','lipSync.intensity','lipSync.delay','lipSync.blinkInterval','microphone.silenceMs'])$('settingsForm').elements.namedItem(name).addEventListener('input',updateRange);
@@ -86,10 +107,12 @@ $('resetAppearance').addEventListener('click',()=>{for(const [key,v] of [['scale
 $('uploadVoiceSample').addEventListener('click',async()=>{
  const file=$('voiceSampleFile').files?.[0];
  if(!file){$('voiceSampleStatus').textContent='Elegí primero un archivo de audio.';return}
+ const transcription=$('settingsForm').elements.namedItem('voiceSampleText').value.trim();
+ if(transcription.length<3){$('voiceSampleStatus').textContent='Escribí primero las palabras exactas que se escuchan en el audio.';return}
  if(file.size>4*1024*1024){$('voiceSampleStatus').textContent='La muestra debe ocupar menos de 4 MB.';return}
  $('voiceSampleStatus').textContent='Subiendo muestra…';
- try{const fd=new FormData();fd.append('audio',file);const info=await api('/api/admin/voice-sample',{method:'POST',body:fd});
- config.hasVoiceSample=true;$('voiceSampleStatus').textContent='Muestra convertida a WAV y guardada: '+info.name+' · '+info.duration+' segundos. Guardá también el texto exacto de la muestra.'}
+ try{await api('/api/admin/config',json('PUT',collect()));const fd=new FormData();fd.append('audio',file);const info=await api('/api/admin/voice-sample',{method:'POST',body:fd});
+ config.hasVoiceSample=true;if(mediaInfo){mediaInfo.voiceSample=true;mediaInfo.voiceSampleTextConfigured=true;mediaInfo.voiceSampleBytes=info.size};$('voiceSampleStatus').textContent='Muestra de voz y transcripción guardadas en Supabase: '+info.name+' · '+info.duration+' segundos.'}
  catch(e){$('voiceSampleStatus').textContent='Error al subir: '+e.message}
 });
 $('listenVoiceSample').addEventListener('click',async()=>{
