@@ -105,4 +105,40 @@ async function synthesize(text,config,assetDirectory,apiKey,{mode='auto',allowFa
  }
  throw lastError||Error('No se pudo sintetizar la voz');
 }
-module.exports={isSupportedAudio,normalizeSample,makeRequest,synthesize};
+
+/** Opens a Fish HTTP audio stream without buffering the whole MP3 in Node. */
+async function synthesizeStream(text,config,assetDirectory,apiKey,{mode='auto'}={}){
+ const sampleReady=fs.existsSync(path.join(assetDirectory,'voice-sample.bin'))&&!!String(config.voiceSampleText||'').trim();
+ const idReady=!!String(config.fish.referenceId||'').trim();
+ const first=mode==='auto'?(sampleReady?'sample':idReady?'id':'default'):mode;
+ const options=[first];
+ if(mode==='auto'){
+  if(first==='sample'&&idReady)options.push('id');
+  if(first!=='default')options.push('default');
+ }
+ let last;
+ for(const source of options){
+  try{
+   const req=makeRequest(text,config,assetDirectory,source);
+   const response=await fetch('https://api.fish.audio/v1/tts',{
+    method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':req.contentType,model:config.fish.model},
+    body:req.body,signal:AbortSignal.timeout(45000)
+   });
+   if(!response.ok){
+    const body=(await response.text()).slice(0,220);
+    const error=new Error('Fish '+response.status+' ('+source+'): '+body);
+    error.invalidReference=response.status===400&&/reference|voice|audio|invalid|model id/i.test(body);
+    if(error.invalidReference){console.warn('Fish streaming: referencia no válida',source,'status',response.status);last=error;continue}
+    throw error;
+   }
+   if(!response.body)throw Error('Fish no entregó datos de audio');
+   return {response,source,fallbackFrom:source===first?null:first};
+  }catch(e){
+   last=e;
+   if(!e.invalidReference)throw e;
+  }
+ }
+ throw last||Error('No se pudo iniciar la voz de Fish');
+}
+
+module.exports={isSupportedAudio,normalizeSample,makeRequest,synthesize,synthesizeStream};
