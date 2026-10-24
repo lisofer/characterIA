@@ -317,7 +317,7 @@ async function resumeCall(){
   session=await api('/api/student/session');
   $('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);
  }catch(e){tell('No pude recuperar la entrevista: '+e.message);return}
- lastAssistant=session.lastAssistant||config.introText;
+ lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
  ui();
  if(session.stage!=='done')startRecognition('call');
  if(session.stage==='done')tell('Tu currículum está listo para descargar.');
@@ -376,7 +376,7 @@ async function loadStudent(){
  loginView.hidden=true;studentView.hidden=false;
  $('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);
  mode='call';ended=false;busy=false;hasSpeechError=false;
- lastAssistant=session.lastAssistant||config.introText;
+ lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
  preloadSprites();applyAppearance();animate();finishStudent();
  if(session.stage!=='done'){
   startRecognition('call');
