@@ -104,7 +104,7 @@ const sec=(title,arr)=>{arr=(Array.isArray(arr)?arr:[arr]).filter(Boolean);if(!a
 sec('PERFIL',c.profile);sec('FORMACIÓN',c.education);sec('EXPERIENCIA Y ACTIVIDADES',c.experience);sec('HABILIDADES',c.skills);sec('CURSOS',c.courses);sec('IDIOMAS',c.languages);d.end();
 out.on('finish',()=>{fs.renameSync(tmp,file);resolve(file)});out.on('error',reject);d.on('error',reject)})}
 app.post('/api/student/chat',auth,student,rateLimit({windowMs:60000,limit:12}),async(req,res)=>{const message=clip(req.body.message,850);if(!message)return res.status(400).json({error:'Escribí o dictá una respuesta'});const s=getSession(req.auth.id);if(!s)return res.sendStatus(404);if(s.stage==='done')return res.status(409).json({error:'El CV ya fue generado; descargalo o empezá otro'});
-try{const {obj,usage}=await gemini(s,message);apply(s.cv,obj.updates);s.usage.geminiInputTokens+=Number(usage.promptTokenCount)||0;s.usage.geminiOutputTokens+=Number(usage.candidatesTokenCount)||0;
+try{let result;try{result=await gemini(s,message)}catch(e){if(/timeout|high demand|overload|503|unavailable/i.test(String(e.message))||e.name==='TimeoutError'){result=await gemini(s,message,'gemini-3.5-flash-lite')}else throw e}const {obj,usage}=result;apply(s.cv,obj.updates);s.usage.geminiInputTokens+=Number(usage.promptTokenCount)||0;s.usage.geminiOutputTokens+=Number(usage.candidatesTokenCount)||0;
 const changed=!!(obj.updates&&Object.keys(obj.updates).some(k=>fields.includes(k))),wasReviewed=s.reviewed;
 if(changed&&s.reviewed){s.reviewed=false;s.stage='interview'}
 let action=['talk','review','generate'].includes(obj.action)?obj.action:'talk',reply=clip(obj.reply,1900),download=false;
