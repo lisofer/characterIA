@@ -10,7 +10,7 @@ async function api(path,options={}){
  return body;
 }
 let config=null,session=null,mode='call',busy=false,ended=false;
-let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0;
+let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0,voiceWatchdog=null,voiceBlobUrl=null,voiceIsBuffering=false;
 let recognition=null,recognitionSeq=0,recognitionTimer=null,holdActive=false,micStarted=0,micDraft='',holdAccumulated='',lastSnapshot='',silenceTimer=null,recognitionStopped=false,stoppingForRequest=false,restartCount=0;
 let requestController=null,requestVersion=0,pendingAnswer='',hasSpeechError=false,audioPermissionBlocked=false,callReady=false;
 const sprites=[];
@@ -26,11 +26,21 @@ function addLog(role,text){
  const root=$('conversation');root.append(div);if(root.children.length>40)root.firstChild.remove();
 }
 function imageState(i){
- const img=$('avatar'),url=config?.images?.[String(i)]||config?.images?.['0'];
+ const img=$('avatar');
+ const index=String(i),url=config?.images?.[index]||config?.images?.['0'];
  if(!url){img.hidden=true;$('avatarPlaceholder').hidden=false;return}
  const absolute=new URL(url,location.href).href;
- if(img.src!==absolute)img.src=absolute;
- img.hidden=false;$('avatarPlaceholder').hidden=true;
+ if(img.dataset.failedSrc===absolute){
+  img.hidden=true;$('avatarPlaceholder').hidden=false;return;
+ }
+ if(img.src!==absolute){
+  img.onload=()=>{img.hidden=false;$('avatarPlaceholder').hidden=true;img.dataset.loadedSrc=absolute};
+  img.onerror=()=>{img.dataset.failedSrc=absolute;img.hidden=true;$('avatarPlaceholder').hidden=false;console.warn('PNG no se pudo mostrar:',index);tell('La imagen del personaje no cargó; la conversación sigue disponible.')};
+  img.src=absolute;
+ }
+ // El atributo hidden se conserva hasta confirmar onload: evita mostrar una imagen rota.
+ if(img.complete&&img.naturalWidth>0){img.hidden=false;$('avatarPlaceholder').hidden=true}
+ else if(!img.dataset.loadedSrc){img.hidden=true;$('avatarPlaceholder').hidden=false}
 }
 function preloadSprites(){
  sprites.length=0;
@@ -65,12 +75,14 @@ function animate(){
 }
 function stopVoice(){
  voiceToken++;
+ clearTimeout(voiceWatchdog);voiceWatchdog=null;voiceIsBuffering=false;
  speechActive=false;speechPlan=null;
  if(voiceAudio){
   const old=voiceAudio;voiceAudio=null;
   old.onplaying=null;old.onended=null;old.onerror=null;
   old.pause();old.removeAttribute('src');old.load();
  }
+ if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
  try{speechSynthesis.cancel()}catch{}
 }
 function nativeVoice(text,token){
@@ -93,47 +105,87 @@ function nativeVoice(text,token){
 function afterSpeaking(){
  if(mode==='ended'){tell('La llamada terminó.');return}
  if(session?.stage==='done'){tell('Tu CV está listo para descargar.');return}
- if(mode==='call')tell('Te escucho · hablá cuando quieras');
+ if(mode==='call'){tell('Te escucho · hablá cuando quieras');if(!recognition&&!busy&&!ended)scheduleCallRestart()}
  else if(mode==='keyboard')tell('Podés responder escribiendo. El asistente seguirá hablando.');
  else tell('Mantené pulsado el micrófono para enviar un audio.');
 }
 function speak(text,kind='last'){
- if(!text)return;
+ if(!text||ended&&kind!=='farewell')return;
  stopVoice();
+ // El reconocedor no debe escuchar mientras Fish está cargando o reproduciendo
+ // una respuesta: de otro modo reenvía la voz del asistente como si fuera del alumno.
+ cancelRecognition();
  const token=voiceToken;
  speechPlan=window.PersonaLipSync?.build(text)||null;
- voiceKind=kind;
- setSubtitle('');
- tell('Preparando la voz del asistente…');
+ voiceKind=kind;voiceIsBuffering=true;
+ setSubtitle('');tell('Conectando la voz del asistente…');
  const audio=new Audio();
  voiceAudio=audio;audio.preload='auto';
- audio.onplaying=()=>{
+ let retryingWithBlob=false,played=false;
+ function onPlayable(){
   if(token!==voiceToken)return;
-  speechActive=true;audioPermissionBlocked=false;
+  played=true;clearTimeout(voiceWatchdog);voiceWatchdog=null;
+  voiceIsBuffering=false;speechActive=true;audioPermissionBlocked=false;
   $('activateAudioButton').hidden=true;
-  tell(mode==='ended'?'Despidiéndose…':'El asistente está hablando. Podés interrumpirlo.');
- };
+  tell(kind==='farewell'?'Despedida en curso…':'El asistente está hablando. Tocá el personaje para interrumpirlo.');
+ }
+ function useDeviceVoice(reason){
+  if(token!==voiceToken||audio.dataset.fallback==='device')return;
+  clearTimeout(voiceWatchdog);voiceWatchdog=null;
+  console.warn('Audio de Fish no disponible:',reason);
+  audio.dataset.fallback='device';voiceIsBuffering=false;speechActive=false;
+  try{audio.pause();audio.removeAttribute('src');audio.load()}catch{}
+  tell('Reproduciendo la voz del dispositivo porque Fish no respondió.');
+  nativeVoice(text,token);
+ }
+ async function retryNormalAudio(reason){
+  if(token!==voiceToken||retryingWithBlob)return;
+  retryingWithBlob=true;
+  clearTimeout(voiceWatchdog);voiceWatchdog=null;
+  // Fallback a la ruta probada de MP3 completo cuando Android no reproduce
+  // el streaming sin Content-Length. Se conserva Fish y su referencia de voz.
+  tell('Reintentando la voz…');
+  try{
+   audio.pause();audio.removeAttribute('src');audio.load();
+   const response=await fetch('/api/tts',json('POST',{text}));
+   if(!response.ok)throw Error((await response.json().catch(()=>({}))).error||'Error Fish '+response.status);
+   const blob=await response.blob();
+   if(token!==voiceToken)return;
+   if(blob.size<100)throw Error('Audio Fish vacío');
+   voiceBlobUrl=URL.createObjectURL(blob);
+   audio.src=voiceBlobUrl;
+   await audio.play();
+  }catch(e){
+   if(token!==voiceToken)return;
+   if(e.name==='NotAllowedError'){
+    audioPermissionBlocked=true;
+    $('activateAudioButton').hidden=false;
+    tell('Chrome necesita que toques «Activar sonido» para reproducir.');
+   }else useDeviceVoice(e.message||reason);
+  }
+ }
+ audio.onplaying=onPlayable;
  audio.onended=()=>{
   if(token!==voiceToken)return;
+  clearTimeout(voiceWatchdog);
   const duration=audio.duration;
   if(Number.isFinite(duration))reportUsage('audio',duration);
-  speechActive=false;afterSpeaking();
+  speechActive=false;voiceIsBuffering=false;
+  afterSpeaking();
  };
- const fail=()=>{
-  if(token!==voiceToken||audio.dataset.fallback==='1')return;
-  audio.dataset.fallback='1';speechActive=false;
-  nativeVoice(text,token);
- };
- audio.onerror=fail;
+ audio.onerror=()=>{if(token!==voiceToken)return;if(!retryingWithBlob)retryNormalAudio('streaming');else useDeviceVoice('audio MP3')};
  audio.src='/api/tts-stream?kind='+encodeURIComponent(kind)+'&v='+Date.now();
+ voiceWatchdog=setTimeout(()=>{if(token===voiceToken&&!played&&!audioPermissionBlocked)retryNormalAudio('el audio progresivo tardó más de lo previsto')},7000);
  audio.play().catch(e=>{
   if(token!==voiceToken)return;
   if(e.name==='NotAllowedError'){
+   clearTimeout(voiceWatchdog);voiceWatchdog=null;
    audioPermissionBlocked=true;
    $('activateAudioButton').hidden=false;
    tell('El navegador bloqueó el sonido automático. Tocá «Activar sonido».');
-   setSubtitle('Tocá «Activar sonido» para escuchar al asistente');
-  }else fail();
+   setSubtitle('Activá el sonido para escuchar al asistente');
+  }else if(!retryingWithBlob)retryNormalAudio(e.message||'Audio progresivo');
+  else useDeviceVoice(e.message||'Falló la reproducción');
  });
 }
 function resumeSound(){
@@ -198,12 +250,12 @@ function finishRecognition(seq,send=true){
  }else{tell('No escuché una respuesta. Mantené apretado para intentar otra vez.')}
 }
 function scheduleCallRestart(){
- if(mode!=='call'||busy||ended||recognition||session?.stage==='done'||hasSpeechError)return;
+ if(mode!=='call'||busy||ended||recognition||speechActive||voiceIsBuffering||session?.stage==='done'||hasSpeechError)return;
  clearTimeout(recognitionTimer);
  recognitionTimer=setTimeout(()=>{if(mode==='call'&&!busy&&!recognition)startRecognition('call')},Math.min(1200,250+restartCount*110));
 }
 function startRecognition(source){
- if(busy||ended||session?.stage==='done'||recognition)return;
+ if(busy||ended||session?.stage==='done'||recognition||source==='call'&&(speechActive||voiceIsBuffering))return;
  if(!['call','audio'].includes(source)||mode!==source)return;
  const Engine=window.SpeechRecognition||window.webkitSpeechRecognition;
  if(!Engine){
@@ -278,7 +330,7 @@ function switchMode(next){
  ui();
  if(next==='keyboard'){$('answer').focus({preventScroll:true});tell('Escribí tu respuesta. El micrófono está apagado.')}
  else if(next==='audio')tell('Mantené pulsado el botón naranja para hablar. Al soltar, envío tu audio.');
- else if(next==='call'){tell('Te escucho · hablá cuando quieras');startRecognition('call')}
+ else if(next==='call'){tell('Iniciando llamada…');if(!speechActive&&!voiceIsBuffering)startRecognition('call')}
 }
 function beginHold(event){
  if(busy||ended||session?.stage==='done')return;
@@ -320,7 +372,6 @@ async function resumeCall(){
  }catch(e){tell('No pude recuperar la entrevista: '+e.message);return}
  lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
  ui();
- if(session.stage!=='done')startRecognition('call');
  if(session.stage==='done')tell('Tu currículum está listo para descargar.');
  else speak(lastAssistant,(session.history||[]).length?'last':'intro');
 }
@@ -347,7 +398,6 @@ async function sendAnswer(message,retry=false){
    const link=document.createElement('a');link.href='/api/student/pdf';link.download='Mi-CV.pdf';document.body.append(link);link.click();link.remove();
    tell('CV generado. Podés descargarlo nuevamente.');
   }
-  if(mode==='call'&&session.stage!=='done'&&!hasSpeechError)startRecognition('call');
   speak(data.reply,'last');
  }catch(e){
   if(version!==requestVersion||ended)return;
@@ -359,7 +409,7 @@ async function sendAnswer(message,retry=false){
  }finally{
   if(version===requestVersion){
    busy=false;requestController=null;ui();
-   if(mode==='call'&&!recognition&&!ended&&session.stage!=='done'&&$('retryPanel').hidden)scheduleCallRestart();
+   if(mode==='call'&&!recognition&&!ended&&!speechActive&&!voiceIsBuffering&&session.stage!=='done'&&$('retryPanel').hidden)scheduleCallRestart();
   }
  }
 }
@@ -380,7 +430,6 @@ async function loadStudent(){
  lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
  preloadSprites();applyAppearance();animate();finishStudent();
  if(session.stage!=='done'){
-  startRecognition('call');
   speak(lastAssistant,(session.history||[]).length?'last':'intro');
  }else{setSubtitle('¡Tu currículum está listo!');}
 }
@@ -403,7 +452,15 @@ $('micButton').addEventListener('lostpointercapture',()=>{if(holdActive)endHold(
 $('micButton').addEventListener('contextmenu',e=>e.preventDefault());
 $('micButton').addEventListener('keydown',e=>{if(e.repeat)return;if([' ','Enter'].includes(e.key)){e.preventDefault();beginHold(e)}});
 $('micButton').addEventListener('keyup',e=>{if([' ','Enter'].includes(e.key)){e.preventDefault();endHold(e)}});
-$('avatarButton').addEventListener('click',()=>{if(!busy&&!ended&&lastAssistant)speak(lastAssistant,session?.history?.length?'last':'intro')});
+$('avatarButton').addEventListener('click',()=>{
+ if(busy||ended)return;
+ if(speechActive||voiceIsBuffering){
+  stopVoice();tell('Te escucho · hablá cuando quieras');
+  if(mode==='call')startRecognition('call');
+  return;
+ }
+ if(lastAssistant)speak(lastAssistant,session?.history?.length?'last':'intro');
+});
 $('restartButton').addEventListener('click',async()=>{
  if(!confirm('¿Querés crear otro CV? Se borrarán los datos de esta entrevista.'))return;
  cancelRecognition();stopVoice();
