@@ -34,34 +34,75 @@ async function normalizeSample(buffer){
   return {buffer:wav,mime:'audio/wav',duration:Math.round(duration*10)/10};
  }finally{await fs.promises.rm(folder,{recursive:true,force:true})}
 }
-function makeRequest(text,config,assetDirectory){
+
+function makeRequest(text,config,assetDirectory,mode='auto'){
  const payload={text,format:'mp3',temperature:config.fish.temperature,top_p:config.fish.topP,prosody:{speed:config.fish.speed,volume:config.fish.volume}};
  const samplePath=path.join(assetDirectory,'voice-sample.bin');
  const sampleText=String(config.voiceSampleText||'').trim();
- if(fs.existsSync(samplePath)&&sampleText){
+ const sampleReady=fs.existsSync(samplePath)&&!!sampleText;
+ const voiceID=String(config.fish.referenceId||'').trim();
+ const source=mode==='auto'?(sampleReady?'sample':voiceID?'id':'default'):mode;
+ if(!['sample','id','default'].includes(source))throw Error('Modo de voz no reconocido');
+ if(source==='sample'){
+  if(!fs.existsSync(samplePath))throw Error('No hay ninguna muestra de voz guardada. Subí un archivo desde Administración.');
+  if(!sampleText)throw Error('Falta la transcripción exacta de la muestra. Guardala en Administración.');
   const sample=fs.readFileSync(samplePath);
-  if(!isSupportedAudio(sample))throw Error('La muestra guardada no está en un formato válido para Fish. Volvé a cargarla en Administración → Voz.');
-  if(sampleText.length<3)throw Error('Escribí el texto exacto de la muestra en Administración → Voz.');
+  if(!isSupportedAudio(sample))throw Error('El archivo de voz guardado no es WAV/MP3 válido. Volvé a subirlo para convertirlo.');
   payload.references=[{audio:new Uint8Array(sample),text:sampleText}];
-  return {body:Buffer.from(encode(payload)),contentType:'application/msgpack',source:'sample'};
+  return {body:Buffer.from(encode(payload)),contentType:'application/msgpack',source};
  }
- if(config.fish.referenceId)payload.reference_id=config.fish.referenceId;
- return {body:Buffer.from(JSON.stringify(payload)),contentType:'application/json',source:config.fish.referenceId?'id':'default'};
+ if(source==='id'){
+  if(!voiceID)throw Error('No hay un Voice ID configurado en Administración.');
+  payload.reference_id=voiceID;
+ }
+ return {body:Buffer.from(JSON.stringify(payload)),contentType:'application/json',source};
 }
-async function synthesize(text,config,assetDirectory,apiKey){
- const request=makeRequest(text,config,assetDirectory);
+function fallbackMessage(source){
+ return source==='sample'?'Fish rechazó el audio de muestra. Revisá el audio y su texto exacto en Administración → Voz.':source==='id'?'Fish rechazó el Voice ID. Revisá que corresponda a una voz accesible desde tu cuenta.':'Fish no pudo generar audio sin una voz de referencia.';
+}
+async function sendFish(req,config,apiKey){
  let response;
  try{
-  response=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':request.contentType,model:config.fish.model},body:request.body,signal:AbortSignal.timeout(60000)});
- }catch(e){throw Error('No se pudo contactar con Fish Audio: '+(e.name==='TimeoutError'?'la conexión tardó demasiado.':e.message))}
- if(!response.ok){
-  const body=(await response.text()).slice(0,250);
-  if(response.status===400&&request.source==='sample')throw Error('Fish rechazó el audio de referencia. Comprobá que la muestra contenga voz clara y que su transcripción coincida exactamente. Probá subirla de nuevo. '+body);
-  if(response.status===400&&request.source==='id')throw Error('Fish rechazó el ID de la voz configurada. Revisalo en Administración → Voz. '+body);
-  throw Error('Fish Audio '+response.status+': '+body);
+  response=await fetch('https://api.fish.audio/v1/tts',{
+   method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':req.contentType,model:config.fish.model},
+   body:req.body,signal:AbortSignal.timeout(45000)
+  });
+ }catch(e){
+  throw Error('No se pudo contactar con Fish Audio: '+(e.name==='TimeoutError'?'la solicitud tardó demasiado.':e.message));
  }
- const data=Buffer.from(await response.arrayBuffer());
- if(data.length<100)throw Error('Fish devolvió un audio vacío.');
- return {audio:data,source:request.source};
+ if(!response.ok){
+  const body=(await response.text()).slice(0,260);
+  const error=new Error('Fish Audio '+response.status+' ('+req.source+'): '+(response.status===400?fallbackMessage(req.source)+' ':'')+body);
+  error.status=response.status;
+  error.source=req.source;
+  error.invalidReference=response.status===400&&/reference|referencia|audio|voice|model id|not found|invalid/i.test(body);
+  throw error;
+ }
+ const audio=Buffer.from(await response.arrayBuffer());
+ if(audio.length<100)throw Error('Fish respondió con un audio vacío.');
+ return {audio,source:req.source};
+}
+async function synthesize(text,config,assetDirectory,apiKey,{mode='auto',allowFallback=true}={}){
+ const sampleReady=fs.existsSync(path.join(assetDirectory,'voice-sample.bin'))&&!!String(config.voiceSampleText||'').trim();
+ const idReady=!!String(config.fish.referenceId||'').trim();
+ const first=mode==='auto'?(sampleReady?'sample':idReady?'id':'default'):mode;
+ const options=[first];
+ if(allowFallback&&mode==='auto'){
+  if(first==='sample'&&idReady)options.push('id');
+  if(first!=='default')options.push('default');
+ }
+ let lastError=null;
+ for(const source of options){
+  try{
+   const req=makeRequest(text,config,assetDirectory,source);
+   const result=await sendFish(req,config,apiKey);
+   return {...result,fallbackFrom:source!==first?first:null};
+  }catch(e){
+   lastError=e;
+   if(!e.invalidReference||source===options.at(-1))throw e;
+   console.warn('Fish: referencia rechazada; probando otra fuente:',source,'status',e.status);
+  }
+ }
+ throw lastError||Error('No se pudo sintetizar la voz');
 }
 module.exports={isSupportedAudio,normalizeSample,makeRequest,synthesize};
