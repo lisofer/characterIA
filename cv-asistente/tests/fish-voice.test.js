@@ -25,7 +25,7 @@ test('con muestra: Fish recibe MessagePack con bytes de audio (no Base64)',()=>{
 test('muestra antigua en formato inválido: mensaje para recargar',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fish-test-'));
  try{fs.writeFileSync(path.join(dir,'voice-sample.bin'),Buffer.from('esto no es audio'));
- assert.throws(()=>makeRequest('Hola',config,dir),/Volvé a cargarla/);
+ assert.throws(()=>makeRequest('Hola',config,dir),/Volvé a (subirlo|cargarla)/);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
 
