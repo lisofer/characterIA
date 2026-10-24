@@ -28,7 +28,7 @@ function objKey(filename){return namespace+'/'+safeRelative(filename)}
 async function remote(method,url,body=null,contentType=null,missingOK=false){
  const h=headers();if(contentType)h['Content-Type']=contentType;
  const response=await fetch(url,{method,headers:h,body,signal:AbortSignal.timeout(20000)});
- if(missingOK&&response.status===404)return null;
+ if(missingOK&&(response.status===404||(response.status===400&&/"statusCode":"404"|"code":"NoSuchKey"|"message":"Object not found"/i.test((await response.clone().text()).slice(0,500)))))return null;
  if(!response.ok){const detail=(await response.text()).slice(0,350);throw Error('Almacenamiento Supabase: '+response.status+' '+detail+(response.status===400&&/row-level security policy|accessdenied|unauthorized/i.test(detail)?' | Supabase no aceptó esta petición como service_role. Verificá que la clave SECRET y la URL pertenezcan al mismo proyecto.':'') )}
  return response;
 }
