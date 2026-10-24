@@ -170,3 +170,39 @@ input::placeholder,textarea::placeholder{color:#9097ae}
 }
 @media(max-height:640px){.avatar-button{max-height:31dvh}.character-area{min-height:120px;padding-bottom:7px}.bubble{max-height:25dvh}.session-bottom{gap:5px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+
+/* Ajustes Persona Studio: encuadre real de PNG de cualquier proporción */
+.character-area{min-height:0}
+.avatar-button{
+  display:block!important;position:relative!important;flex:1 1 auto!important;
+  min-height:0!important;max-height:none!important;overflow:hidden!important;
+  width:min(100%,590px);height:100%;border:0;background:transparent;
+}
+.avatar-button img{
+  display:block;position:absolute;inset:0;
+  width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;
+  object-fit:contain!important;object-position:center center!important;
+  transform:translate(var(--sprite-offset-x,0%),var(--sprite-offset-y,0%)) scale(var(--sprite-scale,1));
+  transform-origin:center center;filter:drop-shadow(0 14px 22px #40416f18);
+}
+.avatar-fallback{position:absolute;left:50%;bottom:0;transform:translateX(-50%)}
+.config-subsection{background:#f8f8fe;border:1px solid #e7e6f7;border-radius:17px;margin-top:22px;padding:18px}
+.config-subsection h3{margin:0 0 5px;font-size:15px;font-weight:800;letter-spacing:-.02em}
+.config-subsection>.hint{margin:7px 0 14px}
+.config-subsection label{font-size:12px}
+.config-subsection input[type=file]{display:block!important;background:#fff;padding:12px;border:1px dashed #aca8e7;border-radius:12px;width:100%;color:#545a74;font-size:12px}
+.config-subsection input[type=range]{accent-color:#6255df}
+.config-subsection output{float:right;font-weight:800;color:#5e4fdc}
+.config-subsection audio{width:100%;margin:14px 0 3px}
+.inline-actions{display:flex;gap:7px;flex-wrap:wrap}
+.inline-actions button{font-size:11px;padding:10px 12px}
+.toggle-option{display:flex;align-items:center;gap:9px;line-height:1.4}
+.toggle-option input{width:18px;height:18px;accent-color:#6255df}
+.circle-button[aria-pressed=true]{background:#e04269;color:white;box-shadow:0 0 0 8px #e0426923}
+@media(max-width:600px){
+ .character-area{padding-top:7px}
+ .avatar-button{min-height:0!important;max-height:none!important;height:100%}
+ .config-subsection{padding:13px;margin-top:18px}
+ .inline-actions button{flex:1 1 120px}
+}
