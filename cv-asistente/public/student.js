@@ -2,22 +2,65 @@
 const $=id=>document.getElementById(id);
 const loginView=$('loginView'),studentView=$('studentView'),subtitle=$('subtitle'),statusEl=$('status');
 let config=null,session=null,busy=false,recognition=null,listening=false,micStart=0;
-let voiceAudio=null,audioCtx=null,analyser=null,avatarLoop=0,lastPrompt='',mouth=0,blinkUntil=0,lastBlink=0,voiceStart=0;
+let voiceAudio=null,avatarLoop=0,lastPrompt='',blinkUntil=0,lastBlink=0,lipPlan=null,speechToken=0,sourceUrl=null;
+let micActive=false,micText='',micSilenceTimer=null,micSessionId=0,micError='';
 async function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options});const content=r.headers.get('content-type')||'';const data=content.includes('application/json')?await r.json():null;if(!r.ok)throw Error(data?.error||('Error HTTP '+r.status));return data}
 const json=(method,body)=>({method,headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 function tell(msg){statusEl.textContent=msg}
 function imageState(i){const src=config?.images?.[String(i)]||config?.images?.[i];const idle=config?.images?.['0'];const img=$('avatar');if(!src&&!idle){img.hidden=true;$('avatarPlaceholder').hidden=false;return}const target=src||idle;const url=new URL(target,location.href).href;if(img.src!==url)img.src=url;img.hidden=false;$('avatarPlaceholder').hidden=true}
-function animate(){cancelAnimationFrame(avatarLoop);let tick=0;const frame=()=>{const now=performance.now();let talking=voiceAudio&&!voiceAudio.paused&&!voiceAudio.ended;let next=0;if(talking){let power=0;if(analyser){const a=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(a);power=a.slice(2,60).reduce((x,y)=>x+y,0)/58}if(now-tick>85){mouth=power>24?([2,4,6][Math.floor(Math.random()*3)]):0;tick=now}next=mouth}else mouth=0;
-if(now-lastBlink>2800+Math.random()*900){blinkUntil=now+125;lastBlink=now}
-const closed=now<blinkUntil;imageState(next+(closed?1:0));$('fallbackMouth').textContent=talking?(mouth?'O':'—'):'ᴗ';avatarLoop=requestAnimationFrame(frame)};avatarLoop=requestAnimationFrame(frame)}
+
+function applyAppearance(){
+ const f=$('avatarButton'),settings=config?.appearance||{};
+ f.style.setProperty('--sprite-scale',String(settings.scale??1));
+ f.style.setProperty('--sprite-offset-x',String(settings.offsetX??0)+'%');
+ f.style.setProperty('--sprite-offset-y',String(settings.offsetY??0)+'%');
+}
+function animate(){
+ cancelAnimationFrame(avatarLoop);
+ let blinkAt=performance.now()+2600;
+ const frame=()=>{
+  const now=performance.now(),talking=!!(voiceAudio&&!voiceAudio.paused&&!voiceAudio.ended);
+  const mouth=talking&&window.PersonaLipSync?window.PersonaLipSync.pose(lipPlan,(voiceAudio.currentTime||0)*1000,(voiceAudio.duration||0)*1000,config?.lipSync||{}):0;
+  if(now>blinkAt){blinkUntil=now+125;blinkAt=now+Number(config?.lipSync?.blinkInterval||3500)+Math.random()*500}
+  const blink=config?.lipSync?.blink!==false&&now<blinkUntil;
+  imageState(mouth+(blink?1:0));
+  $('fallbackMouth').textContent=talking?(mouth===4?'O':mouth===6?'—':mouth?'◯':'—'):'ᴗ';
+  avatarLoop=requestAnimationFrame(frame);
+ };
+ avatarLoop=requestAnimationFrame(frame);
+}
 function addLog(role,text){const e=document.createElement('div');e.className='log-entry'+(role==='user'?' you':'');e.textContent=(role==='user'?'Vos: ':'Asistente: ')+text;$('conversation').appendChild(e);if($('conversation').children.length>40)$('conversation').firstChild.remove()}
 function updateSubtitle(t,log=true){lastPrompt=t;subtitle.textContent=t;if(log)addLog('assistant',t)}
-function stopVoice(){if(voiceAudio){voiceAudio.pause();voiceAudio.src='';voiceAudio=null}window.speechSynthesis?.cancel?.();analyser=null}
-function nativeVoice(text){if(!('speechSynthesis' in window))return;const say=new SpeechSynthesisUtterance(text);say.lang='es-AR';say.rate=.96;window.speechSynthesis.speak(say);tell('Escuchando la explicación. También podés leerla en pantalla.')}
-async function speak(text){stopVoice();if(!text)return;try{const r=await fetch('/api/tts',json('POST',{text}));if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Voz no disponible');const audioURL=URL.createObjectURL(await r.blob());const a=new Audio(audioURL);voiceAudio=a;a.onended=()=>{reportUsage('audio',a.duration);URL.revokeObjectURL(audioURL);tell('Podés responder hablando o escribiendo.')};a.onerror=()=>{URL.revokeObjectURL(audioURL);tell('El audio no se pudo reproducir, pero podés leer el texto.')};
-try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();const source=audioCtx.createMediaElementSource(a);analyser=audioCtx.createAnalyser();analyser.fftSize=256;source.connect(analyser);analyser.connect(audioCtx.destination)}catch{analyser=null}
-await a.play();voiceStart=Date.now();tell('El personaje está hablando. Tocá su imagen para repetir.')}
-catch(e){console.warn('Voz:',e.message);tell('El texto está disponible. Tocá el personaje para intentar escuchar.');if(e.message!=='play() failed')nativeVoice(text)}}
+
+function stopVoice(){
+ speechToken++;
+ if(voiceAudio){voiceAudio.pause();voiceAudio.removeAttribute('src');voiceAudio.load();voiceAudio=null}
+ if(sourceUrl){URL.revokeObjectURL(sourceUrl);sourceUrl=null}
+ window.speechSynthesis?.cancel?.();lipPlan=null;
+}
+function nativeVoice(text){
+ if(!('speechSynthesis' in window))return;
+ const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=.96;window.speechSynthesis.speak(u);
+}
+async function speak(text){
+ stopVoice();const token=speechToken;if(!text)return;
+ lipPlan=window.PersonaLipSync?.build(text)||null;
+ try{
+  const r=await fetch('/api/tts',json('POST',{text}));
+  if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Voz no disponible');
+  const blob=await r.blob();if(token!==speechToken)return;
+  sourceUrl=URL.createObjectURL(blob);
+  const a=new Audio(sourceUrl);voiceAudio=a;
+  a.onended=()=>{if(token!==speechToken)return;reportUsage('audio',a.duration);tell('Podés responder hablando o escribiendo.');stopVoice()};
+  a.onerror=()=>{if(token===speechToken)tell('El audio no se pudo reproducir. Podés leer el texto.')};
+  await a.play();if(token===speechToken)tell('El asistente está hablando. Tocá la imagen para repetir.');
+ }catch(e){
+  if(token!==speechToken)return;
+  console.warn('Voz:',e.message);
+  tell('No se pudo reproducir Fish. Podés leer el texto o tocar la imagen para reintentar.');
+  if(!/play|abort/i.test(e.message))nativeVoice(text);
+ }
+}
 async function reportUsage(kind,seconds){if(!Number.isFinite(seconds)||seconds<=0)return;try{await api('/api/student/usage',json('POST',{kind,seconds:Math.min(seconds,180)}))}catch{}}
 function setBusy(v){busy=v;$('micButton').disabled=v;$('keyboardButton').disabled=v;$('textForm').querySelector('button').disabled=v}
 function showComplete(){const done=session?.stage==='done';$('complete').hidden=!done;$('micButton').hidden=done;$('keyboardButton').hidden=done;$('textForm').hidden=true}
@@ -26,9 +69,62 @@ try{const data=await api('/api/student/chat',json('POST',{message}));session.sta
 catch(e){tell(e.message);addLog('assistant','No pude procesar esa respuesta. Podés intentarlo nuevamente.')}
 finally{setBusy(false)}}
 function inputMode(){if(session?.stage==='done')return;const form=$('textForm');form.hidden=!form.hidden;if(!form.hidden){$('answer').focus();tell('Escribí tu respuesta y tocá Enviar.')}else tell('Podés usar el micrófono.')}
-function startListening(){if(busy||session?.stage==='done')return;const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SpeechRecognition){$('textForm').hidden=false;$('answer').focus();tell('Este navegador no ofrece reconocimiento de voz. Podés escribir tu respuesta.');return}
-if(listening){recognition?.stop();return}stopVoice();recognition=new SpeechRecognition();recognition.lang='es-AR';recognition.continuous=false;recognition.interimResults=true;let final='';recognition.onstart=()=>{listening=true;micStart=Date.now();$('micButton').classList.add('recording');tell('Te escucho. Podés hablar ahora.')};recognition.onresult=e=>{let provisional='';for(let i=e.resultIndex;i<e.results.length;i++){const value=e.results[i][0].transcript;if(e.results[i].isFinal)final+=value+' ';else provisional+=value}if(final||provisional)subtitle.textContent=(final+provisional).trim()};recognition.onerror=e=>{tell('No pude reconocer la voz ('+e.error+'). Probá otra vez o usá el teclado.')};recognition.onend=()=>{listening=false;$('micButton').classList.remove('recording');reportUsage('mic',(Date.now()-micStart)/1000);if(final.trim()){sendAnswer(final.trim())}else{subtitle.textContent=lastPrompt||config.introText;if(!statusEl.textContent.includes('reconocer'))tell('Tocá el micrófono para volver a hablar.')}};try{recognition.start()}catch{tell('El micrófono no está disponible. Podés usar el teclado.')}}
-async function loadStudent(){config=await api('/api/bootstrap');session=await api('/api/student/session');$('appTitle').textContent=config.title;document.title=config.title;$('duration').textContent='Unos '+config.durationMinutes+' minutos';loginView.hidden=true;studentView.hidden=false;$('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);const text=session.lastAssistant||config.introText;updateSubtitle(text,!(session.history||[]).length);showComplete();animate();if(session.stage!=='done'){tell('Tocá el micrófono para hablar, o el teclado para escribir.');speak(text)}else tell('Tu CV está listo para descargar.')}
+
+function finishMic(id){
+ if(id!==micSessionId)return;
+ const message=micText.trim();
+ micSessionId++;micActive=false;listening=false;
+ clearTimeout(micSilenceTimer);micSilenceTimer=null;
+ $('micButton').classList.remove('recording');
+ $('micButton').setAttribute('aria-pressed','false');
+ $('micButton').setAttribute('aria-label','Hablar con el micrófono');
+ reportUsage('mic',(Date.now()-micStart)/1000);
+ subtitle.textContent=lastPrompt||config.introText;
+ if(message){sendAnswer(message)}
+ else tell(micError||'No escuché tu respuesta. Tocá otra vez para hablar o usá el teclado.');
+}
+function stopMic(){
+ if(!micActive)return;
+ clearTimeout(micSilenceTimer);micSilenceTimer=null;
+ tell('Terminando el dictado…');
+ try{recognition?.stop()}catch{finishMic(micSessionId)}
+}
+function startListening(){
+ if(busy||session?.stage==='done')return;
+ if(micActive){stopMic();return}
+ const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SpeechRecognition){$('textForm').hidden=false;$('answer').focus();tell('Tu navegador no admite dictado. Podés usar el teclado.');return}
+ stopVoice();micText='';micError='';
+ clearTimeout(micSilenceTimer);micSilenceTimer=null;
+ const id=++micSessionId, r=new SpeechRecognition();recognition=r;
+ r.lang=config?.microphone?.language||'es-AR';
+ r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+ micActive=true;listening=true;micStart=Date.now();
+ $('micButton').classList.add('recording');
+ $('micButton').setAttribute('aria-pressed','true');
+ $('micButton').setAttribute('aria-label','Detener micrófono y enviar respuesta');
+ tell('Te escucho. Tocá de nuevo para terminar, o esperá al detectar una pausa.');
+ r.onresult=e=>{
+  if(id!==micSessionId)return;
+  let collected='';
+  for(let i=0;i<e.results.length;i++)collected+=e.results[i][0].transcript+' ';
+  micText=collected.trim();
+  if(micText){
+   subtitle.textContent=micText;
+   tell('Escuchando… Al dejar de hablar o tocar el micrófono, envío tu respuesta.');
+   clearTimeout(micSilenceTimer);
+   micSilenceTimer=setTimeout(()=>{if(id===micSessionId)stopMic()},Number(config?.microphone?.silenceMs)||2200);
+  }
+ };
+ r.onerror=e=>{
+  if(id!==micSessionId)return;
+  const messages={'not-allowed':'Permiso de micrófono denegado. Revisá los permisos del navegador.','audio-capture':'No se detectó un micrófono.','network':'No se pudo conectar al reconocimiento de voz. Probá el teclado.','no-speech':'No escuché tu voz. Tocá para intentar de nuevo.'};
+  micError=messages[e.error]||'No pude reconocer la voz ('+e.error+'). Probá con el teclado.';
+ };
+ r.onend=()=>{if(id===micSessionId)finishMic(id)};
+ try{r.start()}catch{micError='No pude activar el micrófono. Probá otra vez o usá el teclado.';finishMic(id)}
+}
+async function loadStudent(){config=await api('/api/bootstrap');session=await api('/api/student/session');$('appTitle').textContent=config.title;document.title=config.title;$('duration').textContent='Unos '+config.durationMinutes+' minutos';loginView.hidden=true;studentView.hidden=false;$('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);const text=session.lastAssistant||config.introText;updateSubtitle(text,!(session.history||[]).length);showComplete();applyAppearance();animate();if(session.stage!=='done'){tell('Tocá el micrófono para hablar, o el teclado para escribir.');speak(text)}else tell('Tu CV está listo para descargar.')}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/api/login',json('POST',{role:'student',password:$('accessKey').value}));await loadStudent()}catch(err){$('loginError').textContent=err.message}});
 $('textForm').addEventListener('submit',e=>{e.preventDefault();sendAnswer($('answer').value)});
 $('keyboardButton').addEventListener('click',inputMode);
