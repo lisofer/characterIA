@@ -50,12 +50,12 @@ async function speak(text){
  try{
   const r=await fetch('/api/tts',json('POST',{text}));
   if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Voz no disponible');
-  const blob=await r.blob();if(token!==speechToken)return;
+  const fallbackFrom=r.headers.get('X-CV-Voice-Fallback');const chosenVoice=r.headers.get('X-CV-Voice-Source');const blob=await r.blob();if(token!==speechToken)return;
   sourceUrl=URL.createObjectURL(blob);
   const a=new Audio(sourceUrl);voiceAudio=a;
   a.onended=()=>{if(token!==speechToken)return;reportUsage('audio',a.duration);tell('Podés responder hablando o escribiendo.');stopVoice()};
   a.onerror=()=>{if(token===speechToken)tell('El audio no se pudo reproducir. Podés leer el texto.')};
-  await a.play();if(token===speechToken)tell('El asistente está hablando. Tocá la imagen para repetir.');
+  await a.play();if(token===speechToken)tell(fallbackFrom?'Fish rechazó la referencia de voz configurada. Para continuar, se está usando otra voz. Podés revisarla en Administración.':'El asistente está hablando. Tocá la imagen para repetir.');
  }catch(e){
   if(token!==speechToken)return;
   console.warn('Voz:',e.message);
