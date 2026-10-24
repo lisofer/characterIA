@@ -54,10 +54,11 @@ function displayImages(){
   });
   card.append(num,preview,titleEl,input,uploadLabel,feedback);root.append(card);
  });
+ applyAvatarPreview();
 }
 function applyAvatarPreview(){
  const img=$('avatarPreviewImage'),empty=$('avatarPreviewEmpty'),url=config?.images?.['0'];
- if(url){img.src='/api/assets/0?v='+url;img.hidden=false;empty.hidden=true}else{img.hidden=true;empty.hidden=false}
+ if(url){const next='/api/assets/0?v='+url;if(img.getAttribute('src')!==next)img.setAttribute('src',next);img.hidden=false;empty.hidden=true}else{img.hidden=true;empty.hidden=false}
  const form=$('settingsForm'),valOf=n=>Number(form.elements.namedItem(n)?.value||0);
  img.style.transform='translate('+valOf('appearance.offsetX')+'%,'+valOf('appearance.offsetY')+'%) scale('+valOf('appearance.scale')+')';
 }
