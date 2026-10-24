@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/student.js && node --check public/admin.js"
+    "check": "node --check server.js && node --check fish-voice.js && node --check persistent-store.js && node --check public/student.js && node --check public/admin.js",
+    "test": "node --test tests/*.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -16,6 +17,7 @@
     "helmet": "^8.0.0",
     "multer": "^2.0.2",
     "pdfkit": "^0.17.1",
-    "express-rate-limit": "^7.5.0"
+    "express-rate-limit": "^7.5.0",
+    "@msgpack/msgpack": "^3.1.2"
   }
 }
