@@ -27,6 +27,7 @@ async function remote(method,url,body=null,contentType=null,missingOK=false){
 function configured(){return enabled}
 function active(){return ready}
 async function prepare(root){
+ if(process.env.CV_PERSISTENT_STORAGE==='supabase'&&!enabled)throw Error('La aplicación requiere Supabase. Comprobá SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Render.');
  if(Boolean(base)!==Boolean(key))throw Error('Configurá tanto SUPABASE_URL como SUPABASE_SERVICE_ROLE_KEY en Render');
  if(!enabled)return {enabled:false,restored:0};
  if(!/^https:\/\/[a-z0-9.-]+$/i.test(base))throw Error('SUPABASE_URL debe ser una dirección HTTPS válida');
