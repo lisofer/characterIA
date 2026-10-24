@@ -139,6 +139,12 @@ async function start(){
   console.log('Almacenamiento Supabase listo. Archivos restaurados:',cloudBoot.restored);
  }else console.warn('ALERTA: sin SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY, los archivos se borran al redesplegar Render Free.');
  app.listen(PORT,'0.0.0.0',()=>console.log('Mi primer CV: puerto '+PORT));
+ if(process.env.CV_FISH_SMOKE_TEST==='1'&&process.env.FISH_API_KEY){
+  const diag={...config,fish:{...config.fish,referenceId:''},voiceSampleText:''};
+  fishVoice.synthesize('Hola, prueba de audio.',diag,DIR.assets,process.env.FISH_API_KEY,{mode:'default',allowFallback:false})
+   .then(out=>console.log('Fish diagnóstico: voz predeterminada funciona, bytes=',out.audio.length,'modelo=',diag.fish.model))
+   .catch(e=>console.warn('Fish diagnóstico: falla voz predeterminada, status=',e.status||'sin respuesta','detalle=',String(e.message).slice(0,200)));
+ }
 }
 start().catch(e=>{console.error('No se pudo recuperar el almacenamiento externo:',e.message);process.exitCode=1});
 
