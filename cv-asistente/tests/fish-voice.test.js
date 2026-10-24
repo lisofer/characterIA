@@ -3,7 +3,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {decode}=require('@msgpack/msgpack');
-const {makeRequest,isSupportedAudio,synthesize}=require('../fish-voice');
+const {makeRequest,isSupportedAudio,synthesize,synthesizeStream}=require('../fish-voice');
 const config={fish:{model:'s2.1-pro-free',referenceId:'voice-123',temperature:.7,topP:.7,speed:1,volume:0},voiceSampleText:'Una muestra de voz clara.'};
 test('sin muestra: Fish recibe JSON con reference_id',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fish-test-'));
@@ -55,4 +55,19 @@ test('prueba exclusiva de una muestra falla sin cambiar silenciosamente de voz',
   await assert.rejects(synthesize('Hola',config,dir,'test-key',{mode:'sample',allowFallback:false}),/Fish rechazó el audio/);
   assert.equal(attempts,1);
  }finally{global.fetch=oldFetch;fs.rmSync(dir,{recursive:true,force:true})}
+});
+
+test('Fish streaming entrega el cuerpo progresivo sin esperar el MP3 entero',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fish-stream-'));
+ const old=global.fetch;let called=0;
+ try{
+  global.fetch=async()=>{called++;return {
+   ok:true,status:200,body:new ReadableStream({start(ctrl){ctrl.enqueue(Uint8Array.from([1,2,3]));ctrl.close()}}),
+   arrayBuffer:()=>{throw Error('El streaming no debe convertir toda la respuesta a buffer')}
+  }};
+  const data=await synthesizeStream('Hola',config,dir,'test-key',{mode:'default'});
+  assert.equal(called,1);assert.equal(data.source,'default');
+  const reader=data.response.body.getReader();const first=await reader.read();
+  assert.deepEqual(Array.from(first.value),[1,2,3]);
+ }finally{global.fetch=old;fs.rmSync(dir,{recursive:true,force:true})}
 });
