@@ -55,6 +55,12 @@ function displayImages(){
   card.append(num,preview,titleEl,input,uploadLabel,feedback);root.append(card);
  });
 }
+function applyAvatarPreview(){
+ const img=$('avatarPreviewImage'),empty=$('avatarPreviewEmpty'),url=config?.images?.['0'];
+ if(url){img.src='/api/assets/0?v='+url;img.hidden=false;empty.hidden=true}else{img.hidden=true;empty.hidden=false}
+ const form=$('settingsForm'),valOf=n=>Number(form.elements.namedItem(n)?.value||0);
+ img.style.transform='translate('+valOf('appearance.offsetX')+'%,'+valOf('appearance.offsetY')+'%) scale('+valOf('appearance.scale')+')';
+}
 function updateRange(){
  const f=$('settingsForm');
  const pairs=[['fish.temperature','temperatureVal',2,''],['fish.topP','topPVal',2,''],['fish.speed','speedVal',2,'×'],['fish.volume','volumeVal',0,''],['appearance.scale','avatarScaleValue',0,' %',100],['appearance.offsetX','avatarXValue',0,' %'],['appearance.offsetY','avatarYValue',0,' %'],['lipSync.intensity','lipIntensityValue',0,' %'],['lipSync.delay','lipDelayValue',0,' ms'],['lipSync.blinkInterval','blinkValue',0,' ms'],['microphone.silenceMs','silenceValue',0,' ms']];
