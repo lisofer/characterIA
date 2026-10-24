@@ -313,3 +313,24 @@ input::placeholder,textarea::placeholder{color:#9097ae}
  .subtitle-track{min-height:46px}
 }
 @media(prefers-reduced-motion:reduce){.call-action.record.is-recording{animation:none!important}}
+
+
+/* Llamada: evita que el área del retrato colapse al calcular altura flexible */
+.call-scene{flex:1 1 auto;min-height:290px}
+.call-persona{flex:1 1 auto;min-height:220px;align-items:stretch;display:flex}
+.call-persona .avatar-button{height:auto!important;min-height:220px!important;align-self:stretch;flex:1 1 auto!important;display:block;position:relative}
+.call-persona .avatar-button img:not([hidden]){display:block!important;visibility:visible;opacity:1}
+.call-persona .avatar-button img{width:100%!important;height:100%!important;object-fit:contain!important;object-position:bottom center!important}
+.call-persona .avatar-fallback:not([hidden]){display:grid!important;position:absolute;bottom:10px;left:50%;transform:translateX(-50%)}
+.call-action.hangup svg{fill:none!important;stroke:#fff!important;stroke-width:2.2!important;transform:rotate(135deg)}
+.call-action.hangup svg path{fill:none!important;stroke:currentColor!important}
+@media(max-width:600px){
+ .call-scene{min-height:270px}
+ .call-persona{min-height:190px}
+ .call-persona .avatar-button{min-height:190px!important}
+}
+@media(max-height:640px){
+ .call-scene{min-height:220px}
+ .call-persona{min-height:150px}
+ .call-persona .avatar-button{min-height:150px!important}
+}
