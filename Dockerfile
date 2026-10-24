@@ -6,6 +6,7 @@ COPY cv-asistente/package*.json ./
 RUN apk add --no-cache ffmpeg
 RUN npm install --omit=dev && npm cache clean --force
 COPY cv-asistente/ ./
+RUN npm run check && npm test
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
