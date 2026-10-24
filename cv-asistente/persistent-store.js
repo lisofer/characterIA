@@ -4,7 +4,15 @@
 const fs=require('fs');
 const path=require('path');
 const base=String(process.env.SUPABASE_URL||'').replace(/\/+$/,'');
-const key=process.env.SUPABASE_SERVICE_ROLE_KEY||'';
+const key=String(process.env.SUPABASE_SERVICE_ROLE_KEY||'').trim();
+function keyRole(){
+ if(key.startsWith('sb_secret_'))return 'secret';
+ if(key.startsWith('sb_publishable_'))return 'publishable';
+ if(key.split('.').length===3){
+  try{const info=JSON.parse(Buffer.from(key.split('.')[1],'base64url').toString());return info.role==='service_role'?'service_role':info.role==='anon'?'anon':'jwt_other'}catch{return 'jwt_invalid'}
+ }
+ return key?'unknown':'missing';
+}
 const enabled=!!(base&&key);
 const bucket=process.env.SUPABASE_BUCKET||'mi-primer-cv-privado';
 const namespace='appdata';
@@ -21,12 +29,16 @@ async function remote(method,url,body=null,contentType=null,missingOK=false){
  const h=headers();if(contentType)h['Content-Type']=contentType;
  const response=await fetch(url,{method,headers:h,body,signal:AbortSignal.timeout(20000)});
  if(missingOK&&response.status===404)return null;
- if(!response.ok){const detail=(await response.text()).slice(0,350);throw Error('Almacenamiento Supabase: '+response.status+' '+detail)}
+ if(!response.ok){const detail=(await response.text()).slice(0,350);throw Error('Almacenamiento Supabase: '+response.status+' '+detail+(response.status===400&&/row-level security policy|accessdenied|unauthorized/i.test(detail)?' | Supabase no aceptó esta petición como service_role. Verificá que la clave SECRET y la URL pertenezcan al mismo proyecto.':'') )}
  return response;
 }
 function configured(){return enabled}
 function active(){return ready}
 async function prepare(root){
+ const role=keyRole();
+ console.log('Supabase: tipo de credencial detectado:',role);
+ if(role==='publishable'||role==='anon')throw Error('Clave incorrecta para el servidor: se recibió una clave pública (publishable/anon). Render → SUPABASE_SERVICE_ROLE_KEY necesita la clave Secret sb_secret_..., NO Publishable.');
+ if(role==='jwt_other'||role==='jwt_invalid'||role==='unknown')throw Error('La clave guardada en SUPABASE_SERVICE_ROLE_KEY no parece ser una clave Secret válida ni una service_role antigua. Revisá que no hayas pegado comillas o el nombre de la clave.');
  if(process.env.CV_PERSISTENT_STORAGE==='supabase'&&!enabled)throw Error('La aplicación requiere Supabase. Comprobá SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Render.');
  if(Boolean(base)!==Boolean(key))throw Error('Configurá tanto SUPABASE_URL como SUPABASE_SERVICE_ROLE_KEY en Render');
  if(!enabled)return {enabled:false,restored:0};
