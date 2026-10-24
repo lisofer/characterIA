@@ -1,6 +1,7 @@
 'use strict';
 const express=require('express'),helmet=require('helmet'),rateLimit=require('express-rate-limit'),multer=require('multer'),PDFDocument=require('pdfkit');
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const fishVoice=require('./fish-voice');
 const cloud=require('./persistent-store');
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 
@@ -71,22 +72,16 @@ const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024
 app.post('/api/admin/images/:slot',auth,admin,upload.single('image'),asyncRoute(async(req,res)=>{const n=+req.params.slot;if(!Number.isInteger(n)||n<0||n>7||!req.file||!req.file.buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return res.status(400).json({error:'Subí una imagen PNG válida, de hasta 5 MB.'});fs.writeFileSync(path.join(DIR.assets,'state-'+n+'.png'),req.file.buffer);config.images[String(n)]=Date.now();put(configFile,config);await cloudSave('assets/state-'+n+'.png');await cloudSave('settings.json');res.json({ok:true,url:'/api/assets/'+n+'?v='+config.images[String(n)]})}));
 const voiceUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:4*1024*1024,files:1},fileFilter:(_req,file,cb)=>cb(null,['audio/mpeg','audio/mp3','audio/wav','audio/x-wav','audio/webm','audio/mp4','audio/ogg'].includes(file.mimetype))});
 app.post('/api/admin/voice-sample',auth,admin,voiceUpload.single('audio'),asyncRoute(async(req,res)=>{
- if(!req.file||req.file.size<400)return res.status(400).json({error:'Elegí un archivo de audio MP3, WAV, WEBM, M4A u OGG válido (máx. 4 MB)'});
- fs.writeFileSync(path.join(DIR.assets,'voice-sample.bin'),req.file.buffer);
- fs.writeFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),req.file.mimetype);
+ if(!req.file||req.file.size<400)return res.status(400).json({error:'Elegí un audio de voz válido (máximo 4 MB).'});
+ let clean;
+ try{clean=await fishVoice.normalizeSample(req.file.buffer)}catch(e){return res.status(422).json({error:e.message})}
+ fs.writeFileSync(path.join(DIR.assets,'voice-sample.bin'),clean.buffer);
+ fs.writeFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),clean.mime);
  await cloudSave('assets/voice-sample.bin');await cloudSave('assets/voice-sample-mime.txt');
- res.json({ok:true,name:req.file.originalname,size:req.file.size});
+ res.json({ok:true,name:req.file.originalname,size:clean.buffer.length,duration:clean.duration,normalized:true});
 }));
 app.delete('/api/admin/voice-sample',auth,admin,asyncRoute(async(_req,res)=>{for(const name of ['voice-sample.bin','voice-sample-mime.txt']){const p=path.join(DIR.assets,name);await cloudRemove('assets/'+name);if(fs.existsSync(p))fs.unlinkSync(p)}res.json({ok:true})}));
 app.get('/api/admin/voice-sample',auth,admin,(_req,res)=>{const p=path.join(DIR.assets,'voice-sample.bin');if(!fs.existsSync(p))return res.status(404).json({error:'No hay muestra de voz'});res.set('Cache-Control','no-store').type(fs.existsSync(path.join(DIR.assets,'voice-sample-mime.txt'))?fs.readFileSync(path.join(DIR.assets,'voice-sample-mime.txt'),'utf8'):'audio/mpeg').sendFile(p)});
-function fishVoiceBody(text){
- const payload={text,format:'mp3',temperature:config.fish.temperature,top_p:config.fish.topP,prosody:{speed:config.fish.speed,volume:config.fish.volume}};
- const p=path.join(DIR.assets,'voice-sample.bin');
- if(fs.existsSync(p)&&config.voiceSampleText?.trim()){
-  payload.references=[{audio:fs.readFileSync(p).toString('base64'),text:config.voiceSampleText.trim()}];
- }else if(config.fish.referenceId)payload.reference_id=config.fish.referenceId;
- return payload;
-}
 app.get('/api/student/session',auth,student,asyncRoute(async(req,res)=>{let s=getSession(req.auth.id);if(!s){s=fresh(req.auth.id);await cloudSave('sessions/'+s.id+'.json')}res.json({cv:s.cv,stage:s.stage,reviewed:s.reviewed,history:s.history.slice(-22),lastAssistant:s.lastAssistant,pdfCreated:s.pdfCreated})}));
 app.post('/api/student/reset',auth,student,asyncRoute(async(req,res)=>{const old=path.join(DIR.cvs,req.auth.id+'.pdf');if(fs.existsSync(old)){await cloudRemove('cvs/'+req.auth.id+'.pdf');fs.unlinkSync(old)}fresh(req.auth.id);await cloudSave('sessions/'+req.auth.id+'.json');res.json({ok:true})}));
 function apply(cv,updates){if(!updates||typeof updates!=='object'||Array.isArray(updates))return;for(const k of fields){if(!Object.hasOwn(updates,k))continue;const v=updates[k];if(lists.has(k)){if(Array.isArray(v))cv[k]=[...new Set(v.map(x=>clip(x,180)).filter(Boolean))].slice(0,15)}else if(v===null)cv[k]='';else if(typeof v==='string')cv[k]=clip(v,k==='profile'?550:180)}}
@@ -124,12 +119,9 @@ s.history.push({role:'user',text:message},{role:'assistant',text:reply});s.histo
 catch(e){console.error('Chat:',e.message);const temporary=/timeout|high demand|overload|503|unavailable/i.test(String(e.message))||e.name==='TimeoutError';res.status(temporary?503:(e.status||500)).json({error:temporary?'Gemini está ocupado. Podés volver a intentar la misma respuesta.':e.message||'No se pudo procesar la respuesta.',retryable:temporary})}});
 app.get('/api/student/pdf',auth,student,(req,res)=>{const s=getSession(req.auth.id);if(!s?.pdfCreated)return res.sendStatus(404);res.download(path.join(DIR.cvs,s.id+'.pdf'),'Mi-CV.pdf')});
 app.post('/api/tts',auth,student,rateLimit({windowMs:3600000,limit:70}),async(req,res)=>{const s=getSession(req.auth.id),t=clip(req.body.text,2200);if(!s||!t)return res.sendStatus(400);const allowed=t===config.introText||s.lastAssistant===t||s.history.slice(-14).some(h=>h.role==='assistant'&&h.text===t);if(!allowed)return res.sendStatus(403);if(s.usage.ttsChars+t.length>30000)return res.status(429).json({error:'Límite de voz alcanzado'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});
-try{const payload=fishVoiceBody(t);
-const r=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':'application/json',model:config.fish.model},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});
-if(!r.ok)throw Error('Fish Audio '+r.status+': '+(await r.text()).slice(0,200));
-const b=Buffer.from(await r.arrayBuffer());if(b.length<100)throw Error('No llegó audio');s.usage.ttsChars+=t.length;s.usage.ttsCalls++;save(s);await cloudSave('sessions/'+s.id+'.json');res.set('Cache-Control','no-store');res.type('audio/mpeg').send(b)}
+try{const {audio:b}=await fishVoice.synthesize(t,config,DIR.assets,process.env.FISH_API_KEY);s.usage.ttsChars+=t.length;s.usage.ttsCalls++;save(s);await cloudSave('sessions/'+s.id+'.json');res.set('Cache-Control','no-store');res.type('audio/mpeg').send(b)}
 catch(e){console.error('TTS:',e.message);res.status(502).json({error:e.message})}});
-app.post('/api/admin/preview-voice',auth,admin,rateLimit({windowMs:3600000,limit:15}),async(req,res)=>{const text=clip(req.body.text,800);if(!text)return res.status(400).json({error:'Escribí el texto de prueba'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});try{const payload=fishVoiceBody(text);const r=await fetch('https://api.fish.audio/v1/tts',{method:'POST',headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':'application/json',model:config.fish.model},body:JSON.stringify(payload),signal:AbortSignal.timeout(60000)});if(!r.ok)throw Error('Fish Audio '+r.status+': '+(await r.text()).slice(0,180));res.set('Cache-Control','no-store').type('audio/mpeg').send(Buffer.from(await r.arrayBuffer()))}catch(e){res.status(502).json({error:e.message})}});
+app.post('/api/admin/preview-voice',auth,admin,rateLimit({windowMs:3600000,limit:15}),async(req,res)=>{const text=clip(req.body.text,800);if(!text)return res.status(400).json({error:'Escribí el texto de prueba'});if(!process.env.FISH_API_KEY)return res.status(503).json({error:'Falta FISH_API_KEY'});try{const {audio}=await fishVoice.synthesize(text,config,DIR.assets,process.env.FISH_API_KEY);res.set('Cache-Control','no-store').type('audio/mpeg').send(audio)}catch(e){res.status(502).json({error:e.message})}});
 app.post('/api/student/usage',auth,student,asyncRoute(async(req,res)=>{const s=getSession(req.auth.id);if(!s)return res.sendStatus(404);const k=req.body.kind==='mic'?'micSeconds':req.body.kind==='audio'?'audioPlayedSeconds':null;if(!k)return res.sendStatus(400);s.usage[k]=Math.min(28800,(s.usage[k]||0)+limit(req.body.seconds,0,180,0));save(s);await cloudSave('sessions/'+s.id+'.json');res.json({ok:true})}));
 function listSessions(){return fs.readdirSync(DIR.sessions).filter(x=>x.endsWith('.json')).map(x=>load(path.join(DIR.sessions,x),null)).filter(Boolean).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
 app.get('/api/admin/usage',auth,admin,(_req,res)=>{const all=listSessions(),summary=all.reduce((u,s)=>{for(const k of ['geminiInputTokens','geminiOutputTokens','ttsChars','ttsCalls','audioPlayedSeconds','micSeconds'])u[k]+=s.usage[k]||0;u.pdfCount+=s.pdfCreated?1:0;return u},{sessions:all.length,pdfCount:0,geminiInputTokens:0,geminiOutputTokens:0,ttsChars:0,ttsCalls:0,audioPlayedSeconds:0,micSeconds:0});res.json({summary,sessions:all.map(s=>({id:s.id,name:s.cv.full_name||'(sin nombre)',createdAt:s.createdAt,updatedAt:s.updatedAt,stage:s.stage,pdfCreated:s.pdfCreated,usage:s.usage,elapsedMinutes:Math.max(0,Math.round((Date.parse(s.updatedAt)-Date.parse(s.createdAt))/60000))}))})});
