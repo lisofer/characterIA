@@ -66,10 +66,33 @@ async function speak(text){
 async function reportUsage(kind,seconds){if(!Number.isFinite(seconds)||seconds<=0)return;try{await api('/api/student/usage',json('POST',{kind,seconds:Math.min(seconds,180)}))}catch{}}
 function setBusy(v){busy=v;$('micButton').disabled=v;$('keyboardButton').disabled=v;$('textForm').querySelector('button').disabled=v}
 function showComplete(){const done=session?.stage==='done';$('complete').hidden=!done;$('micButton').hidden=done;$('keyboardButton').hidden=done;$('textForm').hidden=true}
-async function sendAnswer(message){message=String(message||'').trim();if(!message||busy)return;stopVoice();setBusy(true);tell('Estoy preparando la respuesta…');addLog('user',message);$('answer').value='';$('textForm').hidden=true;
-try{const data=await api('/api/student/chat',json('POST',{message}));session.stage=data.stage;session.reviewed=data.reviewed;session.cv=data.cv;session.history.push({role:'user',text:message},{role:'assistant',text:data.reply});updateSubtitle(data.reply);if(data.download){showComplete();const anchor=document.createElement('a');anchor.href='/api/student/pdf';anchor.download='Mi-CV.pdf';document.body.append(anchor);anchor.click();anchor.remove();tell('CV generado. Si la descarga no comienza, usá «Descargar mi CV».')}else tell('Podés contestar hablando o escribiendo.');speak(data.reply)}
-catch(e){tell(e.message);addLog('assistant','No pude procesar esa respuesta. Podés intentarlo nuevamente.')}
-finally{setBusy(false)}}
+let pendingAnswer='',pendingLogged=false;
+async function sendAnswer(message,retrying=false){
+ message=String(message||'').trim();if(!message||busy)return;
+ stopVoice();setBusy(true);tell('Consultando a Gemini…');
+ if(!retrying){addLog('user',message);pendingLogged=true}
+ pendingAnswer=message;$('retryPanel').hidden=true;$('textForm').hidden=true;
+ try{
+  const data=await api('/api/student/chat',json('POST',{message}));
+  pendingAnswer='';pendingLogged=false;$('retryPanel').hidden=true;$('answer').value='';
+  session.stage=data.stage;session.reviewed=data.reviewed;session.cv=data.cv;
+  session.history.push({role:'user',text:message},{role:'assistant',text:data.reply});
+  updateSubtitle(data.reply);
+  if(data.download){
+   showComplete();const anchor=document.createElement('a');anchor.href='/api/student/pdf';anchor.download='Mi-CV.pdf';
+   document.body.append(anchor);anchor.click();anchor.remove();tell('CV generado. Si no se descarga automáticamente, tocá «Descargar mi CV».');
+  }else tell('Podés continuar hablando o escribiendo.');
+  speak(data.reply);
+ }catch(e){
+  const friendly=e.message||'No se pudo conectar con Gemini.';
+  tell('No se pudo obtener una respuesta, pero conservamos lo que dijiste.');
+  $('retryMessage').textContent=friendly+' Tu respuesta sigue disponible para reintentar o modificar.';
+  $('retryPanel').hidden=false;
+  $('answer').value=message;
+  $('textForm').hidden=false;
+  $('answer').focus({preventScroll:true});
+ }finally{setBusy(false)}
+}
 function inputMode(){if(session?.stage==='done')return;const form=$('textForm');form.hidden=!form.hidden;if(!form.hidden){$('answer').focus();tell('Escribí tu respuesta y tocá Enviar.')}else tell('Podés usar el micrófono.')}
 
 function finishMic(id){
@@ -129,6 +152,7 @@ function startListening(){
 async function loadStudent(){config=await api('/api/bootstrap');session=await api('/api/student/session');$('appTitle').textContent=config.title;document.title=config.title;$('duration').textContent='Unos '+config.durationMinutes+' minutos';loginView.hidden=true;studentView.hidden=false;$('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);const text=session.lastAssistant||config.introText;updateSubtitle(text,!(session.history||[]).length);showComplete();preloadSprites();applyAppearance();animate();if(session.stage!=='done'){tell('Tocá el micrófono para hablar, o el teclado para escribir.');speak(text)}else tell('Tu CV está listo para descargar.')}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/api/login',json('POST',{role:'student',password:$('accessKey').value}));await loadStudent()}catch(err){$('loginError').textContent=err.message}});
 $('textForm').addEventListener('submit',e=>{e.preventDefault();sendAnswer($('answer').value)});
+$('retryButton').addEventListener('click',()=>sendAnswer(pendingAnswer||$('answer').value,true));
 $('keyboardButton').addEventListener('click',inputMode);
 $('micButton').addEventListener('click',startListening);
 $('avatarButton').addEventListener('click',()=>{if(!busy){const t=lastPrompt||config?.introText;if(t)speak(t)}});
