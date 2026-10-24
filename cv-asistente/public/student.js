@@ -261,11 +261,12 @@ function startRecognition(source){
   const canSend=source==='audio'?true:hadText;
   finishRecognition(seq,canSend);
   if(source==='call'&&!hadText){
-   restartCount++;
-   if(restartCount>8){hasSpeechError=true;tell('El micrófono se detuvo repetidas veces. Tocá «Volver al modo llamada» para activarlo.');$('returnCallButton').hidden=false}
+   // Chrome puede cerrar reconocimiento durante silencios normales.
+   // Seguimos escuchando con una pausa breve para cuidar batería.
+   restartCount=Math.min(12,restartCount+1);
   }
  };
- try{r.start();restartCount=0;
+ try{r.start();
   if(source==='call')tell('Te escucho · hablá cuando quieras');
   else tell('Grabando audio · soltá para enviar');
  }catch(e){cancelRecognition();hasSpeechError=true;tell('Chrome necesita que habilites el micrófono. Tocá «Volver al modo llamada».');$('returnCallButton').hidden=false}
