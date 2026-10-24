@@ -55,9 +55,13 @@ function displayImages(){
   card.append(num,preview,titleEl,input,uploadLabel,feedback);root.append(card);
  });
 }
-function updateRange(){for(const [name,out] of [['fish.temperature','temperatureVal'],['fish.topP','topPVal'],['fish.speed','speedVal'],['fish.volume','volumeVal']]){$(out).textContent=Number($('settingsForm').elements.namedItem(name).value).toFixed(out==='volumeVal'?0:2)}}
-function setConfig(c){config=c;const form=$('settingsForm');for(const name of ['title','characterName','durationMinutes','introText','personality','pedagogy','geminiModel'])val(form,name,c[name]);for(const name of ['model','referenceId','temperature','topP','speed','volume'])val(form,'fish.'+name,c.fish?.[name]);for(const name of ['accent','style'])val(form,'template.'+name,c.template?.[name]);$('apiStatus').textContent='Variables en Render: Gemini '+(c.env.gemini?'configurada':'sin configurar')+' · Fish '+(c.env.fish?'configurada':'sin configurar')+'. Las claves permanecen en el servidor.';displayImages();updateRange()}
-function collect(){const f=$('settingsForm');const g=name=>f.elements.namedItem(name).value;return{title:g('title'),characterName:g('characterName'),durationMinutes:Number(g('durationMinutes')),introText:g('introText'),personality:g('personality'),pedagogy:g('pedagogy'),geminiModel:g('geminiModel'),fish:{model:g('fish.model'),referenceId:g('fish.referenceId'),temperature:Number(g('fish.temperature')),topP:Number(g('fish.topP')),speed:Number(g('fish.speed')),volume:Number(g('fish.volume'))},template:{accent:g('template.accent'),style:g('template.style')}}}
+function updateRange(){
+ const f=$('settingsForm');
+ const pairs=[['fish.temperature','temperatureVal',2,''],['fish.topP','topPVal',2,''],['fish.speed','speedVal',2,'×'],['fish.volume','volumeVal',0,''],['appearance.scale','avatarScaleValue',0,' %',100],['appearance.offsetX','avatarXValue',0,' %'],['appearance.offsetY','avatarYValue',0,' %'],['lipSync.intensity','lipIntensityValue',0,' %'],['lipSync.delay','lipDelayValue',0,' ms'],['lipSync.blinkInterval','blinkValue',0,' ms'],['microphone.silenceMs','silenceValue',0,' ms']];
+ for(const [name,id,precision,suffix,mult=1] of pairs){const el=f.elements.namedItem(name);if(!el||!$(id))continue;$(id).textContent=(Number(el.value)*mult).toFixed(precision)+suffix}
+}
+function setConfig(c){config=c;const form=$('settingsForm');for(const name of ['title','characterName','durationMinutes','introText','personality','pedagogy','geminiModel'])val(form,name,c[name]);for(const name of ['model','referenceId','temperature','topP','speed','volume'])val(form,'fish.'+name,c.fish?.[name]);for(const name of ['accent','style'])val(form,'template.'+name,c.template?.[name]);$('apiStatus').textContent='Variables en Render: Gemini '+(c.env.gemini?'configurada':'sin configurar')+' · Fish '+(c.env.fish?'configurada':'sin configurar')+'. Las claves permanecen en el servidor.';for(const k of ['scale','offsetX','offsetY'])val(form,'appearance.'+k,c.appearance?.[k]);for(const k of ['intensity','delay','blinkInterval'])val(form,'lipSync.'+k,c.lipSync?.[k]);form.elements.namedItem('lipSync.blink').checked=c.lipSync?.blink!==false;for(const k of ['silenceMs','language'])val(form,'microphone.'+k,c.microphone?.[k]);val(form,'voiceSampleText',c.voiceSampleText);$('voiceSampleStatus').textContent=c.hasVoiceSample?'Muestra de voz guardada en el servidor.':'Sin muestra de voz cargada.';displayImages();updateRange()}
+function collect(){const f=$('settingsForm');const g=name=>f.elements.namedItem(name).value;return{title:g('title'),characterName:g('characterName'),durationMinutes:Number(g('durationMinutes')),introText:g('introText'),personality:g('personality'),pedagogy:g('pedagogy'),geminiModel:g('geminiModel'),fish:{model:g('fish.model'),referenceId:g('fish.referenceId'),temperature:Number(g('fish.temperature')),topP:Number(g('fish.topP')),speed:Number(g('fish.speed')),volume:Number(g('fish.volume'))},template:{accent:g('template.accent'),style:g('template.style')},appearance:{scale:Number(g('appearance.scale')),offsetX:Number(g('appearance.offsetX')),offsetY:Number(g('appearance.offsetY'))},lipSync:{intensity:Number(g('lipSync.intensity')),delay:Number(g('lipSync.delay')),blinkInterval:Number(g('lipSync.blinkInterval')),blink:f.elements.namedItem('lipSync.blink').checked},microphone:{silenceMs:Number(g('microphone.silenceMs')),language:g('microphone.language')},voiceSampleText:g('voiceSampleText')}}
 function cell(label,value){const d=document.createElement('div');d.textContent=label+': '+value;return d}
 function minutes(n){return (Number(n||0)/60).toFixed(1)+' min'}
 async function showUsage(){try{const data=await api('/api/admin/usage');const v=data.summary;const s=$('usageSummary');s.replaceChildren(cell('Entrevistas',v.sessions),cell('CV generados',v.pdfCount),cell('Audio reproducido (informado por navegador)',minutes(v.audioPlayedSeconds)),cell('Micrófono (informado por navegador)',minutes(v.micSeconds)),cell('Caracteres Fish TTS',v.ttsChars.toLocaleString('es-AR')),cell('Llamadas Fish',v.ttsCalls),cell('Tokens Gemini entrada',v.geminiInputTokens.toLocaleString('es-AR')),cell('Tokens Gemini salida',v.geminiOutputTokens.toLocaleString('es-AR')));
@@ -68,8 +72,31 @@ const del=document.createElement('button');del.className='secondary';del.type='b
 catch(e){$('sessionsList').textContent='No se pudieron cargar los registros: '+e.message}}
 async function openPanel(){const c=await api('/api/admin/config');$('adminLogin').hidden=true;$('adminPanel').hidden=false;setConfig(c);$('shareLink').value=location.origin+'/';await showUsage()}
 $('adminLoginForm').addEventListener('submit',async e=>{e.preventDefault();$('adminLoginError').textContent='';try{await api('/api/login',json('POST',{role:'admin',password:$('adminPassword').value}));await openPanel()}catch(err){$('adminLoginError').textContent=err.message}});
-$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();$('saveStatus').textContent='Guardando…';try{const d=await api('/api/admin/config',json('PUT',collect()));config={...d.config,env:config.env};$('saveStatus').textContent='Configuración guardada correctamente (almacenamiento temporal de Render Free)';setTimeout(()=>{$('saveStatus').textContent=''},5000)}catch(err){$('saveStatus').textContent=err.message}});
-for(const name of ['fish.temperature','fish.topP','fish.speed','fish.volume'])$('settingsForm').elements.namedItem(name).addEventListener('input',updateRange);
+$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();$('saveStatus').textContent='Guardando…';try{const d=await api('/api/admin/config',json('PUT',collect()));config={...d.config,env:config.env,hasVoiceSample:config.hasVoiceSample};$('saveStatus').textContent='Configuración guardada correctamente (almacenamiento temporal de Render Free)';setTimeout(()=>{$('saveStatus').textContent=''},5000)}catch(err){$('saveStatus').textContent=err.message}});
+for(const name of ['fish.temperature','fish.topP','fish.speed','fish.volume','appearance.scale','appearance.offsetX','appearance.offsetY','lipSync.intensity','lipSync.delay','lipSync.blinkInterval','microphone.silenceMs'])$('settingsForm').elements.namedItem(name).addEventListener('input',updateRange);
+$('resetAppearance').addEventListener('click',()=>{for(const [key,v] of [['scale',1],['offsetX',0],['offsetY',0]])val($('settingsForm'),'appearance.'+key,v);updateRange()});
+$('uploadVoiceSample').addEventListener('click',async()=>{
+ const file=$('voiceSampleFile').files?.[0];
+ if(!file){$('voiceSampleStatus').textContent='Elegí primero un archivo de audio.';return}
+ if(file.size>4*1024*1024){$('voiceSampleStatus').textContent='La muestra debe ocupar menos de 4 MB.';return}
+ $('voiceSampleStatus').textContent='Subiendo muestra…';
+ try{const fd=new FormData();fd.append('audio',file);const info=await api('/api/admin/voice-sample',{method:'POST',body:fd});
+ config.hasVoiceSample=true;$('voiceSampleStatus').textContent='Muestra guardada: '+info.name+' · '+(info.size/1024).toFixed(0)+' KB. Guardá también la transcripción.'}
+ catch(e){$('voiceSampleStatus').textContent='Error al subir: '+e.message}
+});
+$('listenVoiceSample').addEventListener('click',async()=>{
+ const a=$('voiceSampleAudio');
+ if(a.dataset.blobUrl)URL.revokeObjectURL(a.dataset.blobUrl);
+ const file=$('voiceSampleFile').files?.[0];
+ if(file){a.src=URL.createObjectURL(file);a.dataset.blobUrl=a.src}
+ else{const r=await fetch('/api/admin/voice-sample');if(!r.ok){$('voiceSampleStatus').textContent='No hay ninguna muestra guardada.';return}a.src=URL.createObjectURL(await r.blob());a.dataset.blobUrl=a.src}
+ a.hidden=false;try{await a.play()}catch(e){$('voiceSampleStatus').textContent='Tocá el reproductor para escuchar la muestra.'}
+});
+$('deleteVoiceSample').addEventListener('click',async()=>{
+ if(!confirm('¿Eliminar la muestra de voz del servidor?'))return;
+ try{await api('/api/admin/voice-sample',{method:'DELETE'});config.hasVoiceSample=false;$('voiceSampleStatus').textContent='Muestra eliminada.'; $('voiceSampleFile').value='';}
+ catch(e){$('voiceSampleStatus').textContent=e.message}
+});
 $('refreshUsage').addEventListener('click',showUsage);
 $('testVoice').addEventListener('click',async()=>{const btn=$('testVoice');btn.disabled=true;$('previewStatus').textContent='Generando audio…';try{const r=await fetch('/api/admin/preview-voice',json('POST',{text:$('previewText').value}));if(!r.ok)throw Error((await r.json().catch(()=>({}))).error||'Falló Fish');const audio=$('previewAudio');if(audio.dataset.blobUrl)URL.revokeObjectURL(audio.dataset.blobUrl);audio.src=URL.createObjectURL(await r.blob());audio.dataset.blobUrl=audio.src;audio.hidden=false;await audio.play();$('previewStatus').textContent='Voz de prueba generada con la configuración guardada.'}catch(e){$('previewStatus').textContent=e.message}finally{btn.disabled=false}});
 $('copyLink').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('shareLink').value);$('copyLink').textContent='Enlace copiado';setTimeout(()=>$('copyLink').textContent='Copiar enlace',1800)}catch{$('shareLink').select()}});
