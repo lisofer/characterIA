@@ -11,7 +11,7 @@ async function api(path,options={}){
 }
 let config=null,session=null,mode='call',busy=false,ended=false;
 let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0;
-let recognition=null,recognitionSeq=0,recognitionTimer=null,holdActive=false,micStarted=0,micDraft='',lastSnapshot='',silenceTimer=null,recognitionStopped=false,stoppingForRequest=false,restartCount=0;
+let recognition=null,recognitionSeq=0,recognitionTimer=null,holdActive=false,micStarted=0,micDraft='',holdAccumulated='',lastSnapshot='',silenceTimer=null,recognitionStopped=false,stoppingForRequest=false,restartCount=0;
 let requestController=null,requestVersion=0,pendingAnswer='',hasSpeechError=false,audioPermissionBlocked=false,callReady=false;
 const sprites=[];
 function tell(t){statusEl.textContent=t||''}
@@ -157,7 +157,7 @@ function ui(){
  $('micButton').setAttribute('aria-pressed',String(holdActive));
  $('keyboardButton').classList.toggle('is-selected',isKeyboard);
  $('textForm').hidden=!isKeyboard||isEnded||session?.stage==='done';
- $('returnCallButton').hidden=isCall||isEnded||session?.stage==='done';
+ $('returnCallButton').hidden=(isCall&&!hasSpeechError)||isEnded||session?.stage==='done';
  $('callEnded').hidden=!isEnded||session?.stage==='done';
  $('complete').hidden=session?.stage!=='done';
  $('callActions').hidden=session?.stage==='done'||isEnded;
@@ -172,13 +172,7 @@ function cancelRecognition(){
   try{previous.abort()}catch{}
  }
 }
-function cleanTranscript(raw){
- // SpeechRecognition sends the ENTIRE hypothesis again each time; never append
- // consecutive result-event snapshots. Collapse unstable excessive stutters.
- let t=String(raw||'').replace(/\s+/g,' ').trim();
- t=t.replace(/\b([\p{L}]{2,})(?:\s+\1){3,}\b/giu,'$1 $1');
- return t.slice(0,850);
-}
+function cleanTranscript(raw){return window.SpeechInput?.dedupe(raw)||String(raw||'').trim().slice(0,850)}
 function echoesAssistant(t){
  if(!speechActive||!lastAssistant)return false;
  const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9áéíóúñ\s]/g,' ').replace(/\s+/g,' ').trim();
@@ -192,9 +186,9 @@ function echoesAssistant(t){
 }
 function finishRecognition(seq,send=true){
  if(seq!==recognitionSeq)return;
- const answer=cleanTranscript(micDraft);
+ const answer=cleanTranscript(mode==='audio'?[holdAccumulated,micDraft].filter(Boolean).join(' '):micDraft);
  const elapsed=(Date.now()-micStarted)/1000;
- cancelRecognition();holdActive=false;
+ cancelRecognition();holdActive=false;holdAccumulated='';
  if(elapsed>0)reportUsage('mic',elapsed);
  ui();
  if(!send||mode==='ended'||session?.stage==='done')return;
@@ -227,9 +221,7 @@ function startRecognition(source){
   if(seq!==recognitionSeq||mode!==source||busy)return;
   // Build one snapshot from the CURRENT recognition result list, replacing interim
   // alternatives rather than accumulating them with each onresult event.
-  const parts=[];
-  for(let i=0;i<event.results.length;i++)if(event.results[i]?.[0]?.transcript)parts.push(event.results[i][0].transcript);
-  const snapshot=cleanTranscript(parts.join(' '));
+  const snapshot=window.SpeechInput?.snapshot(event.results)||cleanTranscript(Array.from(event.results||[],x=>x?.[0]?.transcript||'').join(' '));
   if(!snapshot||snapshot===lastSnapshot)return;
   if(source==='call'&&echoesAssistant(snapshot))return;
   lastSnapshot=snapshot;micDraft=snapshot;
@@ -260,6 +252,12 @@ function startRecognition(source){
  r.onend=()=>{
   if(seq!==recognitionSeq)return;
   const hadText=!!micDraft;
+  if(source==='audio'&&holdActive&&!hasSpeechError){
+   if(hadText)holdAccumulated=cleanTranscript([holdAccumulated,micDraft].filter(Boolean).join(' '));
+   cancelRecognition();
+   if(holdActive)setTimeout(()=>{if(holdActive&&mode==='audio'&&!recognition)startRecognition('audio')},130);
+   return;
+  }
   const canSend=source==='audio'?true:hadText;
   finishRecognition(seq,canSend);
   if(source==='call'&&!hadText){
@@ -275,7 +273,7 @@ function startRecognition(source){
 function switchMode(next){
  if(session?.stage==='done'||ended)return;
  cancelRecognition();
- mode=next;holdActive=false;hasSpeechError=false;restartCount=0;
+ mode=next;holdActive=false;holdAccumulated='';hasSpeechError=false;restartCount=0;
  ui();
  if(next==='keyboard'){$('answer').focus({preventScroll:true});tell('Escribí tu respuesta. El micrófono está apagado.')}
  else if(next==='audio')tell('Mantené pulsado el botón naranja para hablar. Al soltar, envío tu audio.');
@@ -286,7 +284,7 @@ function beginHold(event){
  if(event.type==='pointerdown'&&event.button!==0)return;
  if(event.cancelable)event.preventDefault();
  if(mode!=='audio')switchMode('audio');
- holdActive=true;hasSpeechError=false;ui();
+ holdAccumulated='';holdActive=true;hasSpeechError=false;ui();
  if(event.pointerId!==undefined)try{$('micButton').setPointerCapture(event.pointerId)}catch{}
  if(speechActive)stopVoice();
  startRecognition('audio');
@@ -297,9 +295,10 @@ function endHold(event){
  holdActive=false;
  const seq=recognitionSeq;
  if(recognition){tell('Procesando tu audio…');try{recognition.stop()}catch{finishRecognition(seq)}}
+ else if(holdAccumulated){const answer=cleanTranscript(holdAccumulated);holdAccumulated='';if(answer)sendAnswer(answer);else{tell('No escuché una respuesta.');ui()}}
  else{tell('Tocá y mantené pulsado un momento para grabar.');ui()}
 }
-function cancelHold(){if(!holdActive)return;holdActive=false;cancelRecognition();ui();tell('Se canceló el audio. Podés volver a grabarlo.')}
+function cancelHold(){if(!holdActive)return;holdActive=false;holdAccumulated='';cancelRecognition();ui();tell('Se canceló el audio. Podés volver a grabarlo.')}
 function beginHangup(){
  if(ended||session?.stage==='done')return;
  mode='ended';ended=true;
