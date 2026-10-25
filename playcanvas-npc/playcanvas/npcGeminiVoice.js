@@ -219,13 +219,18 @@ NpcGeminiVoice.prototype.reset = async function () {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ type: 'reset' }));
         } else {
-            // An empty Live connection is currently used to authenticate a reset.
-            // The next iteration will use a dedicated short-lived HTTP reset ticket.
+            // Reset with one HTTP request; no Live audio session is consumed.
             var ticket = await this._ticket();
-            var self = this;
-            this.ws = new WebSocket(ticket.backend.replace(/^http/, 'ws') + '/live?token=' + encodeURIComponent(ticket.token));
-            this.ws.onmessage = function (event) { self._handle(JSON.parse(event.data)); };
-            this.ws.onerror = function () { self.waitingReset = false; self._status('No se pudo restablecer: servidor inaccesible'); };
+            var response = await fetch(ticket.backend + '/api/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: ticket.token })
+            });
+            var result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'No se pudo restablecer');
+            this.waitingReset = false;
+            this.transcriptEl.replaceChildren();
+            this._status('✓ NPC restablecido. Su personalidad sigue intacta.');
         }
     } catch (e) { this.waitingReset = false; this._status('Error: ' + e.message); }
 };
