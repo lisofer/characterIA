@@ -109,6 +109,20 @@ app.post('/api/session', async (req, res) => {
   res.json({ token, expiresInSeconds: 300 });
 });
 
+app.post('/api/reset', async (req, res) => {
+  // A single-use short-lived ticket is enough to reset the player's own NPC.
+  // Does not open Gemini Live or consume an audio session.
+  if (!allowedOrigin(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido' });
+  const token = req.body?.token;
+  const ticket = issued.get(token);
+  if (!ticket || ticket.expires < Date.now()) return res.status(401).json({ error: 'Ticket vencido' });
+  issued.delete(token);
+  const ws = active.get(activeKey(ticket.npcId, ticket.playerId));
+  if (ws) { ws.npcReset = true; ws.close(1000, 'NPC reseteado'); }
+  try { await store.reset(ticket.npcId, ticket.playerId); res.json({ ok: true }); }
+  catch (err) { jsonError(res, err); }
+});
+
 app.get('/api/admin/npcs', admin, async (_req, res) => res.json(await store.getProfiles()));
 app.get('/api/admin/memory/:npcId/:playerId', admin, async (req, res) => {
   if (!validId(req.params.npcId) || !validId(req.params.playerId)) return res.sendStatus(400);
