@@ -1,0 +1,22 @@
+name: NPC PlayCanvas - pruebas
+on:
+  push:
+    branches: [feature/playcanvas-npc-live]
+    paths: ['playcanvas-npc/**', '.github/workflows/playcanvas-npc.yml']
+  pull_request:
+    paths: ['playcanvas-npc/**', '.github/workflows/playcanvas-npc.yml']
+jobs:
+  node-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: playcanvas-npc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: node --check server.js
+      - run: node --check playcanvas/npcGeminiVoice.js
