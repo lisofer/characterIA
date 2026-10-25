@@ -378,3 +378,44 @@ input::placeholder,textarea::placeholder{color:#9097ae}
   .call-scene .subtitle-track p{font-size:16px;line-height:1.38}
 }
 @media(max-height:730px){.call-scene .subtitle-track{min-height:114px;padding:9px 13px}}
+
+
+/* Diseño final de subtítulos: franja delgada de dos renglones, con corte entre palabras */
+.call-scene .caption-area{gap:5px;max-width:760px;padding:0}
+.call-scene .subtitle-track{
+  min-height:62px!important;
+  height:auto!important;
+  max-height:none!important;
+  border-radius:15px;
+  padding:8px 14px!important;
+  align-items:center;
+}
+.call-scene .subtitle-track p{
+  font-size:clamp(15px,2.7vw,18px)!important;
+  line-height:1.34!important;
+  white-space:pre-line!important;
+  word-break:normal!important;
+  overflow-wrap:normal!important;
+  text-align:left!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+}
+.call-actions{gap:clamp(8px,2.5vw,25px)!important;justify-content:space-evenly!important;max-width:490px;margin:0 auto}
+.call-action-item{flex:0 0 auto;min-width:0}
+.call-action{width:clamp(57px,13vw,69px)!important;height:clamp(57px,13vw,69px)!important;border-radius:21px}
+.call-action .call-emoji{display:inline-flex;align-items:center;justify-content:center;font-size:31px;line-height:1;transform:none!important}
+.call-action.hangup svg{display:none!important}
+.call-action.restart{background:linear-gradient(135deg,#7d77b6,#5b588d);box-shadow:0 8px 22px #28204754}
+.call-action.restart .call-emoji{font-size:28px}
+.call-action.hangup{background:#ef4867}
+@media(max-width:600px){
+ .call-scene .subtitle-track{min-height:58px!important;padding:8px 12px!important}
+ .call-scene .subtitle-track p{font-size:16px!important;line-height:1.32!important}
+ .call-actions{gap:8px!important}
+ .call-action{width:59px!important;height:59px!important;border-radius:19px}
+ .call-action .call-emoji{font-size:29px}
+ .call-action.restart .call-emoji{font-size:27px}
+ .call-controls{padding:9px 10px max(10px,env(safe-area-inset-bottom))}
+ .call-action-item{font-size:10px;gap:5px}
+}
+@media(max-height:700px){.call-scene .subtitle-track{min-height:54px!important}}
