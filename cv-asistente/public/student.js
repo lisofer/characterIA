@@ -10,10 +10,11 @@ async function api(path,options={}){
  return body;
 }
 let config=null,session=null,mode='call',busy=false,ended=false;
-let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0,voiceWatchdog=null,voiceBlobUrl=null,voiceIsBuffering=false;
+let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0,voiceWatchdog=null,voiceBlobUrl=null,voiceIsBuffering=false,voiceFetchController=null;
 let recognition=null,recognitionSeq=0,recognitionTimer=null,holdActive=false,micStarted=0,micDraft='',holdAccumulated='',lastSnapshot='',silenceTimer=null,recognitionStopped=false,stoppingForRequest=false,restartCount=0;
 let requestController=null,requestVersion=0,pendingAnswer='',hasSpeechError=false,audioPermissionBlocked=false,callReady=false;
 const sprites=[];
+let subtitleMeasureCtx=null;
 function tell(t){statusEl.textContent=t||''}
 function setSubtitle(text){
  text=String(text||'');
@@ -65,8 +66,14 @@ function animate(){
   const blinking=config?.lipSync?.blink!==false&&now<blinkUntil;
   imageState(mouth+(blinking?1:0));
   $('fallbackMouth').textContent=talking?(mouth===4?'O':mouth===6?'—':mouth?'◯':'—'):'ᴗ';
-  if(talking&&window.PersonaLipSync){
-   const current=window.PersonaLipSync.caption(speechPlan,elapsed,total);
+  if(talking&&window.PersonaLipSync?.subtitleAt){
+   const text=subtitle;
+   const track=text.parentElement;
+   const usableWidth=Math.max(140,(track?.clientWidth||340)-34);
+   const style=getComputedStyle(text);
+   const context=subtitleMeasureCtx||(subtitleMeasureCtx=document.createElement('canvas').getContext('2d'));
+   context.font=style.font;
+   const current=window.PersonaLipSync.subtitleAt(speechPlan,elapsed,total,Math.round(usableWidth/6)*6,s=>context.measureText(s).width);
    if(current)setSubtitle(current);
   }
   avatarLoop=requestAnimationFrame(loop);
@@ -76,6 +83,7 @@ function animate(){
 function stopVoice(){
  voiceToken++;
  clearTimeout(voiceWatchdog);voiceWatchdog=null;voiceIsBuffering=false;
+ if(voiceFetchController){voiceFetchController.abort();voiceFetchController=null}
  speechActive=false;speechPlan=null;
  if(voiceAudio){
   const old=voiceAudio;voiceAudio=null;
@@ -110,88 +118,96 @@ function afterSpeaking(){
  else tell('Mantené pulsado el micrófono para enviar un audio.');
 }
 function speak(text,kind='last'){
- if(!text||ended&&kind!=='farewell')return;
+ if(!text||(ended&&kind!=='farewell'))return;
  stopVoice();
- // El reconocedor no debe escuchar mientras Fish está cargando o reproduciendo
- // una respuesta: de otro modo reenvía la voz del asistente como si fuera del alumno.
  cancelRecognition();
  const token=voiceToken;
  speechPlan=window.PersonaLipSync?.build(text)||null;
  voiceKind=kind;voiceIsBuffering=true;
- setSubtitle('');tell('Conectando la voz del asistente…');
+ setSubtitle('');tell('Preparando voz Fish…');
  const audio=new Audio();
  voiceAudio=audio;audio.preload='auto';
- let retryingWithBlob=false,played=false;
+ const aborter=new AbortController();
+ voiceFetchController=aborter;
+ let attempt=0,completed=false,blocked=false;
+ const shouldContinue=()=>token===voiceToken&&!completed;
  function onPlayable(){
-  if(token!==voiceToken)return;
-  played=true;clearTimeout(voiceWatchdog);voiceWatchdog=null;
+  if(!shouldContinue())return;
   voiceIsBuffering=false;speechActive=true;audioPermissionBlocked=false;
   $('activateAudioButton').hidden=true;
-  tell(kind==='farewell'?'Despedida en curso…':'El asistente está hablando. Tocá el personaje para interrumpirlo.');
+  tell(kind==='farewell'?'Despidiéndose…':'El asistente está hablando · voz Fish');
  }
- function useDeviceVoice(reason){
-  if(token!==voiceToken||audio.dataset.fallback==='device')return;
-  clearTimeout(voiceWatchdog);voiceWatchdog=null;
-  console.warn('Audio de Fish no disponible:',reason);
-  audio.dataset.fallback='device';voiceIsBuffering=false;speechActive=false;
-  try{audio.pause();audio.removeAttribute('src');audio.load()}catch{}
-  tell('Reproduciendo la voz del dispositivo porque Fish no respondió.');
+ function useDeviceVoice(error){
+  if(!shouldContinue())return;
+  completed=true;
+  // Only after Fish has conclusively failed. Stop MP3 first and ignore
+  // every pending callback; never play two voices simultaneously.
+  try{audio.pause();audio.onerror=null;audio.onended=null;audio.removeAttribute('src');audio.load()}catch{}
+  if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
+  voiceIsBuffering=false;speechActive=false;
+  console.warn('Fish falló definitivamente, se usa voz local:',String(error||'').slice(0,120));
+  tell('Fish no está disponible. Se usará la voz del dispositivo.');
   nativeVoice(text,token);
  }
- async function retryNormalAudio(reason){
-  if(token!==voiceToken||retryingWithBlob)return;
-  retryingWithBlob=true;
-  clearTimeout(voiceWatchdog);voiceWatchdog=null;
-  // Fallback a la ruta probada de MP3 completo cuando Android no reproduce
-  // el streaming sin Content-Length. Se conserva Fish y su referencia de voz.
-  tell('Reintentando la voz…');
+ async function playFish(){
   try{
-   audio.pause();audio.removeAttribute('src');audio.load();
-   const response=await fetch('/api/tts',json('POST',{text}));
-   if(!response.ok)throw Error((await response.json().catch(()=>({}))).error||'Error Fish '+response.status);
-   const blob=await response.blob();
-   if(token!==voiceToken)return;
-   if(blob.size<100)throw Error('Audio Fish vacío');
-   voiceBlobUrl=URL.createObjectURL(blob);
-   audio.src=voiceBlobUrl;
-   await audio.play();
+   for(attempt=1;attempt<=2;attempt++){
+    if(!shouldContinue())return;
+    tell(attempt===1?'Preparando voz Fish…':'Reintentando voz Fish…');
+    const response=await fetch('/api/tts',{...json('POST',{text}),signal:aborter.signal});
+    if(!shouldContinue())return;
+    if(!response.ok){
+     const detail=await response.json().catch(()=>({}));
+     const e=new Error(detail.error||'Fish respondió '+response.status);
+     if(attempt===1&&response.status>=500)continue;
+     throw e;
+    }
+    const blob=await response.blob();
+    if(!shouldContinue())return;
+    if(blob.size<100)throw new Error('Fish devolvió audio vacío');
+    if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
+    voiceBlobUrl=URL.createObjectURL(blob);
+    audio.onerror=()=>{if(shouldContinue()){audio.onerror=null;useDeviceVoice('Chrome no pudo decodificar MP3 de Fish')}};
+    audio.src=voiceBlobUrl;
+    audio.load();
+    try{
+     await audio.play();
+     return;
+    }catch(e){
+     if(!shouldContinue())return;
+     if(e.name==='NotAllowedError'){
+      // Permission denial is not a Fish failure; do not invoke native TTS.
+      blocked=true;audioPermissionBlocked=true;voiceIsBuffering=false;
+      $('activateAudioButton').hidden=false;
+      tell('Tocá «Activar sonido» para escuchar Fish.');
+      return;
+     }
+     if(e.name==='AbortError'&&attempt===1)continue;
+     throw e;
+    }
+   }
+   useDeviceVoice('Fish agotó dos intentos');
   }catch(e){
-   if(token!==voiceToken)return;
-   if(e.name==='NotAllowedError'){
-    audioPermissionBlocked=true;
-    $('activateAudioButton').hidden=false;
-    tell('Chrome necesita que toques «Activar sonido» para reproducir.');
-   }else useDeviceVoice(e.message||reason);
+   if(!shouldContinue()||e.name==='AbortError'&&aborter.signal.aborted)return;
+   useDeviceVoice(e.message);
   }
  }
  audio.onplaying=onPlayable;
  audio.onended=()=>{
-  if(token!==voiceToken)return;
-  clearTimeout(voiceWatchdog);
-  const duration=audio.duration;
-  if(Number.isFinite(duration))reportUsage('audio',duration);
+  if(!shouldContinue())return;
+  completed=true;
+  const seconds=audio.duration;
+  if(Number.isFinite(seconds))reportUsage('audio',seconds);
   speechActive=false;voiceIsBuffering=false;
   afterSpeaking();
  };
- audio.onerror=()=>{if(token!==voiceToken)return;if(!retryingWithBlob)retryNormalAudio('streaming');else useDeviceVoice('audio MP3')};
- audio.src='/api/tts-stream?kind='+encodeURIComponent(kind)+'&v='+Date.now();
- voiceWatchdog=setTimeout(()=>{if(token===voiceToken&&!played&&!audioPermissionBlocked)retryNormalAudio('el audio progresivo tardó más de lo previsto')},7000);
- audio.play().catch(e=>{
-  if(token!==voiceToken)return;
-  if(e.name==='NotAllowedError'){
-   clearTimeout(voiceWatchdog);voiceWatchdog=null;
-   audioPermissionBlocked=true;
-   $('activateAudioButton').hidden=false;
-   tell('El navegador bloqueó el sonido automático. Tocá «Activar sonido».');
-   setSubtitle('Activá el sonido para escuchar al asistente');
-  }else if(!retryingWithBlob)retryNormalAudio(e.message||'Audio progresivo');
-  else useDeviceVoice(e.message||'Falló la reproducción');
- });
+ audio.onerror=()=>{if(shouldContinue())useDeviceVoice('No se pudo reproducir el MP3 de Fish')};
+ playFish();
 }
 function resumeSound(){
  const a=voiceAudio;
  if(a&&audioPermissionBlocked){
-  a.play().then(()=>{$('activateAudioButton').hidden=true;audioPermissionBlocked=false}).catch(()=>nativeVoice(lastAssistant,voiceToken));
+  a.play().then(()=>{$('activateAudioButton').hidden=true;audioPermissionBlocked=false}).catch(()=>{tell('No se pudo activar el sonido. Revisá el volumen y los permisos de Chrome.');});
  }else if(lastAssistant)speak(lastAssistant,session?.history?.length?'last':'intro');
 }
 async function reportUsage(kind,seconds){
