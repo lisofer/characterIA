@@ -13,6 +13,7 @@ let config=null,session=null,mode='call',busy=false,ended=false;
 let voiceAudio=null,voiceToken=0,voiceKind='',speechActive=false,speechPlan=null,lastAssistant='',lastCaption='',avatarLoop=0,blinkUntil=0,voiceWatchdog=null,voiceBlobUrl=null,voiceIsBuffering=false,voiceFetchController=null;
 let recognition=null,recognitionSeq=0,recognitionTimer=null,holdActive=false,micStarted=0,micDraft='',holdAccumulated='',lastSnapshot='',silenceTimer=null,recognitionStopped=false,stoppingForRequest=false,restartCount=0;
 let requestController=null,requestVersion=0,pendingAnswer='',hasSpeechError=false,audioPermissionBlocked=false,callReady=false;
+let lastSpokenText='',lastSpokenKind='intro',lastLeftAt=0,returnGreetingPending=false,greetingVersion=0;
 const sprites=[];
 let subtitleMeasureCtx=null;
 function tell(t){statusEl.textContent=t||''}
@@ -93,23 +94,6 @@ function stopVoice(){
  if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
  try{speechSynthesis.cancel()}catch{}
 }
-function nativeVoice(text,token){
- if(!('speechSynthesis' in window))return;
- const utterance=new SpeechSynthesisUtterance(text);
- utterance.lang='es-AR';utterance.rate=1;
- const plan=window.PersonaLipSync?.build(text);
- const words=plan?.entries||[];
- utterance.onboundary=e=>{
-  if(token!==voiceToken)return;
-  const i=words.findIndex(x=>e.charIndex>=x.index&&e.charIndex<=x.endIndex);
-  if(i>=0)setSubtitle(window.PersonaLipSync?.caption(plan,words[i].start,plan.total)||text.slice(e.charIndex,e.charIndex+70));
- };
- utterance.onstart=()=>{if(token===voiceToken){speechActive=true;tell('El asistente está hablando · voz del dispositivo')}}
- utterance.onend=()=>{if(token===voiceToken){speechActive=false;afterSpeaking()}};
- utterance.onerror=()=>{if(token===voiceToken){speechActive=false;tell('El texto está disponible en el historial.')}} ;
- setSubtitle((window.PersonaLipSync?.captions(plan)?.[0]?.text)||text.slice(0,65));
- speechSynthesis.speak(utterance);
-}
 function afterSpeaking(){
  if(mode==='ended'){tell('La llamada terminó.');return}
  if(session?.stage==='done'){tell('Tu CV está listo para descargar.');return}
@@ -122,6 +106,7 @@ function speak(text,kind='last'){
  stopVoice();
  cancelRecognition();
  const token=voiceToken;
+ lastSpokenText=text;lastSpokenKind=kind;
  speechPlan=window.PersonaLipSync?.build(text)||null;
  voiceKind=kind;voiceIsBuffering=true;
  setSubtitle('');tell('Preparando voz Fish…');
@@ -137,17 +122,18 @@ function speak(text,kind='last'){
   $('activateAudioButton').hidden=true;
   tell(kind==='farewell'?'Despidiéndose…':'El asistente está hablando · voz Fish');
  }
- function useDeviceVoice(error){
+ function reportFishFailure(error){
   if(!shouldContinue())return;
   completed=true;
-  // Only after Fish has conclusively failed. Stop MP3 first and ignore
-  // every pending callback; never play two voices simultaneously.
   try{audio.pause();audio.onerror=null;audio.onended=null;audio.removeAttribute('src');audio.load()}catch{}
   if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
   voiceIsBuffering=false;speechActive=false;
-  console.warn('Fish falló definitivamente, se usa voz local:',String(error||'').slice(0,120));
-  tell('Fish no está disponible. Se usará la voz del dispositivo.');
-  nativeVoice(text,token);
+  console.warn('Fish no pudo reproducirse:',String(error||'').slice(0,140));
+  $('activateAudioButton').hidden=false;
+  $('activateAudioButton').textContent='🔊 Reintentar con Fish';
+  tell('No se pudo escuchar a Fish. Podés reintentar sin perder lo dicho.');
+  setSubtitle('No se pudo reproducir Fish. Tocá «Reintentar con Fish».');
+  if(mode==='call'&&!busy&&!ended)scheduleCallRestart();
  }
  async function playFish(){
   try{
@@ -167,7 +153,7 @@ function speak(text,kind='last'){
     if(blob.size<100)throw new Error('Fish devolvió audio vacío');
     if(voiceBlobUrl){URL.revokeObjectURL(voiceBlobUrl);voiceBlobUrl=null}
     voiceBlobUrl=URL.createObjectURL(blob);
-    audio.onerror=()=>{if(shouldContinue()){audio.onerror=null;useDeviceVoice('Chrome no pudo decodificar MP3 de Fish')}};
+    audio.onerror=()=>{if(shouldContinue()){audio.onerror=null;reportFishFailure('Chrome no pudo decodificar MP3 de Fish')}};
     audio.src=voiceBlobUrl;
     audio.load();
     try{
@@ -176,9 +162,10 @@ function speak(text,kind='last'){
     }catch(e){
      if(!shouldContinue())return;
      if(e.name==='NotAllowedError'){
-      // Permission denial is not a Fish failure; do not invoke native TTS.
+      // El bloqueo automático no se confunde con un error de Fish.
       blocked=true;audioPermissionBlocked=true;voiceIsBuffering=false;
       $('activateAudioButton').hidden=false;
+      $('activateAudioButton').textContent='🔊 Activar sonido de Fish';
       tell('Tocá «Activar sonido» para escuchar Fish.');
       return;
      }
@@ -186,10 +173,10 @@ function speak(text,kind='last'){
      throw e;
     }
    }
-   useDeviceVoice('Fish agotó dos intentos');
+   reportFishFailure('Fish agotó dos intentos');
   }catch(e){
    if(!shouldContinue()||e.name==='AbortError'&&aborter.signal.aborted)return;
-   useDeviceVoice(e.message);
+   reportFishFailure(e.message);
   }
  }
  audio.onplaying=onPlayable;
@@ -201,14 +188,14 @@ function speak(text,kind='last'){
   speechActive=false;voiceIsBuffering=false;
   afterSpeaking();
  };
- audio.onerror=()=>{if(shouldContinue())useDeviceVoice('No se pudo reproducir el MP3 de Fish')};
+ audio.onerror=()=>{if(shouldContinue())reportFishFailure('No se pudo reproducir el MP3 de Fish')};
  playFish();
 }
 function resumeSound(){
  const a=voiceAudio;
  if(a&&audioPermissionBlocked){
-  a.play().then(()=>{$('activateAudioButton').hidden=true;audioPermissionBlocked=false}).catch(()=>{tell('No se pudo activar el sonido. Revisá el volumen y los permisos de Chrome.');});
- }else if(lastAssistant)speak(lastAssistant,session?.history?.length?'last':'intro');
+  a.play().then(()=>{$('activateAudioButton').hidden=true;audioPermissionBlocked=false}).catch(()=>{tell('Chrome no pudo reproducir Fish. Revisá el volumen o tocá reintentar.');});
+ }else if(lastSpokenText)speak(lastSpokenText,lastSpokenKind);
 }
 async function reportUsage(kind,seconds){
  if(!Number.isFinite(seconds)||seconds<=0)return;
@@ -218,7 +205,7 @@ function ui(){
  const isCall=mode==='call',isKeyboard=mode==='keyboard',isAudio=mode==='audio',isEnded=mode==='ended';
  $('callModeTag').textContent=isEnded?'LLAMADA FINALIZADA':isCall?'LLAMADA EN CURSO':isKeyboard?'MODO TECLADO':'MODO AUDIO';
  $('callStateDot').classList.toggle('is-ended',isEnded);
- $('hangupButton').disabled=isEnded;
+ $('hangupButton').disabled=isEnded||session?.stage==='done';
  $('micButton').disabled=busy||isEnded||session?.stage==='done';
  $('keyboardButton').disabled=isEnded||session?.stage==='done';
  $('micButton').classList.toggle('is-recording',holdActive);
@@ -228,7 +215,7 @@ function ui(){
  $('returnCallButton').hidden=(isCall&&!hasSpeechError)||isEnded||session?.stage==='done';
  $('callEnded').hidden=!isEnded||session?.stage==='done';
  $('complete').hidden=session?.stage!=='done';
- $('callActions').hidden=session?.stage==='done'||isEnded;
+ $('callActions').hidden=false;
  if(session?.stage==='done')$('returnCallButton').hidden=true;
 }
 function clearRecognitionTimer(){clearTimeout(silenceTimer);silenceTimer=null}
@@ -368,6 +355,23 @@ function endHold(event){
  else{tell('Tocá y mantené pulsado un momento para grabar.');ui()}
 }
 function cancelHold(){if(!holdActive)return;holdActive=false;holdAccumulated='';cancelRecognition();ui();tell('Se canceló el audio. Podés volver a grabarlo.')}
+async function greet(kind){
+ const version=++greetingVersion;
+ tell(kind==='resume'?'Preparando un saludo para retomar…':kind==='farewell'?'Despidiéndose…':'Preparando la presentación…');
+ try{
+  const result=await api('/api/student/voice-line',json('POST',{kind}));
+  if(version!==greetingVersion)return;
+  if(kind!=='farewell'&&ended)return;
+  speak(result.text,kind);
+ }catch(e){
+  if(version!==greetingVersion)return;
+  // Los textos configurados pueden pronunciarse por Fish incluso si el
+  // endpoint de saludo tiene un error transitorio.
+  const local=kind==='farewell'?(config.farewellText||'Hasta luego. Gracias por conversar conmigo.'):kind==='intro'?config.introText:null;
+  if(local)speak(local,kind);
+  else tell('No pude preparar el saludo de regreso. Tocá «Volver al modo llamada» para continuar.');
+ }
+}
 function beginHangup(){
  if(ended||session?.stage==='done')return;
  mode='ended';ended=true;
@@ -377,8 +381,7 @@ function beginHangup(){
  $('retryPanel').hidden=true;
  ui();
  tell('Llamada finalizada');
- const goodbye=config?.farewellText||'¡Hasta luego! Gracias por conversar conmigo. ¡Nos vemos!';
- lastAssistant=goodbye;speak(goodbye,'farewell');
+ greet('farewell');
 }
 async function resumeCall(){
  ended=false;mode='call';busy=false;pendingAnswer='';hasSpeechError=false;restartCount=0;
@@ -386,10 +389,10 @@ async function resumeCall(){
   session=await api('/api/student/session');
   $('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);
  }catch(e){tell('No pude recuperar la entrevista: '+e.message);return}
- lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
+ lastAssistant=session.lastAssistant||config.introText;
  ui();
- if(session.stage==='done')tell('Tu currículum está listo para descargar.');
- else speak(lastAssistant,(session.history||[]).length?'last':'intro');
+ if((session.history||[]).length)greet('resume');
+ else greet('intro');
 }
 async function sendAnswer(message,retry=false){
  const value=cleanTranscript(message);
@@ -443,11 +446,12 @@ async function loadStudent(){
  loginView.hidden=true;studentView.hidden=false;
  $('conversation').replaceChildren();for(const h of session.history||[])addLog(h.role,h.text);
  mode='call';ended=false;busy=false;hasSpeechError=false;
- lastAssistant=(session.history||[]).length?(session.lastAssistant||config.introText):config.introText;
+ lastAssistant=session.lastAssistant||config.introText;
  preloadSprites();applyAppearance();animate();finishStudent();
- if(session.stage!=='done'){
-  speak(lastAssistant,(session.history||[]).length?'last':'intro');
- }else{setSubtitle('¡Tu currículum está listo!');}
+ // Cada apertura saluda según el contexto. Nunca repite sin más la respuesta
+ // anterior ni modifica el contenido de la entrevista.
+ if((session.history||[]).length)greet('resume');
+ else greet('intro');
 }
 $('loginForm').addEventListener('submit',async e=>{
  e.preventDefault();$('loginError').textContent='';
@@ -475,15 +479,33 @@ $('avatarButton').addEventListener('click',()=>{
   if(mode==='call')startRecognition('call');
   return;
  }
- if(lastAssistant)speak(lastAssistant,session?.history?.length?'last':'intro');
+ if(lastSpokenText)speak(lastSpokenText,lastSpokenKind);
 });
 $('restartButton').addEventListener('click',async()=>{
- if(!confirm('¿Querés crear otro CV? Se borrarán los datos de esta entrevista.'))return;
+ if(!confirm('¿Empezamos otro currículum desde cero? Se borrará la entrevista anterior.'))return;
+ greetingVersion++;requestVersion++;
+ if(requestController){requestController.abort();requestController=null}
+ ended=false;busy=false;pendingAnswer='';holdActive=false;
  cancelRecognition();stopVoice();
- await api('/api/student/reset',{method:'POST'});await loadStudent();
+ $('restartButton').disabled=true;tell('Creando entrevista nueva…');
+ try{
+  await api('/api/student/reset',{method:'POST'});
+  lastSpokenText='';lastAssistant='';
+  await loadStudent();
+ }catch(e){tell('No se pudo reiniciar: '+e.message)}
+ finally{$('restartButton').disabled=false;ui()}
 });
 document.addEventListener('visibilitychange',()=>{
- if(document.hidden){cancelRecognition();if(speechActive)stopVoice()}
- else if(mode==='call'&&!busy&&!ended&&session?.stage!=='done'&&!hasSpeechError)scheduleCallRestart();
+ if(document.hidden){
+  lastLeftAt=Date.now();
+  cancelRecognition();if(speechActive||voiceIsBuffering)stopVoice();
+ }else if(session&&!ended&&!busy&&studentView.hidden===false){
+  if(lastLeftAt&&Date.now()-lastLeftAt>=10*60*1000){
+   greet('resume');
+  }else if(mode==='call'&&session?.stage!=='done'&&!hasSpeechError){
+   scheduleCallRestart();
+  }
+  lastLeftAt=0;
+ }
 });
 api('/api/me?role=student').then(me=>{if(me.role==='student')loadStudent()}).catch(()=>{});
