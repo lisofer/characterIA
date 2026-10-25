@@ -71,7 +71,7 @@
   return chunk.text;
  }
  /*
-  Subtítulos de máximo cuatro líneas: cada palabra se hace visible cuando
+  Subtítulos compactos de máximo dos líneas: cada palabra se hace visible cuando
   comienza su tiempo estimado dentro del MP3 de Fish. El avance usa
   HTMLAudioElement.currentTime y la duración real del clip, por lo que ni
   Fish ni Gemini necesitan marcas por palabra (que la API no entrega aquí).
@@ -97,8 +97,8 @@
   }
   if(line.length)lines.push(line);
   const pages=[];
-  for(let i=0;i<lines.length;i+=4){
-   const part=lines.slice(i,i+4),first=part[0][0].index;
+  for(let i=0;i<lines.length;i+=2){
+   const part=lines.slice(i,i+2),first=part[0][0].index;
    const lastLine=part.at(-1),last=lastLine.at(-1).index;
    pages.push({first,last,lines:part});
   }
