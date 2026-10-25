@@ -27,13 +27,14 @@
   <div id="retryPanel" class="retry-panel" hidden><p id="retryMessage" class="retry-text" role="alert"></p><button id="retryButton" type="button" class="secondary">Volver a intentar</button></div>
   <form id="textForm" class="call-text-form" hidden><label class="sr-only" for="answer">Tu respuesta escrita</label><textarea id="answer" rows="2" maxlength="850" placeholder="Escribí tu respuesta…"></textarea><button type="submit" class="primary">Enviar</button></form>
   <div class="call-actions" id="callActions">
-   <div class="call-action-item"><button id="hangupButton" class="call-action hangup" type="button" aria-label="Colgar y terminar la llamada" title="Colgar"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10.68 13.31a16 16 0 0 0 3.99 3.99l1.47-1.47a2 2 0 0 1 2.02-.48l2.45.81a2 2 0 0 1 1.39 1.9v2.44a2 2 0 0 1-2.17 2A19.8 19.8 0 0 1 1.5 4.17 2 2 0 0 1 3.5 2h2.44a2 2 0 0 1 1.9 1.39l.81 2.45a2 2 0 0 1-.48 2.02L6.7 9.33"/><path d="m2 2 20 20"/></svg></button><span>Colgar</span></div>
+   <div class="call-action-item"><button id="hangupButton" class="call-action hangup" type="button" aria-label="Colgar y terminar la llamada" title="Colgar"><span class="call-emoji" aria-hidden="true">📞</span></button><span>Colgar</span></div>
    <div class="call-action-item"><button id="micButton" class="call-action record" type="button" aria-label="Mantener pulsado para grabar un audio" title="Mantener pulsado para hablar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></button><span>Audio</span></div>
    <div class="call-action-item"><button id="keyboardButton" class="call-action keyboard" type="button" aria-label="Cambiar a modo teclado" title="Escribir"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5 9h1m3 0h1m3 0h1m3 0h1m3 0h1M5 12h1m3 0h1m3 0h1m3 0h1M7 16h10"/></svg></button><span>Teclado</span></div>
+   <div class="call-action-item"><button id="restartButton" class="call-action restart" type="button" aria-label="Reiniciar la entrevista y crear un currículum desde cero" title="Empezar un CV nuevo"><span class="call-emoji" aria-hidden="true">🔄</span></button><span>Reiniciar</span></div>
   </div>
   <button id="returnCallButton" class="return-call" type="button" hidden><span aria-hidden="true">↻</span> Volver al modo llamada</button>
-  <div id="callEnded" class="call-ended" hidden><p>La llamada terminó. Podés retomarla cuando quieras.</p><button id="resumeButton" class="primary" type="button">Volver a llamar</button></div>
-  <div id="complete" class="complete" hidden><a id="downloadLink" class="primary button-link" href="/api/student/pdf" download="Mi-CV.pdf">Descargar mi CV</a><button class="secondary" id="restartButton" type="button">Crear otro CV</button></div>
+  <div id="callEnded" class="call-ended" hidden><p>La llamada terminó. Podés continuarla o empezar un CV nuevo.</p><button id="resumeButton" class="primary" type="button">Volver a llamar</button></div>
+  <div id="complete" class="complete" hidden><a id="downloadLink" class="primary button-link" href="/api/student/pdf" download="Mi-CV.pdf">Descargar mi CV</a></div>
   <details id="logDetails" class="call-history"><summary>Ver historial de la conversación</summary><div id="conversation" class="log" aria-label="Historial de preguntas y respuestas"></div></details>
  </footer>
 </section>
