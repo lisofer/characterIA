@@ -1,0 +1,16 @@
+{
+  "name": "playcanvas-gemini-npc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.46.0",
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  }
+}
