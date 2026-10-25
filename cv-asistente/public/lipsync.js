@@ -70,5 +70,54 @@
    ||(logical<groups[0].start?groups[0]:groups.reduce((p,g)=>g.start<=logical?g:p,groups[0]));
   return chunk.text;
  }
- window.PersonaLipSync={build,pose,caption,captions};
+ /*
+  Subtítulos de máximo cuatro líneas: cada palabra se hace visible cuando
+  comienza su tiempo estimado dentro del MP3 de Fish. El avance usa
+  HTMLAudioElement.currentTime y la duración real del clip, por lo que ni
+  Fish ni Gemini necesitan marcas por palabra (que la API no entrega aquí).
+  El ancho se mide con la fuente real para evitar los "..." y palabras cortadas.
+ */
+ function subtitlePages(plan,widthPx=300,measure){
+  const items=plan?.entries||[];
+  if(!items.length)return [];
+  const width=Math.max(130,Number(widthPx)||300);
+  if(plan.subtitleLayout?.width===width&&plan.subtitleLayout.pages)return plan.subtitleLayout.pages;
+  const measureWidth=typeof measure==='function'?measure:s=>s.length*8.5;
+  const lines=[];let line=[],current='';
+  for(let i=0;i<items.length;i++){
+   const entry=items[i],next=items[i+1];
+   const suffix=(plan.text.slice(entry.endIndex,next?.index??plan.text.length).match(/^\s*[,;:.!?…¿¡]+/)||[])[0]||'';
+   const token=entry.word+suffix.trim();
+   const test=current?current+' '+token:token;
+   if(line.length&&measureWidth(test)>width){
+    lines.push(line);line=[];current='';
+   }
+   line.push({index:i,token});
+   current=current?current+' '+token:token;
+  }
+  if(line.length)lines.push(line);
+  const pages=[];
+  for(let i=0;i<lines.length;i+=4){
+   const part=lines.slice(i,i+4),first=part[0][0].index;
+   const lastLine=part.at(-1),last=lastLine.at(-1).index;
+   pages.push({first,last,lines:part});
+  }
+  plan.subtitleLayout={width,pages};
+  return pages;
+ }
+ function subtitleAt(plan,positionMs,totalMs,widthPx,measure){
+  const entries=plan?.entries||[];
+  if(!entries.length)return '';
+  const pages=subtitlePages(plan,widthPx,measure);
+  const duration=Number.isFinite(totalMs)&&totalMs>250?totalMs:plan.total;
+  const logical=Math.max(0,Number(positionMs)||0)*plan.total/duration;
+  let current=0;
+  for(let i=1;i<entries.length;i++){
+   if(entries[i].start>logical)break;
+   current=i;
+  }
+  const page=pages.find(p=>current>=p.first&&current<=p.last)||pages.at(-1);
+  return page.lines.map(line=>line.filter(token=>token.index<=current).map(x=>x.token).join(' ')).filter(Boolean).join('\n');
+ }
+ window.PersonaLipSync={build,pose,caption,captions,subtitleAt,subtitlePages};
 })();
