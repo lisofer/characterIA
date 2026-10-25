@@ -334,3 +334,47 @@ input::placeholder,textarea::placeholder{color:#9097ae}
  .call-persona{min-height:150px}
  .call-persona .avatar-button{min-height:150px!important}
 }
+
+
+/* Subtítulos Fish: sin elipsis; bloques de 4 renglones a medida que suena cada palabra. */
+.call-scene .caption-area{max-width:760px}
+.call-scene .subtitle-track{
+  box-sizing:border-box;
+  min-height:132px;
+  padding:13px 18px;
+  align-items:center;
+  justify-content:center;
+  overflow:visible;
+}
+.call-scene .subtitle-track p{
+  display:block;
+  width:100%;
+  max-width:100%;
+  max-height:none;
+  margin:0;
+  text-align:left;
+  font-size:clamp(15px,2.9vw,19px);
+  line-height:1.39;
+  white-space:pre-line;
+  overflow:visible;
+  overflow-wrap:break-word;
+  text-overflow:clip;
+  word-break:normal;
+  font-weight:750;
+}
+.call-action.hangup svg{
+  transform:none!important;
+  fill:none!important;
+  stroke:currentColor!important;
+  stroke-linecap:round!important;
+  stroke-linejoin:round!important;
+  stroke-width:2!important;
+  width:30px;
+  height:30px;
+}
+.call-action.hangup svg path{fill:none!important;stroke:currentColor!important}
+@media(max-width:700px){
+  .call-scene .subtitle-track{min-height:124px;padding:12px 15px}
+  .call-scene .subtitle-track p{font-size:16px;line-height:1.38}
+}
+@media(max-height:730px){.call-scene .subtitle-track{min-height:114px;padding:9px 13px}}
