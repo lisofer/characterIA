@@ -1,7 +1,7 @@
 /* PlayCanvas legacy script: attach to an NPC entity; set Backend URL in Inspector. */
 var NpcGeminiVoice = pc.createScript('npcGeminiVoice');
 NpcGeminiVoice.attributes.add('backendUrl', { type: 'string', title: 'Railway URL', default: 'https://YOUR-SERVICE.up.railway.app' });
-NpcGeminiVoice.attributes.add('npcId', { type: 'string', title: 'NPC ID', default: 'dante' });
+NpcGeminiVoice.attributes.add('npcId', { type: 'string', title: 'NPC ID (auto si hay uno solo)', default: 'auto' });
 NpcGeminiVoice.attributes.add('cameraEntity', { type: 'entity', title: 'Player Camera' });
 NpcGeminiVoice.attributes.add('interactionDistance', { type: 'number', default: 4, min: 1, max: 20 });
 
@@ -19,6 +19,11 @@ NpcGeminiVoice.prototype.initialize = function () {
     this.playing = [];
     this.waitingReset = false;
     this.playerId = this._loadPlayerId();
+    this._npcSavedSelectionKey = 'umbral_selected_npc_' + this.entity.getGuid();
+    try {
+        var selected = localStorage.getItem(this._npcSavedSelectionKey);
+        if (selected && /^[A-Za-z0-9_-]+$/.test(selected)) this.npcId = selected;
+    } catch (e) {}
     this.npcDisplayName = 'NPC';
     this._profilePollSeconds = 0;
     this._profileRefreshInFlight = false;
@@ -27,6 +32,7 @@ NpcGeminiVoice.prototype.initialize = function () {
     this.panel = document.createElement('div');
     this.panel.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(390px,92vw);background:rgba(5,13,23,.93);color:#e8faff;border:1px solid #19c7ea;padding:15px;border-radius:12px;font:14px system-ui;z-index:10000;box-shadow:0 0 20px #0bf2;display:none';
     this.panel.innerHTML = '<div class="npc-name" style="font-size:16px;font-weight:700;margin-bottom:5px">NPC</div>' +
+        '<label class="npc-select-wrap" style="display:none;margin-bottom:7px">Personaje <select class="npc-character" style="display:block;width:100%;background:#122c3b;color:white;padding:7px"></select></label>' +
         '<div class="npc-status" style="min-height:20px;color:#a4c8d7">Acercate y pulsá E para hablar</div>' +
         '<div class="npc-transcript" style="margin:8px 0;min-height:32px;max-height:90px;overflow:auto"></div>' +
         '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
@@ -35,6 +41,17 @@ NpcGeminiVoice.prototype.initialize = function () {
         '<button class="npc-reset" style="padding:10px;cursor:pointer">↻ Restablecer NPC</button></div>';
     document.body.appendChild(this.panel);
     this.nameEl = this.panel.querySelector('.npc-name');
+    this.characterSelect = this.panel.querySelector('.npc-character');
+    this.characterSelectWrap = this.panel.querySelector('.npc-select-wrap');
+    this.characterSelect.onchange = function () {
+        var selectedId = self.characterSelect.value;
+        if (!selectedId || selectedId === self.npcId) return;
+        self.end();
+        self.npcId = selectedId;
+        try { localStorage.setItem(self._npcSavedSelectionKey, selectedId); } catch (e) {}
+        self._refreshName();
+        self._status('Personaje cambiado. Pulsá Hablar para conversar.');
+    };
     this.statusEl = this.panel.querySelector('.npc-status');
     this.transcriptEl = this.panel.querySelector('.npc-transcript');
     this.panel.querySelector('.npc-start').onclick = function () { self.begin(); };
@@ -66,13 +83,35 @@ NpcGeminiVoice.prototype._refreshName = async function () {
     this._profileRefreshInFlight = true;
     try {
         var backend = this.backendUrl.replace(/\/+$/, '');
-        var response = await fetch(backend + '/api/public/npcs');
+        var response = await fetch(backend + '/api/public/npcs', { cache: 'no-store' });
         if (!response.ok) return;
         var npcs = await response.json();
-        var npc = npcs.find(function (p) { return p.id === this.npcId; }, this);
-        if (npc && typeof npc.name === 'string') this._setDisplayName(npc.name);
+        var self = this;
+        if (!npcs.length) {
+            this.characterSelectWrap.style.display = 'none';
+            this._setDisplayName('NPC sin configurar');
+            this._status('Creá tu primer personaje desde el panel de Railway.');
+            return;
+        }
+        var npc = npcs.find(function (p) { return p.id === self.npcId; });
+        if (!npc) {
+            // Automatically use the sole configured character, even for old
+            // PlayCanvas entities whose attribute used to be "dante".
+            npc = npcs[0];
+            this.npcId = npc.id;
+        }
+        this.characterSelectWrap.style.display = npcs.length > 1 ? 'block' : 'none';
+        this.characterSelect.replaceChildren();
+        npcs.forEach(function (p) {
+            var option = document.createElement('option');
+            option.value = p.id;
+            option.textContent = p.name;
+            self.characterSelect.appendChild(option);
+        });
+        this.characterSelect.value = npc.id;
+        if (typeof npc.name === 'string') this._setDisplayName(npc.name);
     } catch (e) {
-        // Offline editor or Railway is not available yet. The Live handshake also sends the display name.
+        // Live handshake also provides the display name.
     } finally {
         this._profileRefreshInFlight = false;
     }
@@ -109,6 +148,11 @@ NpcGeminiVoice.prototype._ticket = async function () {
     });
     var data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error creando sesión');
+    if (data.npcId) {
+        this.npcId = data.npcId;
+        try { localStorage.setItem(this._npcSavedSelectionKey, data.npcId); } catch (e) {}
+    }
+    if (data.npc && data.npc.name) this._setDisplayName(data.npc.name);
     return { backend: backend, token: data.token };
 };
 
