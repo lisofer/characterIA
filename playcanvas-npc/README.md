@@ -66,6 +66,15 @@ Si Codex detecta que tu proyecto usa **ESM Scripts** en vez de scripts clásicos
 - Después de instalar UNA VEZ el npcGeminiVoice.js actualizado, no hace falta volver a Codex cada vez que cambies la personalidad o el nombre.
 
 **Prueba:** En Railway cambiá Nombre a Nira y su prompt a una mujer IA del mundo digital. Guardá. El nombre debe cambiar en el juego sin modificar el script. Iniciá conversación y preguntá cómo se llama. Cambiá después un rasgo de personalidad durante la charla: la conexión debe renovarse conservando la memoria. El botón Restablecer NPC sigue siendo la única acción que borra recuerdos.
+## Personalidades largas y guardado
+
+- El panel y el backend aceptan **hasta 20.000 caracteres** por personalidad, incluyendo los acentos y saltos de línea.
+- Antes existía un límite oculto de 6.000 caracteres: producía un error genérico y Gemini recortaba el texto. Esa restricción ya no existe.
+- El panel muestra un contador y el servidor devuelve errores precisos si el texto supera el límite o faltan campos.
+- Los borradores no guardados se conservan en **sessionStorage del navegador (misma pestaña)** por si falla el guardado o se recarga. Se eliminan cuando el servidor confirma que el cambio quedó persistido. El token administrativo no se guarda.
+- El endpoint `/api/health` incluye `"panelVersion":"npc-admin-longprompt-v3"` para identificar el despliegue nuevo.
+- El servidor puede requerir más tiempo y tokens para iniciar Gemini Live con personalidades muy extensas. El texto guardado **no se trunca** silenciosamente.
+
 ## 3. Panel administrativo
 URL: /admin.html
 
