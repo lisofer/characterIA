@@ -173,7 +173,7 @@ NpcGeminiVoice.prototype._handle = function (msg) {
         this._stopPlayback();
     } else if (msg.type === 'transcript') {
         var line = document.createElement('div');
-        line.textContent = (msg.role === 'user' ? 'Vos: ' : 'NPC: ') + msg.text;
+        line.textContent = (msg.role === 'user' ? 'Vos: ' : this.npcDisplayName + ': ') + msg.text;
         this.transcriptEl.appendChild(line);
         while (this.transcriptEl.childNodes.length > 12) this.transcriptEl.removeChild(this.transcriptEl.firstChild);
         this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight;
