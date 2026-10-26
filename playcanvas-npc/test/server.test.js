@@ -48,7 +48,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   }
   assert.equal(ready, true, output || 'health failed');
   const health = await json(base, '/api/health');
-  assert.equal(health.data.panelVersion, 'npc-admin-save-v2');
+  assert.equal(health.data.panelVersion, 'npc-admin-longprompt-v3');
   const denied = await json(base, '/api/admin/npcs');
   assert.equal(denied.status, 401);
   const h = { Authorization: 'Bearer test-only-secret', 'Content-Type': 'application/json' };
