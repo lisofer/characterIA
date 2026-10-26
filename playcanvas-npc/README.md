@@ -54,6 +54,18 @@ En Windows se puede generar un token seguro mediante:
 
 Si Codex detecta que tu proyecto usa **ESM Scripts** en vez de scripts clásicos, deberá adaptar la envoltura pc.createScript a ESM antes de importar; la lógica de comunicación es reutilizable.
 
+## Sincronización automática de nombre, personalidad y voz
+
+**Railway es la fuente única de configuración.** El npcId de PlayCanvas (dante por compatibilidad con recuerdos existentes) es solamente una clave técnica: no define el nombre visible.
+
+- Al cargar el juego, el script consulta GET /api/public/npcs, que devuelve el nombre y la voz, sin exponer el prompt privado.
+- Cada 5 segundos vuelve a consultar el nombre y actualiza los textos y el nombre de la entidad 3D durante la ejecución.
+- Al conversar, Railway lee el perfil vigente y construye systemInstruction usando el nombre y prompt más recientes. El nombre configurado prevalece sobre nombres antiguos escritos dentro del prompt.
+- Al guardar el perfil en /admin.html, el servidor avisa a las sesiones activas con profile_updated y las cierra con código 4001. El script PlayCanvas abre una nueva conexión automáticamente con el nuevo perfil, SIN borrar la memoria.
+- Si no está conversando, la siguiente conexión ya usa la configuración actualizada.
+- Después de instalar UNA VEZ el npcGeminiVoice.js actualizado, no hace falta volver a Codex cada vez que cambies la personalidad o el nombre.
+
+**Prueba:** En Railway cambiá Nombre a Nira y su prompt a una mujer IA del mundo digital. Guardá. El nombre debe cambiar en el juego sin modificar el script. Iniciá conversación y preguntá cómo se llama. Cambiá después un rasgo de personalidad durante la charla: la conexión debe renovarse conservando la memoria. El botón Restablecer NPC sigue siendo la única acción que borra recuerdos.
 ## 3. Panel administrativo
 URL: /admin.html
 
