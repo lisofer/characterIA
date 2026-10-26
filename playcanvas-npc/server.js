@@ -220,6 +220,16 @@ wsServer.on('connection', async (ws, ticket) => {
   let userCaption = '';
   let npcCaption = '';
   let memoryVersion = 0;
+  // Register close handling before awaiting Gemini, otherwise profile updates
+  // during connection setup could leak an orphaned Gemini Live session.
+  ws.on('close', () => {
+    destroyed = true;
+    try { session?.close(); } catch {}
+    if (active.get(key) === ws) active.delete(key);
+    if (ws.npcReset) return;
+    // Run this off the real-time path; reset version check prevents stale writes.
+    void store.queue.catch(() => {}).then(() => consolidateMemory(npcId, playerId, memoryVersion));
+  });
   try {
     const profile = await store.getProfile(npcId);
     const memory = await store.getMemory(npcId, playerId);
@@ -271,6 +281,10 @@ wsServer.on('connection', async (ws, ticket) => {
       }
     });
     // onopen may occur before live.connect resolves; send a second ready so clients cannot miss it.
+    if (destroyed) {
+      try { session.close(); } catch {}
+      return;
+    }
     send(ws, { type: 'ready', npc: profilePublic(profile) });
   } catch (e) {
     send(ws, { type: 'error', message: 'No se pudo iniciar Gemini Live: ' + String(e.message || e).slice(0, 200) });
@@ -298,14 +312,7 @@ wsServer.on('connection', async (ws, ticket) => {
       }
     } catch (e) { send(ws, { type: 'error', message: 'Mensaje invalido: ' + String(e.message || e).slice(0, 100) }); }
   });
-  ws.on('close', () => {
-    destroyed = true;
-    try { session?.close(); } catch {}
-    if (active.get(key) === ws) active.delete(key);
-    if (ws.npcReset) return;
-    // Run this off the real-time path; reset version check prevents stale writes.
-    void store.queue.catch(() => {}).then(() => consolidateMemory(npcId, playerId, memoryVersion));
-  });
+
 });
 
 server.listen(PORT, '0.0.0.0', () => {
