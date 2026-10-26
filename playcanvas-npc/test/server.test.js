@@ -55,11 +55,13 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   assert.equal(profiles.data.length, 0, 'No se crea Dante por defecto.');
   // Browser form submits POST/PUT/DELETE with an Origin header. This was
   // previously 403 unless the Railway URL was redundantly in APP_ORIGINS.
-  const sameOrigin = 'https://chesscut-studio.up.railway.app';
-  const siteHeaders = { ...h, Host: 'chesscut-studio.up.railway.app', Origin: sameOrigin };
+  // The integration HTTP server runs on localhost; the origin validation
+  // helper separately asserts the real Railway HTTPS hostname.
+  const sameOrigin = base;
+  const siteHeaders = { ...h, Origin: sameOrigin };
   const preflight = await fetch(base + '/api/admin/npcs', {
     method: 'OPTIONS',
-    headers: { Host: 'chesscut-studio.up.railway.app', Origin: sameOrigin,
+    headers: { Origin: sameOrigin,
       'Access-Control-Request-Method':'POST',
       'Access-Control-Request-Headers':'authorization,content-type' }
   });
