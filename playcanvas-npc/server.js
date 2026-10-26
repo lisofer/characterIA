@@ -117,7 +117,7 @@ app.post('/api/session', async (req, res) => {
   const token = crypto.randomBytes(32).toString('base64url');
   issued.set(token, { npcId, playerId, expires: Date.now() + TOKEN_TTL_MS });
   if (issued.size > 2000) for (const [k, v] of issued) if (v.expires < Date.now()) issued.delete(k);
-  res.json({ token, expiresInSeconds: 300 });
+  res.json({ token, npcId, npc: profilePublic(profile), expiresInSeconds: 300 });
 });
 
 app.post('/api/reset', async (req, res) => {
