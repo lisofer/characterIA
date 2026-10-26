@@ -20,6 +20,9 @@ NpcGeminiVoice.prototype.initialize = function () {
     this.waitingReset = false;
     this.playerId = this._loadPlayerId();
     this.npcDisplayName = 'NPC';
+    this._profilePollSeconds = 0;
+    this._profileRefreshInFlight = false;
+    this._reloadProfileOnClose = false;
 
     this.panel = document.createElement('div');
     this.panel.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(390px,92vw);background:rgba(5,13,23,.93);color:#e8faff;border:1px solid #19c7ea;padding:15px;border-radius:12px;font:14px system-ui;z-index:10000;box-shadow:0 0 20px #0bf2;display:none';
@@ -59,6 +62,8 @@ NpcGeminiVoice.prototype._escape = function (str) {
     return String(str).replace(/[&<>"]/g, function (c) { return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]; });
 };
 NpcGeminiVoice.prototype._refreshName = async function () {
+    if (this._profileRefreshInFlight) return;
+    this._profileRefreshInFlight = true;
     try {
         var backend = this.backendUrl.replace(/\/+$/, '');
         var response = await fetch(backend + '/api/public/npcs');
@@ -68,15 +73,24 @@ NpcGeminiVoice.prototype._refreshName = async function () {
         if (npc && typeof npc.name === 'string') this._setDisplayName(npc.name);
     } catch (e) {
         // Offline editor or Railway is not available yet. The Live handshake also sends the display name.
+    } finally {
+        this._profileRefreshInFlight = false;
     }
 };
 NpcGeminiVoice.prototype._setDisplayName = function (name) {
     this.npcDisplayName = name;
     if (this.nameEl) this.nameEl.textContent = name;
+    // This only changes the runtime 3D entity name; the ID remains stable.
+    if (this.entity) this.entity.name = name;
 };
 
 NpcGeminiVoice.prototype._status = function (s) { if (this.statusEl) this.statusEl.textContent = s; };
-NpcGeminiVoice.prototype.update = function () {
+NpcGeminiVoice.prototype.update = function (dt) {
+    this._profilePollSeconds += dt || 0;
+    if (this._profilePollSeconds >= 5) {
+        this._profilePollSeconds = 0;
+        this._refreshName();
+    }
     var cam = this.cameraEntity || this.app.root.findByName('Camera');
     if (!cam) return;
     var distance = cam.getPosition().distance(this.entity.getPosition());
@@ -111,10 +125,25 @@ NpcGeminiVoice.prototype.begin = async function () {
         var url = ticket.backend.replace(/^http/, 'ws') + '/live?token=' + encodeURIComponent(ticket.token);
         var self = this;
         this.ws = new WebSocket(url);
+        var socket = this.ws;
         this.ws.onopen = function () { self._status('Conectando al personaje...'); };
         this.ws.onmessage = function (event) { self._handle(JSON.parse(event.data)); };
         this.ws.onerror = function () { self._status('Falló la conexión. Revisá Railway.'); };
-        this.ws.onclose = function () { self._stopMic(); self.started = false; self.connecting = false; };
+        this.ws.onclose = function (event) {
+            if (self.ws !== socket) return;
+            self._stopMic();
+            self.started = false;
+            self.connecting = false;
+            self.ws = null;
+            var reload = !self.waitingReset && (event.code === 4001 || self._reloadProfileOnClose);
+            self._reloadProfileOnClose = false;
+            if (reload) {
+                self._status('Actualizando personalidad y voz desde Railway...');
+                window.setTimeout(function () {
+                    if (!self.started && !self.connecting && !self.waitingReset) self.begin();
+                }, 350);
+            }
+        };
     } catch (e) {
         this.connecting = false;
         this._stopMic();
@@ -132,6 +161,12 @@ NpcGeminiVoice.prototype._handle = function (msg) {
             this._startMic();
         }
         this._status('🎙 Te escucha. Podés hablar.');
+    } else if (msg.type === 'profile_updated') {
+        if (msg.npc && msg.npc.name) this._setDisplayName(msg.npc.name);
+        this._reloadProfileOnClose = !this.waitingReset;
+        this._stopMic();
+        this._stopPlayback();
+        this._status('Se modificó el personaje en Railway. Aplicando cambios...');
     } else if (msg.type === 'audio') {
         this._playPcm(msg.data, msg.rate || 24000);
     } else if (msg.type === 'interrupted') {
@@ -225,6 +260,7 @@ NpcGeminiVoice.prototype.end = function () {
     this.started = false;
     this.connecting = false;
     this.waitingReset = false;
+    this._reloadProfileOnClose = false;
     this._stopMic();
     this._stopPlayback();
     if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
