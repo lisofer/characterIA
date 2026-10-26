@@ -13,5 +13,10 @@ test('panel administrativo contiene formulario funcional y JavaScript válido', 
   assert.match(html, /\/api\/admin\/npcs', 'POST'/);
   assert.match(html, /\/api\/admin\/npcs\/' \+ encodeURIComponent\(selectedId\), 'PUT'/);
   assert.match(html, /Completá nombre/);
+  assert.match(html, /id="promptCount"/);
+  assert.match(html, /MAX_PERSONALITY_CHARS = 20000/);
+  assert.match(html, /sessionStorage\.setItem/);
+  assert.match(html, /sessionStorage\.removeItem/);
+  assert.ok(!html.includes('maxlength="6000"'));
   assert.ok(!html.includes('option value="dante"'), 'No debe venir Dante preseleccionado');
 });
