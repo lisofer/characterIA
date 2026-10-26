@@ -25,3 +25,11 @@ test('la personalidad se actualiza sin perder la memoria persistente incluida', 
   assert.match(result,/Sos una inteligencia artificial/);
   assert.match(result,/El jugador confía en vos/);
 });
+
+test('se entrega toda una personalidad extensa a Gemini, sin el antiguo corte de 6000 caracteres', () => {
+  const prompt = 'Nira es dulce, aventurera y desea ser una persona de verdad. '.repeat(180);
+  assert.ok(prompt.length > 6000);
+  const instruction = buildNpcInstruction({ id: 'nira', name: 'Nira', voice: 'Kore', prompt }, { summary:'', turns:[] });
+  assert.ok(instruction.includes(prompt), 'Gemini debe recibir el prompt completo');
+  assert.ok(instruction.length > 6000);
+});
