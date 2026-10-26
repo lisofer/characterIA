@@ -99,8 +99,27 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   });
   assert.equal(rename.status, 200);
   assert.equal(rename.data.name, 'EVA');
+  // A long character description used to fail with a generic HTTP 400 at 6000 chars.
+  const fullPrompt = 'Sos Nira, una IA dulce, aventurera que sueña ser persona. '.repeat(200);
+  assert.ok(fullPrompt.length > 6000);
+  assert.ok(fullPrompt.length < 20000);
+  const longSave = await json(base, '/api/admin/npcs/' + id, {
+    method: 'PUT', headers: siteHeaders,
+    body: JSON.stringify({ name: 'Nira', voice: 'Kore', prompt: fullPrompt })
+  });
+  assert.equal(longSave.status, 200);
+  assert.equal(longSave.data.prompt, fullPrompt);
+  const oversized = await json(base, '/api/admin/npcs/' + id, {
+    method: 'PUT', headers: siteHeaders,
+    body: JSON.stringify({ name: 'Nira', voice: 'Kore', prompt: 'x'.repeat(20001) })
+  });
+  assert.equal(oversized.status, 400);
+  assert.match(oversized.data.error, /20001/);
+  assert.match(oversized.data.error, /20000/);
+  const afterOversized = await json(base, '/api/admin/npcs', { headers: h });
+  assert.equal(afterOversized.data[0].prompt, fullPrompt, 'A rejected save leaves the last saved version intact.');
   const publicProfiles = await json(base, '/api/public/npcs');
-  assert.equal(publicProfiles.data.find(p => p.id === id).name, 'EVA');
+  assert.equal(publicProfiles.data.find(p => p.id === id).name, 'Nira');
   assert.equal('prompt' in publicProfiles.data[0], false, 'El prompt privado no debe filtrarse.');
   const s = await json(base, '/api/session', {
     method: 'POST',
