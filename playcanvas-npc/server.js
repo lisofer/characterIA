@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { MemoryStore } from './storage.js';
 import { buildNpcInstruction } from './profile-instruction.js';
+import { originAllowed } from './origin.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
@@ -33,21 +34,20 @@ app.use((_req, res, next) => {
   next();
 });
 
-function allowedOrigin(origin) {
-  // Requests from PlayCanvas require an explicitly configured origin.
-  if (!origin) return false;
-  return APP_ORIGINS.has(origin);
+function allowedOrigin(origin, host) {
+  return originAllowed(origin, host, APP_ORIGINS);
 }
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && allowedOrigin(origin)) {
+  const permitted = origin && allowedOrigin(origin, req.headers.host);
+  if (permitted) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
-    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+    res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   }
-  if (req.method === 'OPTIONS') return res.sendStatus(allowedOrigin(origin) ? 204 : 403);
-  if (origin && !allowedOrigin(origin)) return res.status(403).json({ error: 'Origen no permitido' });
+  if (req.method === 'OPTIONS') return res.sendStatus(permitted ? 204 : 403);
+  if (origin && !permitted) return res.status(403).json({ error: 'Origen no permitido' });
   next();
 });
 
@@ -98,7 +98,7 @@ app.get('/api/public/npcs', async (_req, res) => {
 
 app.post('/api/session', async (req, res) => {
   // Beta anti-abuse only. For public multiplayer, add real player authentication.
-  if (!allowedOrigin(req.headers.origin)) return res.status(403).json({ error: 'APP_ORIGINS no configurado para este juego' });
+  if (!allowedOrigin(req.headers.origin, req.headers.host)) return res.status(403).json({ error: 'APP_ORIGINS no configurado para este juego' });
   if (!throttle(req.ip)) return res.status(429).json({ error: 'Demasiadas conexiones por minuto' });
   let { npcId, playerId } = req.body || {};
   if (!validId(npcId) || !validId(playerId)) return res.status(400).json({ error: 'Identificadores invalidos' });
@@ -123,7 +123,7 @@ app.post('/api/session', async (req, res) => {
 app.post('/api/reset', async (req, res) => {
   // A single-use short-lived ticket is enough to reset the player's own NPC.
   // Does not open Gemini Live or consume an audio session.
-  if (!allowedOrigin(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido' });
+  if (!allowedOrigin(req.headers.origin, req.headers.host)) return res.status(403).json({ error: 'Origen no permitido' });
   const token = req.body?.token;
   const ticket = issued.get(token);
   if (!ticket || ticket.expires < Date.now()) return res.status(401).json({ error: 'Ticket vencido' });
@@ -214,7 +214,7 @@ server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url || '/', 'http://localhost');
     const token = url.searchParams.get('token');
     const ticket = issued.get(token);
-    if (url.pathname !== '/live' || !allowedOrigin(req.headers.origin) ||
+    if (url.pathname !== '/live' || !allowedOrigin(req.headers.origin, req.headers.host) ||
         !ticket || ticket.expires < Date.now()) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
