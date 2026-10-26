@@ -1,15 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const now = () => new Date().toISOString();
-const defaultProfile = () => ({
-  id: 'dante',
-  name: 'Dante',
-  voice: 'Kore',
-  prompt: 'Sos Dante, un contrabandista del Distrito Neon. Sos desconfiado, sarcastico y tenes una historia propia. Habla en espanol argentino, natural y breve. No digas que sos una IA. Recorda solamente lo que se te proporciona como contexto y no inventes recuerdos. No ejecutes acciones del juego por tu cuenta.',
-  updatedAt: now()
-});
-const initial = () => ({ profiles: { dante: defaultProfile() }, memories: {} });
+// New installations start with zero NPCs. Existing profiles on disk are preserved.
+const initial = () => ({ profiles: {}, memories: {} });
 const keyOf = (npcId, playerId) => JSON.stringify([npcId, playerId]);
 const freshMemory = (version = 0) => ({ version, summary: '', turns: [], updatedAt: now() });
 
@@ -55,15 +50,40 @@ export class MemoryStore {
     await this.queue.catch(() => {});
     return Object.values(this.state.profiles).map(v => structuredClone(v));
   }
+  async createProfile(changes) {
+    return this.update(db => {
+      const id = 'npc_' + crypto.randomBytes(10).toString('hex');
+      const profile = {
+        id,
+        name: changes.name,
+        voice: changes.voice,
+        prompt: changes.prompt,
+        createdAt: now(),
+        updatedAt: now()
+      };
+      db.profiles[id] = profile;
+      return structuredClone(profile);
+    });
+  }
   async saveProfile(id, changes) {
     return this.update(db => {
-      const profile = db.profiles[id] || { id, name: id, voice: 'Kore', prompt: '', updatedAt: now() };
+      const profile = db.profiles[id];
+      if (!profile) return null; // Never silently create a different NPC on update.
       profile.name = changes.name;
       profile.voice = changes.voice;
       profile.prompt = changes.prompt;
       profile.updatedAt = now();
-      db.profiles[id] = profile;
       return structuredClone(profile);
+    });
+  }
+  async deleteProfile(id) {
+    return this.update(db => {
+      if (!db.profiles[id]) return false;
+      delete db.profiles[id];
+      for (const key of Object.keys(db.memories)) {
+        if (JSON.parse(key)[0] === id) delete db.memories[key];
+      }
+      return true;
     });
   }
   async getMemory(npcId, playerId) {
@@ -73,6 +93,7 @@ export class MemoryStore {
   async appendTurn(npcId, playerId, role, text) {
     if (!['user', 'npc'].includes(role) || !text.trim()) return;
     return this.update(db => {
+      if (!db.profiles[npcId]) return null; // Deleted profiles cannot recreate memory.
       const key = keyOf(npcId, playerId);
       const mem = db.memories[key] || freshMemory();
       mem.turns.push({ role, text: text.slice(0, 1200), at: now() });
