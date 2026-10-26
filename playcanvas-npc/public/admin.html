@@ -32,15 +32,15 @@ pre{white-space:pre-wrap;word-break:break-word;color:#98f0c8}
 <div style="margin-top:12px"><button id="load" class="secondary">Conectar y cargar NPC</button></div>
 </section>
 <section>
-<label for="npc">NPC</label><select id="npc"><option value="dante">Dante</option></select>
+<label for="npc">NPC</label><select id="npc"><option value="">Cargá los personajes desde el servidor</option></select>
 <div class="flex">
-<div><label for="name">Nombre</label><input id="name" value="Dante"></div>
+<div><label for="name">Nombre</label><input id="name" placeholder="Nombre asignado en Railway"></div>
 <div><label for="voice">Voz de Gemini</label><input id="voice" value="Kore"></div>
 </div>
 <label for="prompt">Personalidad / system prompt</label>
 <textarea id="prompt" placeholder="Describí quién es el personaje, qué sabe, su historia, y cómo habla."></textarea>
 <div style="margin-top:12px"><button id="save">Guardar personalidad</button></div>
-<p class="hint">Los cambios de personalidad se aplican al abrir una nueva conversación.</p>
+<p class="hint">El nombre se sincroniza con el juego. Si hay una conversación activa, se vuelve a conectar automáticamente a Gemini para aplicar la nueva personalidad y voz, sin borrar la memoria.</p>
 </section>
 <section>
 <h2>Memoria y restablecimiento</h2>
@@ -93,7 +93,7 @@ $('save').onclick=async()=>{try{
   const data={name:$('name').value,voice:$('voice').value,prompt:$('prompt').value};
   await api('/api/admin/npcs/'+encodeURIComponent($('npc').value),'PUT',data);
   $('npc').selectedOptions[0].textContent=data.name+' ('+$('npc').value+')';
-  show('Nombre y personalidad guardados. Se aplicarán en la próxima conversación.');
+  show('Nombre y personalidad guardados en Railway. El juego tomará la configuración actualizada automáticamente.');
 }catch(e){show('Error: '+e.message);}};
 $('memory').onclick=async()=>{try{
   const m=await api('/api/admin/memory/'+encodeURIComponent($('npc').value)+'/'+encodeURIComponent($('player').value));
