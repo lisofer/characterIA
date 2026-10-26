@@ -16,6 +16,7 @@ const APP_ORIGINS = new Set(
   (process.env.APP_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
 );
 const TOKEN_TTL_MS = 5 * 60 * 1000;
+const MAX_PERSONALITY_CHARS = 20000;
 const store = await new MemoryStore().init();
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 const app = express();
@@ -26,7 +27,7 @@ const active = new Map();
 const ipBudget = new Map();
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '64kb' }));
 app.use((_req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'no-referrer');
@@ -137,16 +138,27 @@ app.post('/api/reset', async (req, res) => {
 app.get('/api/admin/npcs', admin, async (_req, res) => {
   res.json(await store.getProfiles());
 });
-function validProfile(body) {
+function profileValidationError(body) {
   const { name, voice, prompt } = body || {};
-  if (typeof name !== 'string' || !name.trim() || name.length > 80 ||
-      typeof voice !== 'string' || !/^[a-zA-Z0-9]{2,40}$/.test(voice) ||
-      typeof prompt !== 'string' || !prompt.trim() || prompt.length > 6000) return null;
-  return { name: name.trim(), voice, prompt: prompt.trim() };
+  if (typeof name !== 'string' || !name.trim()) return 'El nombre del personaje está vacío.';
+  if (name.length > 80) return 'El nombre no puede superar 80 caracteres.';
+  if (typeof voice !== 'string' || !/^[a-zA-Z0-9]{2,40}$/.test(voice)) return 'La voz debe ser un identificador válido de Gemini, por ejemplo Kore.';
+  if (typeof prompt !== 'string' || !prompt.trim()) return 'La personalidad está vacía. Pegá el texto del personaje.';
+  if (prompt.length > MAX_PERSONALITY_CHARS) {
+    return 'La personalidad tiene ' + prompt.length +
+      ' caracteres y el límite es ' + MAX_PERSONALITY_CHARS +
+      '. Podés acortarla sin perder lo esencial.';
+  }
+  return null;
+}
+function validProfile(body) {
+  if (profileValidationError(body)) return null;
+  return { name: body.name.trim(), voice: body.voice, prompt: body.prompt.trim() };
 }
 app.post('/api/admin/npcs', admin, async (req, res) => {
+  const problem = profileValidationError(req.body);
+  if (problem) return res.status(400).json({ error: problem });
   const changes = validProfile(req.body);
-  if (!changes) return res.status(400).json({ error: 'Completá nombre, voz y personalidad antes de crear el personaje.' });
   try {
     const created = await store.createProfile(changes);
     res.status(201).json(created);
@@ -158,10 +170,11 @@ app.get('/api/admin/memory/:npcId/:playerId', admin, async (req, res) => {
   res.json(await store.getMemory(req.params.npcId, req.params.playerId));
 });
 app.put('/api/admin/npcs/:id', admin, async (req, res) => {
-  const id = req.params.id, changes = validProfile(req.body);
-  if (!validId(id) || !changes) {
-    return res.status(400).json({ error: 'Completá nombre, voz y personalidad válidos.' });
-  }
+  const id = req.params.id;
+  if (!validId(id)) return res.status(400).json({ error: 'Identificador de personaje inválido.' });
+  const problem = profileValidationError(req.body);
+  if (problem) return res.status(400).json({ error: problem });
+  const changes = validProfile(req.body);
   try {
     const saved = await store.saveProfile(id, changes);
     if (!saved) return res.status(404).json({ error: 'Este personaje ya no existe. Actualizá el listado.' });
