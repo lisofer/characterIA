@@ -19,10 +19,11 @@ NpcGeminiVoice.prototype.initialize = function () {
     this.playing = [];
     this.waitingReset = false;
     this.playerId = this._loadPlayerId();
+    this.npcDisplayName = 'NPC';
 
     this.panel = document.createElement('div');
     this.panel.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(390px,92vw);background:rgba(5,13,23,.93);color:#e8faff;border:1px solid #19c7ea;padding:15px;border-radius:12px;font:14px system-ui;z-index:10000;box-shadow:0 0 20px #0bf2;display:none';
-    this.panel.innerHTML = '<div style="font-size:16px;font-weight:700;margin-bottom:5px">NPC: '+this._escape(this.npcId)+'</div>' +
+    this.panel.innerHTML = '<div class="npc-name" style="font-size:16px;font-weight:700;margin-bottom:5px">NPC</div>' +
         '<div class="npc-status" style="min-height:20px;color:#a4c8d7">Acercate y pulsá E para hablar</div>' +
         '<div class="npc-transcript" style="margin:8px 0;min-height:32px;max-height:90px;overflow:auto"></div>' +
         '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
@@ -30,6 +31,7 @@ NpcGeminiVoice.prototype.initialize = function () {
         '<button class="npc-stop" style="padding:10px;cursor:pointer">Terminar</button>' +
         '<button class="npc-reset" style="padding:10px;cursor:pointer">↻ Restablecer NPC</button></div>';
     document.body.appendChild(this.panel);
+    this.nameEl = this.panel.querySelector('.npc-name');
     this.statusEl = this.panel.querySelector('.npc-status');
     this.transcriptEl = this.panel.querySelector('.npc-transcript');
     this.panel.querySelector('.npc-start').onclick = function () { self.begin(); };
@@ -38,6 +40,7 @@ NpcGeminiVoice.prototype.initialize = function () {
         if (confirm('¿Querés restablecer los recuerdos de este NPC? Su personalidad seguirá igual.')) self.reset();
     };
     this.on('destroy', this._onDestroy, this);
+    this._refreshName();
 };
 
 NpcGeminiVoice.prototype._loadPlayerId = function () {
@@ -55,6 +58,23 @@ NpcGeminiVoice.prototype._loadPlayerId = function () {
 NpcGeminiVoice.prototype._escape = function (str) {
     return String(str).replace(/[&<>"]/g, function (c) { return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]; });
 };
+NpcGeminiVoice.prototype._refreshName = async function () {
+    try {
+        var backend = this.backendUrl.replace(/\/+$/, '');
+        var response = await fetch(backend + '/api/public/npcs');
+        if (!response.ok) return;
+        var npcs = await response.json();
+        var npc = npcs.find(function (p) { return p.id === this.npcId; }, this);
+        if (npc && typeof npc.name === 'string') this._setDisplayName(npc.name);
+    } catch (e) {
+        // Offline editor or Railway is not available yet. The Live handshake also sends the display name.
+    }
+};
+NpcGeminiVoice.prototype._setDisplayName = function (name) {
+    this.npcDisplayName = name;
+    if (this.nameEl) this.nameEl.textContent = name;
+};
+
 NpcGeminiVoice.prototype._status = function (s) { if (this.statusEl) this.statusEl.textContent = s; };
 NpcGeminiVoice.prototype.update = function () {
     var cam = this.cameraEntity || this.app.root.findByName('Camera');
@@ -104,6 +124,7 @@ NpcGeminiVoice.prototype.begin = async function () {
 
 NpcGeminiVoice.prototype._handle = function (msg) {
     if (msg.type === 'ready') {
+        if (msg.npc && msg.npc.name) this._setDisplayName(msg.npc.name);
         if (this.waitingReset) { this.ws.send(JSON.stringify({ type: 'reset' })); return; }
         if (!this.started) {
             this.started = true;
