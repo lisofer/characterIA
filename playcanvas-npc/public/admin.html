@@ -72,7 +72,7 @@ async function load(){
   try{
     const profiles=await api('/api/admin/npcs');
     $('npc').replaceChildren();
-    profiles.forEach(p=>{const option=document.createElement('option');option.value=p.id;option.textContent=p.name+' ('+p.id+')';$('npc').appendChild(option);});
+    profiles.forEach(p=>{const option=document.createElement('option');option.value=p.id;option.textContent=p.name;$('npc').appendChild(option);});
     if(profiles.length) choose(profiles[0]);
     show('Conectado al servidor.');
   }catch(e){show('Error: '+e.message);}
@@ -92,7 +92,7 @@ $('npc').onchange=()=>choose().catch(e=>show(e.message));
 $('save').onclick=async()=>{try{
   const data={name:$('name').value,voice:$('voice').value,prompt:$('prompt').value};
   await api('/api/admin/npcs/'+encodeURIComponent($('npc').value),'PUT',data);
-  $('npc').selectedOptions[0].textContent=data.name+' ('+$('npc').value+')';
+  $('npc').selectedOptions[0].textContent=data.name;
   show('Nombre y personalidad guardados en Railway. El juego tomará la configuración actualizada automáticamente.');
 }catch(e){show('Error: '+e.message);}};
 $('memory').onclick=async()=>{try{
