@@ -6,7 +6,7 @@ Esta carpeta vive en una **rama separada** de characterIA para no alterar la app
 
 ## Qué hay implementado
 - Audio de micrófono del navegador -> Railway -> Gemini Live; la respuesta sale con voz natural de Gemini.
-- Un NPC de ejemplo, **Dante**, con personalidad editable desde el panel web.
+- **Alta de personajes desde el panel web**: creás Nira o cualquier otro NPC, editás su personalidad, voz y nombre, o lo eliminás. El servidor no crea personajes predeterminados en una instalación nueva.
 - Memoria por NPC y por jugador en el archivo /data/npc-data.json; resúmenes automáticos al cerrar una conversación (con modelo Flash-Lite).
 - Botón **Restablecer NPC** desde PlayCanvas y panel privado; la personalidad nunca se borra al resetear.
 - La clave GEMINI_API_KEY queda **solo en Railway**, jamás dentro del script de PlayCanvas.
@@ -42,11 +42,11 @@ En Windows se puede generar un token seguro mediante:
 1. Abrí tu proyecto en el Editor de PlayCanvas.
 2. Desde GitHub, obtené el script **playcanvas/npcGeminiVoice.js** de esta misma carpeta.
    Como ya tenés Codex + MCP, pedile a Codex que cree el script dentro de Assets sin pasar archivos por ChatGPT.
-3. Creá una entidad que represente al NPC, por ejemplo una cápsula 3D llamada **Dante**.
+3. Creá una entidad que represente al NPC, por ejemplo una cápsula 3D. Su nombre visible se toma del personaje guardado en Railway.
 4. En esa entidad agregá el componente **Script** con **npcGeminiVoice**.
 5. Inspector:
    - Backend URL: https://TU-SERVICIO.up.railway.app
-   - NPC ID: dante
+   - NPC ID: `auto` (cuando hay un solo NPC); si hay varios, elegí el personaje desde el selector del juego o asociá a cada entidad su ID generado por Railway.
    - Player Camera: entidad cámara FPS
    - Interaction Distance: 4
 6. Lanzá el juego en HTTPS; permití el micrófono.
@@ -56,7 +56,7 @@ Si Codex detecta que tu proyecto usa **ESM Scripts** en vez de scripts clásicos
 
 ## Sincronización automática de nombre, personalidad y voz
 
-**Railway es la fuente única de configuración.** El npcId de PlayCanvas (dante por compatibilidad con recuerdos existentes) es solamente una clave técnica: no define el nombre visible.
+**Railway es la fuente única de configuración.** Cada NPC nuevo recibe automáticamente un ID técnico único que el jugador no necesita escribir. Los proyectos antiguos con `npcId=dante` pueden seguir encontrando al único NPC; si hay varios, el selector del juego permite elegir.
 
 - Al cargar el juego, el script consulta GET /api/public/npcs, que devuelve el nombre y la voz, sin exponer el prompt privado.
 - Cada 5 segundos vuelve a consultar el nombre y actualiza los textos y el nombre de la entidad 3D durante la ejecución.
@@ -69,11 +69,19 @@ Si Codex detecta que tu proyecto usa **ESM Scripts** en vez de scripts clásicos
 ## 3. Panel administrativo
 URL: /admin.html
 
+1. Ingresá tu ADMIN_TOKEN y pulsá **Conectar y cargar personajes**.
+2. Si no hay personajes, completá el formulario y pulsá **Crear personaje**. Si hay otros, pulsá **+ Nuevo personaje**.
+3. Para crear a Nira escribí Nombre = Nira, Voz = Kore y su prompt completo, luego **Crear personaje**.
+4. La página consulta nuevamente el servidor para confirmar que el personaje quedó guardado.
+5. Después de recargar la página, el token desaparece por seguridad: ingresalo nuevamente y pulsá Conectar. Los personajes no deberían desaparecer.
+6. Podés seleccionar cualquier personaje guardado para editarlo, restablecer su memoria o eliminarlo (esto último borra también sus recuerdos).
+
 - Modificar el nombre, la voz nativa de Gemini y el prompt de personalidad.
 - Ver memoria de un jugador introduciendo su ID.
 - Resetear la memoria individual sin alterar el prompt.
 - Resetear TODAS las memorias de un NPC.
-- El token no se guarda en localStorage; se ingresa en cada visita.
+- El token no se guarda en localStorage; se ingresa en cada visita. **Guardar un personaje requiere primero autenticarse**, y el botón queda deshabilitado cuando no hay sesión.
+- Los perfiles y recuerdos permanecen en /data/npc-data.json. **Si no existe un volumen Railway montado en /data**, Railway puede perder ese archivo al reconstruir o reiniciar el contenedor. Comprobá el volumen en el servicio.
 
 El ID de jugador del script web se genera una vez y se guarda en localStorage del navegador del juego. El ID del panel debe coincidir si querés inspeccionar su memoria; para probar, podés verlo en DevTools > Application > Local Storage > umbral_player_id.
 
@@ -96,10 +104,12 @@ El ID de jugador del script web se genera una vez y se guarda en localStorage de
 ## API
 GET /api/health
 GET /api/public/npcs
-POST /api/session (navegador: npcId, playerId)
+POST /api/session (navegador: npcId, playerId; npcId=auto si hay un solo personaje)
 WSS /live?token=... (mensajes audio, text, reset)
 GET /api/admin/npcs (Bearer ADMIN_TOKEN)
-PUT /api/admin/npcs/:id
+POST /api/admin/npcs (crear un personaje; genera ID automático)
+PUT /api/admin/npcs/:id (editar)
+DELETE /api/admin/npcs/:id (eliminar personaje y recuerdos)
 GET /api/admin/memory/:npcId/:playerId
 POST /api/admin/reset/:npcId/:playerId
 POST /api/admin/reset-all/:npcId
