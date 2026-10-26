@@ -28,15 +28,24 @@ export class MemoryStore {
     }
     return this;
   }
-  async _write() {
+  async _write(nextState = this.state) {
     const tmp = this.file + '.' + process.pid + '.tmp';
-    await fs.writeFile(tmp, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-    await fs.rename(tmp, this.file);
+    try {
+      await fs.writeFile(tmp, JSON.stringify(nextState, null, 2), { mode: 0o600 });
+      await fs.rename(tmp, this.file);
+    } catch (error) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw error;
+    }
   }
   async update(fn) {
     const next = this.queue.catch(() => {}).then(async () => {
-      const result = fn(this.state);
-      await this._write();
+      // Commit only after the file was durably written. If /data fails, a
+      // failed Save must not appear successful in memory until a restart.
+      const snapshot = structuredClone(this.state);
+      const result = fn(snapshot);
+      await this._write(snapshot);
+      this.state = snapshot;
       return result;
     });
     this.queue = next;
