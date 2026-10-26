@@ -91,7 +91,7 @@ function profilePublic(profile) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'playcanvas-gemini-npc', panelVersion: 'npc-admin-save-v2', geminiConfigured: !!ai, model: MODEL });
+  res.json({ ok: true, service: 'playcanvas-gemini-npc', panelVersion: 'npc-admin-longprompt-v3', geminiConfigured: !!ai, model: MODEL });
 });
 app.get('/api/public/npcs', async (_req, res) => {
   res.json((await store.getProfiles()).map(profilePublic));
