@@ -53,6 +53,24 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   const profiles = await json(base, '/api/admin/npcs', { headers: h });
   assert.equal(profiles.status, 200);
   assert.equal(profiles.data.length, 0, 'No se crea Dante por defecto.');
+  // Browser form submits POST/PUT/DELETE with an Origin header. This was
+  // previously 403 unless the Railway URL was redundantly in APP_ORIGINS.
+  const sameOrigin = 'https://chesscut-studio.up.railway.app';
+  const siteHeaders = { ...h, Host: 'chesscut-studio.up.railway.app', Origin: sameOrigin };
+  const preflight = await fetch(base + '/api/admin/npcs', {
+    method: 'OPTIONS',
+    headers: { Host: 'chesscut-studio.up.railway.app', Origin: sameOrigin,
+      'Access-Control-Request-Method':'POST',
+      'Access-Control-Request-Headers':'authorization,content-type' }
+  });
+  assert.equal(preflight.status, 204, 'Browser preflight allows admin save from its own domain');
+  assert.match(preflight.headers.get('access-control-allow-methods') || '', /DELETE/);
+  const forbiddenOrigin = await json(base, '/api/admin/npcs', {
+    method: 'POST',
+    headers: { ...siteHeaders, Origin: 'https://evil.example' },
+    body: JSON.stringify({ name:'Intruso',voice:'Kore',prompt:'No.' })
+  });
+  assert.equal(forbiddenOrigin.status, 403, 'Do not allow other origins');
   const wrongCreate = await json(base, '/api/admin/npcs', {
     method: 'POST', body: JSON.stringify({ name: 'Hacker', voice: 'Kore', prompt: 'No autorizado' }),
     headers: { 'Content-Type': 'application/json' }
@@ -63,7 +81,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   });
   assert.equal(invalidCreate.status, 400);
   const created = await json(base, '/api/admin/npcs', {
-    method: 'POST', headers: h,
+    method: 'POST', headers: siteHeaders,
     body: JSON.stringify({
       name:'Nira', voice:'Kore', prompt:'Sos una mujer IA en un mundo digital.'
     })
@@ -72,7 +90,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   const id = created.data.id;
   assert.match(id, /^npc_[0-9a-f]{20}$/);
   const rename = await json(base, '/api/admin/npcs/'+id, {
-    method:'PUT', headers:h,
+    method:'PUT', headers:siteHeaders,
     body: JSON.stringify({ name:'EVA', voice:'Kore', prompt:'Una nueva historia.' })
   });
   assert.equal(rename.status, 200);
@@ -90,7 +108,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   assert.equal(reset.status, 200);
   const memory = await json(base, '/api/admin/memory/' + id + '/player1', { headers: h });
   assert.equal(memory.data.turns.length, 0);
-  const deleted = await json(base, '/api/admin/npcs/' + id, { method: 'DELETE', headers: h });
+  const deleted = await json(base, '/api/admin/npcs/' + id, { method: 'DELETE', headers: siteHeaders });
   assert.equal(deleted.status, 200);
   const after = await json(base, '/api/admin/npcs', { headers: h });
   assert.deepEqual(after.data, []);
