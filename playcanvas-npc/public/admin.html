@@ -92,7 +92,8 @@ $('npc').onchange=()=>choose().catch(e=>show(e.message));
 $('save').onclick=async()=>{try{
   const data={name:$('name').value,voice:$('voice').value,prompt:$('prompt').value};
   await api('/api/admin/npcs/'+encodeURIComponent($('npc').value),'PUT',data);
-  show('Personalidad guardada. Se aplicará en la próxima conversación.');
+  $('npc').selectedOptions[0].textContent=data.name+' ('+$('npc').value+')';
+  show('Nombre y personalidad guardados. Se aplicarán en la próxima conversación.');
 }catch(e){show('Error: '+e.message);}};
 $('memory').onclick=async()=>{try{
   const m=await api('/api/admin/memory/'+encodeURIComponent($('npc').value)+'/'+encodeURIComponent($('player').value));
