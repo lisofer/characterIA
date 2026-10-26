@@ -100,9 +100,19 @@ app.post('/api/session', async (req, res) => {
   // Beta anti-abuse only. For public multiplayer, add real player authentication.
   if (!allowedOrigin(req.headers.origin)) return res.status(403).json({ error: 'APP_ORIGINS no configurado para este juego' });
   if (!throttle(req.ip)) return res.status(429).json({ error: 'Demasiadas conexiones por minuto' });
-  const { npcId, playerId } = req.body || {};
+  let { npcId, playerId } = req.body || {};
   if (!validId(npcId) || !validId(playerId)) return res.status(400).json({ error: 'Identificadores invalidos' });
-  if (!(await store.getProfile(npcId))) return res.status(404).json({ error: 'NPC inexistente' });
+  let profile = npcId === 'auto' ? null : await store.getProfile(npcId);
+  if (!profile) {
+    // The original game builds used npcId=dante. Keep them functional if only
+    // one character exists, without forcing the user to reuse that ID.
+    const profiles = await store.getProfiles();
+    if (profiles.length === 1 && (npcId === 'auto' || npcId === 'dante')) {
+      profile = profiles[0];
+      npcId = profile.id;
+    }
+  }
+  if (!profile) return res.status(404).json({ error: 'No se encontro el NPC. Si hay varios, asignale a cada entidad su identificador de personaje.' });
   if (!ai) return res.status(503).json({ error: 'Falta GEMINI_API_KEY en Railway' });
   const token = crypto.randomBytes(32).toString('base64url');
   issued.set(token, { npcId, playerId, expires: Date.now() + TOKEN_TTL_MS });
@@ -124,29 +134,59 @@ app.post('/api/reset', async (req, res) => {
   catch (err) { jsonError(res, err); }
 });
 
-app.get('/api/admin/npcs', admin, async (_req, res) => res.json(await store.getProfiles()));
+app.get('/api/admin/npcs', admin, async (_req, res) => {
+  res.json(await store.getProfiles());
+});
+function validProfile(body) {
+  const { name, voice, prompt } = body || {};
+  if (typeof name !== 'string' || !name.trim() || name.length > 80 ||
+      typeof voice !== 'string' || !/^[a-zA-Z0-9]{2,40}$/.test(voice) ||
+      typeof prompt !== 'string' || !prompt.trim() || prompt.length > 6000) return null;
+  return { name: name.trim(), voice, prompt: prompt.trim() };
+}
+app.post('/api/admin/npcs', admin, async (req, res) => {
+  const changes = validProfile(req.body);
+  if (!changes) return res.status(400).json({ error: 'Completá nombre, voz y personalidad antes de crear el personaje.' });
+  try {
+    const created = await store.createProfile(changes);
+    res.status(201).json(created);
+  } catch (err) { jsonError(res, err); }
+});
 app.get('/api/admin/memory/:npcId/:playerId', admin, async (req, res) => {
   if (!validId(req.params.npcId) || !validId(req.params.playerId)) return res.sendStatus(400);
+  if (!(await store.getProfile(req.params.npcId))) return res.status(404).json({ error: 'NPC inexistente' });
   res.json(await store.getMemory(req.params.npcId, req.params.playerId));
 });
 app.put('/api/admin/npcs/:id', admin, async (req, res) => {
-  const id = req.params.id;
-  const { name, voice, prompt } = req.body || {};
-  if (!validId(id) || typeof name !== 'string' || !name.trim() || name.length > 80 ||
-      typeof voice !== 'string' || !/^[a-zA-Z0-9]{2,40}$/.test(voice) ||
-      typeof prompt !== 'string' || !prompt.trim() || prompt.length > 6000) {
-    return res.status(400).json({ error: 'Nombre, voz o personalidad invalidos' });
+  const id = req.params.id, changes = validProfile(req.body);
+  if (!validId(id) || !changes) {
+    return res.status(400).json({ error: 'Completá nombre, voz y personalidad válidos.' });
   }
   try {
-    const saved = await store.saveProfile(id, { name: name.trim(), voice, prompt: prompt.trim() });
+    const saved = await store.saveProfile(id, changes);
+    if (!saved) return res.status(404).json({ error: 'Este personaje ya no existe. Actualizá el listado.' });
     res.json(saved);
-    // Notify all active players of this NPC. The current Gemini session has
-    // immutable systemInstruction and voice; a new session must be created.
     for (const [key, ws] of active) {
       if (JSON.parse(key)[0] !== id || ws.readyState !== WebSocket.OPEN) continue;
       send(ws, { type: 'profile_updated', npc: profilePublic(saved) });
       ws.close(4001, 'Perfil actualizado en Railway');
     }
+  } catch (err) { jsonError(res, err); }
+});
+app.delete('/api/admin/npcs/:id', admin, async (req, res) => {
+  const id = req.params.id;
+  if (!validId(id)) return res.sendStatus(400);
+  // Close active connections and remove unredeemed tickets before deletion.
+  for (const [key, ws] of active) {
+    if (JSON.parse(key)[0] !== id) continue;
+    ws.npcReset = true;
+    ws.close(1000, 'Personaje eliminado');
+  }
+  for (const [token, ticket] of issued) if (ticket.npcId === id) issued.delete(token);
+  try {
+    const deleted = await store.deleteProfile(id);
+    if (!deleted) return res.status(404).json({ error: 'Personaje inexistente' });
+    res.json({ ok: true });
   } catch (err) { jsonError(res, err); }
 });
 app.post('/api/admin/reset/:npcId/:playerId', admin, async (req, res) => {
