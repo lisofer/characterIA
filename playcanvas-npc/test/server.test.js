@@ -53,6 +53,18 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   const profiles = await json(base, '/api/admin/npcs', { headers: h });
   assert.equal(profiles.status, 200);
   assert.equal(profiles.data[0].id, 'dante');
+  const rename = await json(base, '/api/admin/npcs/dante', {
+    method: 'PUT', headers: h,
+    body: JSON.stringify({
+      name: 'Nira', voice: 'Kore',
+      prompt: 'Sos una inteligencia artificial curiosa que vive en una ciudad digital.'
+    })
+  });
+  assert.equal(rename.status, 200);
+  assert.equal(rename.data.name, 'Nira');
+  const publicProfiles = await json(base, '/api/public/npcs');
+  assert.equal(publicProfiles.data.find(p => p.id === 'dante').name, 'Nira');
+  assert.equal('prompt' in publicProfiles.data[0], false, 'El prompt privado no debe filtrarse a PlayCanvas');
   const s = await json(base, '/api/session', {
     method: 'POST',
     headers: { Origin: 'https://launch.playcanvas.com', 'Content-Type': 'application/json' },
