@@ -4,7 +4,7 @@ export function buildNpcInstruction(profile, memory) {
   const recent = (memory.turns || []).slice(-8)
     .map(t => t.role + ': ' + t.text).join('\n').slice(-2000);
   const name = String(profile.name || '').trim();
-  const personality = String(profile.prompt || '').slice(0, 6000);
+  const personality = String(profile.prompt || ''); // Already validated by Railway; never silently truncate.
   return [
     'CONFIGURACION DEL PERSONAJE ALMACENADA EN RAILWAY:',
     'Personalidad: ' + personality,
