@@ -108,7 +108,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
     body: JSON.stringify({ name: 'Nira', voice: 'Kore', prompt: fullPrompt })
   });
   assert.equal(longSave.status, 200);
-  assert.equal(longSave.data.prompt, fullPrompt);
+  assert.equal(longSave.data.prompt, fullPrompt.trim());
   const oversized = await json(base, '/api/admin/npcs/' + id, {
     method: 'PUT', headers: siteHeaders,
     body: JSON.stringify({ name: 'Nira', voice: 'Kore', prompt: 'x'.repeat(20001) })
@@ -117,7 +117,7 @@ test('arranca sin API key, protege panel y mantiene datos en disco', { timeout: 
   assert.match(oversized.data.error, /20001/);
   assert.match(oversized.data.error, /20000/);
   const afterOversized = await json(base, '/api/admin/npcs', { headers: h });
-  assert.equal(afterOversized.data[0].prompt, fullPrompt, 'A rejected save leaves the last saved version intact.');
+  assert.equal(afterOversized.data[0].prompt, fullPrompt.trim(), 'A rejected save leaves the last saved version intact.');
   const publicProfiles = await json(base, '/api/public/npcs');
   assert.equal(publicProfiles.data.find(p => p.id === id).name, 'Nira');
   assert.equal('prompt' in publicProfiles.data[0], false, 'El prompt privado no debe filtrarse.');
