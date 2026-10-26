@@ -78,3 +78,18 @@ test('no elimina perfiles antiguos que ya estaban guardados en /data', async t =
   assert.equal((await reopened.getProfile('dante')).name, 'Nombre antiguo');
   assert.equal((await reopened.getProfiles()).length, 1);
 });
+
+test('error de escritura NO guarda un NPC fantasma en memoria', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'npc-writefail-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const filename = path.join(dir, 'save.json');
+  const s = await new MemoryStore(filename).init();
+  const originalWrite = s._write.bind(s);
+  s._write = async () => { throw new Error('Sin espacio en /data'); };
+  await assert.rejects(s.createProfile(nira), /Sin espacio/);
+  assert.deepEqual(await s.getProfiles(), []);
+  s._write = originalWrite;
+  const created = await s.createProfile(nira);
+  const reopened = await new MemoryStore(filename).init();
+  assert.equal((await reopened.getProfile(created.id)).name, 'Nira');
+});
