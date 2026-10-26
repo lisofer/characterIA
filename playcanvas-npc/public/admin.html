@@ -66,6 +66,8 @@ pre{white-space:pre-wrap;word-break:break-word;color:#98f0c8;max-height:340px;ov
   </div>
   <label for="prompt">Personalidad e historia (system prompt)</label>
   <textarea id="prompt" disabled placeholder="Describí su historia, forma de hablar, carácter, relaciones y secretos."></textarea>
+  <p id="promptCount" class="hint" aria-live="polite">0 / 20.000 caracteres permitidos</p>
+  <p class="hint small">Si el guardado falla, se conserva un borrador en esta pestaña del navegador para que no pierdas el texto.</p>
   <div class="inline" style="margin-top:14px">
     <button id="save" disabled>Crear personaje</button>
     <button id="delete" class="warn" disabled hidden>Eliminar personaje</button>
@@ -95,6 +97,34 @@ let creating = false;
 let profiles = [];
 let selectedId = '';
 let busy = false;
+const MAX_PERSONALITY_CHARS = 20000;
+const draftKey = id => 'npcstudio:unsaved-v1:' + (id || '_nuevo');
+function updatePromptCount() {
+  const count = $('prompt').value.length;
+  $('promptCount').textContent = count.toLocaleString('es-AR') + ' / ' +
+    MAX_PERSONALITY_CHARS.toLocaleString('es-AR') + ' caracteres permitidos';
+  $('promptCount').style.color = count > MAX_PERSONALITY_CHARS ? '#ff9b9b' : '';
+}
+function storeDraft() {
+  if (!connected) return;
+  try {
+    sessionStorage.setItem(draftKey(selectedId), JSON.stringify({
+      name: $('name').value, voice: $('voice').value, prompt: $('prompt').value
+    }));
+  } catch {}
+  updatePromptCount();
+}
+function restoreDraft() {
+  try {
+    const raw = sessionStorage.getItem(draftKey(selectedId));
+    if (!raw) return;
+    const value = JSON.parse(raw);
+    if (typeof value.name === 'string') $('name').value = value.name;
+    if (typeof value.voice === 'string') $('voice').value = value.voice;
+    if (typeof value.prompt === 'string') $('prompt').value = value.prompt;
+  } catch {}
+}
+['name','voice','prompt'].forEach(id => $(id).addEventListener('input', storeDraft));
 const editIds = ['npc','name','voice','prompt','player','memory','reset','resetAll','save','delete','new'];
 
 function status(text, kind='info') {
@@ -142,6 +172,8 @@ function renderProfile(profile) {
   $('name').value = profile?.name || '';
   $('voice').value = profile?.voice || 'Kore';
   $('prompt').value = profile?.prompt || '';
+  restoreDraft();
+  updatePromptCount();
   $('save').textContent = creating ? 'Crear personaje' : 'Guardar cambios';
   $('mode').textContent = creating
     ? 'Estás dando de alta un personaje nuevo. Escribí su nombre y su personalidad.'
@@ -185,8 +217,15 @@ $('save').onclick = async () => {
     voice: $('voice').value.trim(),
     prompt: $('prompt').value.trim()
   };
-  if (!body.name || !body.prompt || !/^[a-zA-Z0-9]{2,40}$/.test(body.voice)) {
-    return status('Completá nombre y personalidad. La voz debe ser un nombre válido como Kore.', 'error');
+  if (!body.name) return status('Falta el nombre del personaje.', 'error');
+  if (!body.prompt) return status('La personalidad está vacía.', 'error');
+  if (body.prompt.length > MAX_PERSONALITY_CHARS) {
+    return status('La personalidad tiene ' + body.prompt.length.toLocaleString('es-AR') +
+      ' caracteres. El límite es ' + MAX_PERSONALITY_CHARS.toLocaleString('es-AR') +
+      '. Acortala un poco antes de guardar; el borrador permanece en esta pestaña.', 'error');
+  }
+  if (!/^[a-zA-Z0-9]{2,40}$/.test(body.voice)) {
+    return status('La voz no es válida. Probá Kore.', 'error');
   }
   setBusy(true);
   try {
@@ -200,6 +239,7 @@ $('save').onclick = async () => {
     if (!saved || saved.name !== body.name || saved.prompt !== body.prompt) {
       throw new Error('El servidor no confirmó que los datos hayan quedado guardados. Comprobá el volumen /data.');
     }
+    try { sessionStorage.removeItem(draftKey(wasNew ? '' : selectedId)); } catch {}
     profiles = list;
     renderOptions();
     renderProfile(saved);
