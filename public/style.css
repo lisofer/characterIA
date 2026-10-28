@@ -48,3 +48,31 @@
 }
 @media(max-height:600px){.student-page .topbar{height:45px;min-height:45px}.controls-bar{padding:6px 16px 8px}.controls-group{width:min(100%,285px)}.subtitle{height:34px}}
 @media(max-width:370px){.student-page .wordmark{font-size:18px!important}.student-page .topbar-right{gap:2px}.student-page .live-pill{max-width:115px}.controls-group{gap:8px}}
+/* NEXO CV: diseño móvil estable. No depende del vh estimado por Chrome. */
+.student-page{height:100dvh;min-height:0;display:grid;grid-template-rows:64px minmax(0,1fr);padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);overflow:hidden}
+.student-page .topbar{height:64px;min-height:0;align-self:stretch}
+.student-page .conversation-shell{display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0;min-width:0;height:100%;width:100%;max-width:780px;position:relative;margin:0 auto;justify-content:initial}
+.student-page .stage{width:100%;height:100%!important;max-height:none!important;min-height:0!important;min-width:0;overflow:hidden;position:relative;flex:none}
+.student-page .stage .avatar-stage{inset:0;display:grid;place-items:center;overflow:hidden}
+.student-page .avatar-images{inset:0;position:absolute;display:block;overflow:hidden;max-width:100%;max-height:100%;transform:translate(var(--avatar-x,0px),var(--avatar-y,0px)) scale(var(--avatar-scale,1));transform-origin:center center}
+.student-page .avatar-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain!important;object-position:center center!important;transform:none;max-width:100%;max-height:100%}
+.student-page .avatar-placeholder{max-height:70%;max-width:70%;transform:scale(.62)!important;transform-origin:center center;opacity:.65}
+.student-page .controls-bar{flex:none;width:100%;min-height:0;margin:0;padding:10px 16px 16px;display:flex;justify-content:center;align-items:center}
+.student-page .controls-group{width:min(100%,424px);max-width:424px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(6px,2.8vw,14px);justify-content:stretch;align-items:center}
+.student-page .control,.student-page .control-amber{width:100%!important;height:auto!important;min-width:0;aspect-ratio:1;max-width:none;border-radius:clamp(12px,4vw,19px);display:grid;place-items:center;margin:0;padding:0}
+.student-page .control .control-symbol{display:grid;place-items:center}
+.student-page .control svg{width:clamp(24px,7vw,35px);height:clamp(24px,7vw,35px)}
+.student-page .subtitle-holder{bottom:9px;left:0;right:0;padding:0 13px;width:100%;max-width:100%}
+.student-page .subtitle{height:clamp(38px,6.5vh,48px);width:min(var(--subtitle-width,760px),100%);min-width:0;max-width:100%;overflow:hidden;white-space:nowrap}
+.student-page .subtitle span{white-space:nowrap;overflow:hidden;text-overflow:clip;max-width:100%}
+.admin-page select{min-height:49px;max-width:100%;color:#eef5ff!important;background-color:#0b1b31!important;-webkit-appearance:auto;appearance:auto}
+.admin-page select option{color:#101b30;background:#f3f6fb}
+@media(max-width:600px){
+ .student-page{grid-template-rows:56px minmax(0,1fr)}
+ .student-page .topbar{height:56px}
+ .student-page .controls-bar{padding:8px 14px 15px}
+ .student-page .controls-group{width:min(100%,390px);gap:clamp(6px,2vw,11px)}
+ .student-page .subtitle-holder{bottom:6px}
+ .student-page .avatar-placeholder{transform:scale(.48)!important}
+}
+@media(max-height:620px){.student-page{grid-template-rows:46px minmax(0,1fr)}.student-page .topbar{height:46px}.student-page .controls-bar{padding:4px 14px 7px}.student-page .controls-group{max-width:290px}}
