@@ -126,6 +126,13 @@ function playAudio(b64){
   if(firstAudioTime===null)firstAudioTime=start;
   nextAudioTime=start+buff.duration;finalAudioTime=nextAudioTime;
   src.start(start);sources.add(src);src.onended=()=>{sources.delete(src);try{src.disconnect()}catch{}};
+  if(connectingUi&&audioContext.state==='running'){
+   const token=callGeneration;
+   setTimeout(()=>{
+    if(token===callGeneration&&audioContext?.state==='running'&&!callEnded&&ws?.readyState===WebSocket.OPEN)
+     voicePlaybackStarted();
+   },Math.max(0,Math.round((start-audioContext.currentTime)*1000)));
+  }
   audioSegments.push({start,end:nextAudioTime,samples:pcm});
   audioSegments=audioSegments.filter(x=>x.end>audioContext.currentTime-.3);
  }).catch(e=>toast('No se pudo reproducir audio: '+e.message));
@@ -263,26 +270,36 @@ async function connectLive(){
   let m;try{m=JSON.parse(e.data)}catch{return}
   switch(m.type){
    case 'connected':
-    currentModel=m.model;hasConnected=true;callEnded=false;setStatus(micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);updateConversationOverlay();
+    currentModel=m.model;hasConnected=true;callEnded=false;
+    setStatus(connectingUi?'Conectando…':micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);
+    updateConversationOverlay();
     if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
     break;
    case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
    case 'input_transcript':if(m.text?.trim()&&micOn)setStatus('Te escucho',true);break;
-   case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn)setStatus('Escuchando',true);break;
+   case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn&&!connectingUi)setStatus('Escuchando',true);break;
    case 'profile':break;
    case 'document':setDocuments([{id:m.id}]);void downloadCVAutomatically(m.id);break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
    case 'notice':toast(m.message);break;
-   case 'closed':hasConnected=false;callEnded=true;setStatus('Desconectado');stopMicrophone();updateConversationOverlay();toast(m.message||'La llamada se cerró');break;
+   case 'closed':
+    if(!callEnded&&socket.readyState===WebSocket.OPEN)socket.close();
+    break;
   }
  };
- socket.onclose=()=>{if(attempt!==connectAttempt)return;ws=null;hasConnected=false;callEnded=true;setStatus('Desconectado');stopMicrophone();stopPlayback();updateConversationOverlay();};
- socket.onerror=()=>{if(attempt!==connectAttempt)return;setStatus('Error de red');toast('No se pudo abrir la llamada.')};
+ socket.onclose=()=>{
+  if(attempt!==connectAttempt)return;
+  ws=null;hasConnected=false;stopMicrophone();stopPlayback();
+  if(!callEnded)scheduleReconnect();
+ };
+ socket.onerror=()=>{if(attempt!==connectAttempt)return;connectingUi=true;updateConversationOverlay();setStatus('Conectando…')};
 }
 function stopCall(){
- connectAttempt++;callGeneration++;hasConnected=false;callEnded=true;stopMicrophone();
+ clearTimeout(reconnectTimer);reconnectTimer=null;
+ clearTimeout(voiceStartTimer);voiceStartTimer=null;
+ connectAttempt++;callGeneration++;hasConnected=false;callEnded=true;connectingUi=false;reconnectAttempt=0;stopMicrophone();
  if(ws){ws.onclose=null;try{ws.close()}catch{}ws=null}
  stopPlayback();setStatus('Desconectado');updateConversationOverlay();
 }
