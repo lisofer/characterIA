@@ -47,6 +47,8 @@ let frameVersions=Array(8).fill(0);
 let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0;
 let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
 let sources=new Set(),connectAttempt=0,playbackGeneration=0;
+let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,downloadNoticeTimer=null;
+const startedDownloads=new Set();
 // A cada línea se le asigna un inicio estimado según audio PCM, NO se escribe palabra por palabra.
 const measureCanvas=document.createElement('canvas'),ctx=measureCanvas.getContext('2d');
 function textFits(t){const f=parseInt(getComputedStyle(el.subBox).fontSize)||20;ctx.font='700 '+f+"px 'DM Sans',Arial,sans-serif";return ctx.measureText(t).width<=Math.max(50,el.subBox.clientWidth-35)}
@@ -79,14 +81,21 @@ function commitCaptionLines(flush){
 }
 function beginResponseIfNeeded(){if(captionFinished&&audioContext&&audioContext.currentTime>=finalAudioTime-.04){resetSubtitle();firstAudioTime=null;finalAudioTime=0}}
 function renderCaptions(){
- if(!audioContext||firstAudioTime===null||audioContext.currentTime<firstAudioTime)return;
- if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>320)commitCaptionLines(true);
- const elapsed=Math.max(0,audioContext.currentTime-firstAudioTime),total=Math.max(.05,finalAudioTime-firstAudioTime);
- const position=captionFinished?elapsed/total*captionWordCount:elapsed*2.8;
- let target=-1;for(let i=0;i<captionLines.length;i++){if(captionLines[i].startWord<=position+.08)target=i;else break}
- if(captionVisible<0&&captionLines.length)target=Math.max(target,0);
+ if(!audioContext||firstAudioTime===null)return;
+ if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>280)commitCaptionLines(true);
+ // Gemini no devuelve marcas temporales por palabra: la línea aparece completa
+ // cuando estimamos que empieza su primera palabra en el audio reproducido.
+ const elapsed=audioContext.currentTime-firstAudioTime-.23;
+ if(elapsed<0||!captionLines.length)return;
+ const duration=Math.max(.35,finalAudioTime-firstAudioTime);
+ const pace=captionFinished?Math.max(1.15,Math.min(3.15,captionWordCount/Math.max(.5,duration-.12))):2.15;
+ const position=elapsed*pace;
+ let target=-1;
+ for(let k=0;k<captionLines.length;k++){
+  if(captionLines[k].startWord<=position+.001)target=k;
+  else break;
+ }
  if(target>captionVisible){captionVisible=target;showSubtitle(captionLines[target].text)}
- if(captionFinished&&elapsed>total+.25&&captionVisible<captionLines.length-1){captionVisible=captionLines.length-1;showSubtitle(captionLines.at(-1).text)}
 }
 function pcmToFloat(base64){const s=atob(base64),v=new Float32Array(s.length/2);for(let i=0;i<v.length;i++){let x=s.charCodeAt(i*2)|(s.charCodeAt(i*2+1)<<8);if(x&0x8000)x-=0x10000;v[i]=x/32768;}return v}
 async function ensureAudio(resume=true){
@@ -164,6 +173,45 @@ function animateMouth(){
  audioSegments=audioSegments.filter(x=>x.end>(audioContext?.currentTime||0)-.2);
 }
 function setStatus(label,connected=false){$('#connection-label').textContent=label;$('.status-dot').classList.toggle('connected',connected);$('#call-btn').title=connected?'Colgar llamada':'Iniciar llamada';$('#call-btn').setAttribute('aria-label',connected?'Colgar llamada':'Iniciar llamada');}
+function updateConversationOverlay(){
+ const overlay=$('#conversation-overlay'),msg=$('#overlay-message'),stage=$('#stage');
+ const hung=callEnded,muted=mutedByUser&&!hung;
+ stage.classList.toggle('call-ended',hung);
+ if(hung)msg.innerHTML='Llamada terminada.<small>Pulsá el botón <strong class="accent-red">rojo</strong> para volver a conectarte.</small>';
+ else if(muted)msg.innerHTML='Estás muteado.<small>Presioná el botón <strong class="accent-yellow">amarillo</strong> para activar el micrófono.</small>';
+ overlay.classList.toggle('hidden',!(hung||muted));
+ $('#mic-btn').classList.toggle('is-muted',mutedByUser||keyboardOpen);
+ $('#mic-btn').setAttribute('aria-pressed',String(mutedByUser||keyboardOpen));
+ $('#mic-btn').setAttribute('aria-label',mutedByUser||keyboardOpen?'Activar micrófono':'Silenciar micrófono');
+ $('#keyboard-btn').setAttribute('aria-pressed',String(keyboardOpen));
+}
+function hideDownloadNotice(){
+ clearTimeout(downloadNoticeTimer);$('#download-notice').classList.add('hidden');
+}
+function showDownloadNotice(message){
+ const n=$('#download-notice');$('#download-notice-text').textContent=message;
+ n.classList.remove('hidden');clearTimeout(downloadNoticeTimer);
+ downloadNoticeTimer=setTimeout(()=>n.classList.add('hidden'),5200);
+}
+async function downloadCVAutomatically(id){
+ if(!id||startedDownloads.has(id))return;
+ startedDownloads.add(id);
+ try{
+  const response=await fetch('/api/cv/'+encodeURIComponent(id),{credentials:'same-origin'});
+  if(!response.ok)throw Error('No se pudo obtener el PDF (HTTP '+response.status+').');
+  const blob=await response.blob();
+  if(!blob.size)throw Error('El PDF llegó vacío.');
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='Mi_Curriculum.pdf';a.style.display='none';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  showDownloadNotice('Tu CV se está descargando en este dispositivo.');
+ }catch(error){
+  startedDownloads.delete(id);
+  showDownloadNotice('No se pudo descargar el CV.');
+  toast(error.message||'Falló la descarga del PDF.');
+ }
+}
 async function connectLive(){
  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const attempt=++connectAttempt;
