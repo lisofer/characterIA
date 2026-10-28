@@ -226,28 +226,28 @@ async function connectLive(){
   let m;try{m=JSON.parse(e.data)}catch{return}
   switch(m.type){
    case 'connected':
-    currentModel=m.model;setStatus(micOn?'Escuchando':'Solo teclado',true);
-    if(micOn && socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
+    currentModel=m.model;hasConnected=true;callEnded=false;setStatus(micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);updateConversationOverlay();
+    if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
     break;
    case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
-   case 'input_transcript':if(m.text?.trim())setStatus('Te escucho',true);break;
+   case 'input_transcript':if(m.text?.trim()&&micOn)setStatus('Te escucho',true);break;
    case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn)setStatus('Escuchando',true);break;
    case 'profile':break;
-   case 'document':setDocuments([{id:m.id}]);toast('Currículum listo para descargar');break;
+   case 'document':setDocuments([{id:m.id}]);void downloadCVAutomatically(m.id);break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
    case 'notice':toast(m.message);break;
-   case 'closed':setStatus('Desconectado');stopMicrophone();toast(m.message||'La llamada se cerró');break;
+   case 'closed':hasConnected=false;callEnded=true;setStatus('Desconectado');stopMicrophone();updateConversationOverlay();toast(m.message||'La llamada se cerró');break;
   }
  };
- socket.onclose=()=>{if(attempt!==connectAttempt)return;ws=null;setStatus('Desconectado');stopMicrophone();stopPlayback();};
+ socket.onclose=()=>{if(attempt!==connectAttempt)return;ws=null;hasConnected=false;callEnded=true;setStatus('Desconectado');stopMicrophone();stopPlayback();updateConversationOverlay();};
  socket.onerror=()=>{if(attempt!==connectAttempt)return;setStatus('Error de red');toast('No se pudo abrir la llamada.')};
 }
 function stopCall(){
- connectAttempt++;stopMicrophone();
+ connectAttempt++;hasConnected=false;callEnded=true;stopMicrophone();
  if(ws){ws.onclose=null;try{ws.close()}catch{}ws=null}
- stopPlayback();setStatus('Desconectado');
+ stopPlayback();setStatus('Desconectado');updateConversationOverlay();
 }
 async function startMicrophone(){
  if(micOn||micBusy)return micOn;
@@ -274,7 +274,7 @@ async function startMicrophone(){
   micOn=true;$('#mic-btn').classList.add('active');$('#mic-btn').setAttribute('aria-pressed','true');
   $('#mic-btn').setAttribute('aria-label','Silenciar micrófono');
   if(ws?.readyState===WebSocket.OPEN)setStatus('Escuchando',true);
-  return true;
+  updateConversationOverlay();return true;
  }catch(e){
   stream?.getTracks().forEach(t=>t.stop());context?.close().catch(()=>{});
   toast(e?.name==='NotAllowedError'?'Permiso de micrófono denegado. Permitilo en Chrome o usá el teclado.':'Micrófono: '+String(e?.message||e));
@@ -289,19 +289,22 @@ function stopMicrophone(){
  processor=null;sourceNode=null;mediaStream=null;microphone=null;
  $('#mic-btn').classList.remove('active');$('#mic-btn').setAttribute('aria-pressed','false');
  $('#mic-btn').setAttribute('aria-label','Activar micrófono');
- if(ws?.readyState===WebSocket.OPEN)setStatus('Micrófono apagado',true);
+ if(ws?.readyState===WebSocket.OPEN)setStatus(mutedByUser?'Silenciado':'Solo teclado',true);
+ updateConversationOverlay();
 }
 async function startCall(){
  if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
- callPending=true;setStatus('Activando micro…');
+ callPending=true;callEnded=false;hasConnected=false;mutedByUser=false;keyboardOpen=false;
+ $('#text-form').classList.add('hidden');updateConversationOverlay();setStatus('Activando micro…');
  try{
   const micReady=await startMicrophone();
-  if(!micReady)toast('Podés continuar escribiendo con el botón azul.');
+  if(!micReady){mutedByUser=true;updateConversationOverlay();toast('Permití el micrófono en Chrome o usá el teclado.');}
   await connectLive();
- }catch(e){toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error')}
+ }catch(e){callEnded=true;toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error');updateConversationOverlay()}
  finally{callPending=false}
 }
-function setDocuments(docs){const doc=docs[0];$('#document-strip').classList.toggle('hidden',!doc);if(doc)$('#download-link').href=`/api/cv/${encodeURIComponent(doc.id)}`}
+let savedDocuments=[];
+function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
 function setupStudent(){
  $('#call-btn').onclick=async()=>{
   if(ws&&(ws.readyState===0||ws.readyState===1))stopCall();
