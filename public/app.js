@@ -178,7 +178,7 @@ async function connectLive(){
   let m;try{m=JSON.parse(e.data)}catch{return}
   switch(m.type){
    case 'connected':
-    currentModel=m.model;setStatus(micOn?'Escuchando':'Micrófono apagado',true);
+    currentModel=m.model;setStatus(micOn?'Escuchando':'Solo teclado',true);
     if(micOn && socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
     break;
    case 'transcript':appendTranscription(m.text);break;
@@ -247,7 +247,8 @@ async function startCall(){
  if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  callPending=true;setStatus('Activando micro…');
  try{
-  if(!(await startMicrophone())){setStatus('Micrófono requerido');return;}
+  const micReady=await startMicrophone();
+  if(!micReady)toast('Podés continuar escribiendo con el botón azul.');
   await connectLive();
  }catch(e){toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error')}
  finally{callPending=false}
