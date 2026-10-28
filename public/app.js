@@ -44,44 +44,48 @@ function showFrame(index){
  el.placeholder.classList.toggle('hidden',real>=0);
 }
 let frameVersions=Array(8).fill(0);
-let captionRaw='',captionWords=[],captionShown=0,captionFinished=false,captionLine='',captionCurrentWord='',firstAudioTime=null,finalAudioTime=0;
-let sources=new Set(), micPending=false, connectAttempt=0, playbackGeneration=0;
-
-// Solo muestra texto que entre en una línea. Mide píxeles, nunca divide palabras.
+let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0;
+let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
+let sources=new Set(),connectAttempt=0,playbackGeneration=0;
+// A cada línea se le asigna un inicio estimado según audio PCM, NO se escribe palabra por palabra.
 const measureCanvas=document.createElement('canvas'),ctx=measureCanvas.getContext('2d');
-function textFits(t){const f=parseInt(getComputedStyle(el.subBox).fontSize)||20;ctx.font=`700 ${f}px 'DM Sans',Arial,sans-serif`;return ctx.measureText(t).width<=Math.max(50,el.subBox.clientWidth-35)}
-function showSubtitle(text){el.subtitle.textContent=text||' ';el.subtitle.style.fontSize='';if(text&&!textFits(text)){let n=parseInt(getComputedStyle(el.subBox).fontSize);while(n>13){n-=1;ctx.font=`700 ${n}px 'DM Sans',Arial,sans-serif`;if(ctx.measureText(text).width<el.subBox.clientWidth-24){el.subtitle.style.fontSize=n+'px';break}}const fs=parseInt(el.subtitle.style.fontSize)||n;ctx.font=`700 ${fs}px 'DM Sans',Arial,sans-serif`;const width=ctx.measureText(text).width;const max=el.subBox.clientWidth-22;if(width>max)el.subtitle.style.transform=`scaleX(${max/width})`;else el.subtitle.style.transform='';}else{el.subtitle.style.transform='';}}
-// Subtítulos ligados al reloj de los fragmentos PCM reproducidos, NO a la llegada del texto.
-function resetSubtitle(){captionRaw='';captionWords=[];captionShown=0;captionFinished=false;captionLine='';captionCurrentWord='';spokenText='';subtitleLine='';showSubtitle(' ')}
-function pushSubtitle(text){
+function textFits(t){const f=parseInt(getComputedStyle(el.subBox).fontSize)||20;ctx.font='700 '+f+"px 'DM Sans',Arial,sans-serif";return ctx.measureText(t).width<=Math.max(50,el.subBox.clientWidth-35)}
+function showSubtitle(text){el.subtitle.textContent=text||' ';el.subtitle.style.fontSize='';el.subtitle.style.transform='';if(text&&!textFits(text)){let n=parseInt(getComputedStyle(el.subBox).fontSize);while(n>13){n--;ctx.font='700 '+n+"px 'DM Sans',Arial,sans-serif";if(ctx.measureText(text).width<el.subBox.clientWidth-24){el.subtitle.style.fontSize=n+'px';break}}const fs=parseInt(el.subtitle.style.fontSize)||n;ctx.font='700 '+fs+"px 'DM Sans',Arial,sans-serif";const max=el.subBox.clientWidth-22,width=ctx.measureText(text).width;if(width>max)el.subtitle.style.transform='scaleX('+(max/width)+')';}}
+function resetSubtitle(){captionRaw='';captionLines=[];captionCommitted=0;captionFinished=false;captionVisible=-1;captionWordCount=0;captionLastTextAt=0;showSubtitle(' ')}
+function appendTranscription(text){
  if(!text)return;
- // Algunos modelos envían texto incremental; otros retransmiten un prefijo acumulado.
- if(text.startsWith(captionRaw) && captionRaw.length)captionRaw=text;
- else if(!captionRaw.endsWith(text))captionRaw+=text;
- captionWords=(captionRaw.match(/\S+/g)||[]);
- spokenText=captionRaw;
-}
-function beginResponseIfNeeded(){
- if(captionFinished && audioContext && audioContext.currentTime>=finalAudioTime-.08){resetSubtitle();firstAudioTime=null;finalAudioTime=0}
-}
-function renderCaptions(){
- if(!audioContext||firstAudioTime===null)return;
- const now=audioContext.currentTime;
- if(now<firstAudioTime)return;
- const elapsed=Math.max(0,now-firstAudioTime);
- // Velocidad aproximada durante streaming. Al cerrar el turno se ajusta a la duración real del audio.
- const totalDuration=Math.max(.05,finalAudioTime-firstAudioTime);
- const target=captionFinished?
-   Math.floor(Math.min(1,elapsed/totalDuration)*captionWords.length+0.001):
-   Math.floor(elapsed*2.85);
- const upto=Math.min(captionWords.length,Math.max(captionShown, target));
- while(captionShown<upto){
-  const word=captionWords[captionShown++];
-  const next=captionLine?captionLine+' '+word:word;
-  captionLine=captionLine&&!textFits(next)?word:next;
-  captionCurrentWord=word;
-  showSubtitle(captionLine);
+ const incoming=String(text);
+ if(incoming.startsWith(captionRaw)&&captionRaw)captionRaw=incoming;
+ else if(!captionRaw.endsWith(incoming)){
+  let overlap=0;
+  for(let k=Math.min(captionRaw.length,incoming.length);k>0;k--){if(captionRaw.endsWith(incoming.slice(0,k))){overlap=k;break}}
+  const tail=incoming.slice(overlap);
+  const space=overlap===0&&/[\p{L}\p{N}]$/u.test(captionRaw)&&/^[\p{L}\p{N}]/u.test(tail);
+  captionRaw+=(space?' ':'')+tail;
  }
+ captionLastTextAt=performance.now();commitCaptionLines(false);
+}
+function commitCaptionLines(flush){
+ const words=captionRaw.trim().match(/\S+/gu)||[];let cursor=captionCommitted;
+ while(cursor<words.length){
+  let end=cursor+1;
+  while(end<words.length&&end-cursor<7&&textFits(words.slice(cursor,end+1).join(' ')))end++;
+  const last=words[end-1]||'',full=end-cursor>=7||end<words.length&&!textFits(words.slice(cursor,end+1).join(' '))||/[.!?;:]$/.test(last);
+  if(!flush&&!full)break;
+  captionLines.push({text:words.slice(cursor,end).join(' '),startWord:cursor,endWord:end});cursor=end;
+ }
+ captionCommitted=cursor;captionWordCount=words.length;
+}
+function beginResponseIfNeeded(){if(captionFinished&&audioContext&&audioContext.currentTime>=finalAudioTime-.04){resetSubtitle();firstAudioTime=null;finalAudioTime=0}}
+function renderCaptions(){
+ if(!audioContext||firstAudioTime===null||audioContext.currentTime<firstAudioTime)return;
+ if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>320)commitCaptionLines(true);
+ const elapsed=Math.max(0,audioContext.currentTime-firstAudioTime),total=Math.max(.05,finalAudioTime-firstAudioTime);
+ const position=captionFinished?elapsed/total*captionWordCount:elapsed*2.8;
+ let target=-1;for(let i=0;i<captionLines.length;i++){if(captionLines[i].startWord<=position+.08)target=i;else break}
+ if(captionVisible<0&&captionLines.length)target=Math.max(target,0);
+ if(target>captionVisible){captionVisible=target;showSubtitle(captionLines[target].text)}
+ if(captionFinished&&elapsed>total+.25&&captionVisible<captionLines.length-1){captionVisible=captionLines.length-1;showSubtitle(captionLines.at(-1).text)}
 }
 function pcmToFloat(base64){const s=atob(base64),v=new Float32Array(s.length/2);for(let i=0;i<v.length;i++){let x=s.charCodeAt(i*2)|(s.charCodeAt(i*2+1)<<8);if(x&0x8000)x-=0x10000;v[i]=x/32768;}return v}
 async function ensureAudio(resume=true){
@@ -101,7 +105,7 @@ function playAudio(b64){
   const pcm=pcmToFloat(b64),buff=audioContext.createBuffer(1,pcm.length,24000);
   buff.copyToChannel(pcm,0);
   const src=audioContext.createBufferSource();src.buffer=buff;src.connect(gain);
-  const start=Math.max(audioContext.currentTime+(firstAudioTime===null?.30:.035),nextAudioTime);
+  const start=Math.max(audioContext.currentTime+(firstAudioTime===null?.48:.035),nextAudioTime);
   if(firstAudioTime===null)firstAudioTime=start;
   nextAudioTime=start+buff.duration;finalAudioTime=nextAudioTime;
   src.start(start);sources.add(src);src.onended=()=>{sources.delete(src);try{src.disconnect()}catch{}};
@@ -177,10 +181,10 @@ async function connectLive(){
     socket.send(JSON.stringify({type:'start'}));
     if(micPending){micPending=false;startMicrophone().catch(()=>{});}
     break;
-   case 'transcript':pushSubtitle(m.text);break;
+   case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
    case 'input_transcript':break;
-   case 'turn_complete':captionFinished=true;break;
+   case 'turn_complete':captionFinished=true;commitCaptionLines(true);break;
    case 'profile':break;
    case 'document':setDocuments([{id:m.id}]);toast('Currículum listo para descargar');break;
    case 'interrupted':stopPlayback(true);break;
