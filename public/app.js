@@ -85,7 +85,8 @@ function renderCaptions(){
  if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>280)commitCaptionLines(true);
  // Gemini no devuelve marcas temporales por palabra: la línea aparece completa
  // cuando estimamos que empieza su primera palabra en el audio reproducido.
- const elapsed=audioContext.currentTime-firstAudioTime-.23;
+ const subtitleOffsetMs=Math.max(-1200,Math.min(1200,Number(config.subtitleDelay??0)));
+ const elapsed=audioContext.currentTime-firstAudioTime-subtitleOffsetMs/1000;
  if(elapsed<0||!captionLines.length)return;
  const duration=Math.max(.35,finalAudioTime-firstAudioTime);
  const pace=captionFinished?Math.max(1.15,Math.min(3.15,captionWordCount/Math.max(.5,duration-.12))):2.15;
@@ -337,8 +338,9 @@ function setupStudent(){
   e.preventDefault();const inp=$('#text-message'),txt=inp.value.trim();if(!txt)return;
   if(!ws||ws.readyState!==WebSocket.OPEN){toast('Conectá la llamada con el botón rojo.');return;}
   ws.send(JSON.stringify({type:'text',text:txt}));inp.value='';
-  // El teclado permanece abierto y el micrófono apagado hasta pulsar el azul.
-  updateConversationOverlay();
+  // El teclado permanece abierto tras enviar y se recupera el foco del campo.
+  keyboardOpen=true;$('#text-form').classList.remove('hidden');
+  updateConversationOverlay();requestAnimationFrame(()=>inp.focus({preventScroll:true}));
  };
  $('#reset-btn').onclick=()=>$('#reset-modal').classList.remove('hidden');
  $('#cancel-reset').onclick=()=>$('#reset-modal').classList.add('hidden');
@@ -361,7 +363,7 @@ function setupStudent(){
 const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?v=${Date.now()}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
 function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
-function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+(o.dataset.for==='mouthDelay'?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
+function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+((o.dataset.for==='mouthDelay'||o.dataset.for==='subtitleDelay')?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
 function fillVoiceSelector(list, current){
  const select=$('#voice-select');
  const all=Array.isArray(list)&&list.length?list:VOICES;
