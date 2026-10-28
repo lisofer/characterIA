@@ -359,6 +359,7 @@ async function startCall({reconnect=false}={}){
  if(!reconnect){
   mutedByUser=false;keyboardOpen=false;
   $('#text-form').classList.add('hidden');
+  syncKeyboardViewport();
  }
  updateConversationOverlay();setStatus('Conectando…');
  try{
@@ -380,7 +381,61 @@ async function startCall({reconnect=false}={}){
 }
 let savedDocuments=[];
 function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
+// El teclado móvil reduce el visualViewport sin necesariamente modificar
+// window.innerHeight. Conservamos los botones abajo y ubicamos el campo sobre el IME.
+function syncKeyboardViewport(){
+ const viewport=window.visualViewport;
+ const visibleHeight=viewport?.height??window.innerHeight;
+ const visibleTop=viewport?.offsetTop??0;
+ const keyboardInset=keyboardOpen
+   ?Math.max(0,Math.round(window.innerHeight-visibleHeight-visibleTop))
+   :0;
+ document.documentElement.style.setProperty('--nexo-keyboard-inset',keyboardInset+'px');
+ $('#student-view').classList.toggle('keyboard-open',keyboardOpen);
+}
+async function closeTextKeyboard(){
+ if(!keyboardOpen)return;
+ keyboardOpen=false;
+ $('#text-form').classList.add('hidden');
+ $('#text-message').blur();
+ syncKeyboardViewport();updateConversationOverlay();
+ if(!mutedByUser&&ws?.readyState===WebSocket.OPEN){
+  const ok=await startMicrophone();
+  if(!ok)mutedByUser=true;
+  updateConversationOverlay();
+ }
+}
+function openTextKeyboard(){
+ if(keyboardOpen)return;
+ keyboardOpen=true;
+ stopMicrophone();
+ $('#text-form').classList.remove('hidden');
+ syncKeyboardViewport();updateConversationOverlay();
+ $('#text-message').focus({preventScroll:true});
+ requestAnimationFrame(syncKeyboardViewport);
+}
+async function dismissStudentInteraction(event){
+ if(!keyboardOpen&&!mutedByUser)return;
+ const target=event.target;
+ if(target.closest('button,input,textarea,select,a,form,.controls-bar,[role="dialog"]'))return;
+ if(keyboardOpen){
+  await closeTextKeyboard();
+ }else if(mutedByUser&&ws?.readyState===WebSocket.OPEN){
+  mutedByUser=false;
+  updateConversationOverlay();
+  const ok=await startMicrophone();
+  if(!ok)mutedByUser=true;
+  updateConversationOverlay();
+ }
+}
 function setupStudent(){
+ $('#close-keyboard').addEventListener('click',()=>void closeTextKeyboard());
+ $('#student-view').addEventListener('click',event=>void dismissStudentInteraction(event));
+ window.visualViewport?.addEventListener('resize',syncKeyboardViewport);
+ window.visualViewport?.addEventListener('scroll',syncKeyboardViewport);
+ window.addEventListener('resize',syncKeyboardViewport);
+ window.addEventListener('orientationchange',syncKeyboardViewport);
+ $('#text-message').addEventListener('focus',()=>requestAnimationFrame(syncKeyboardViewport));
  $('#call-btn').onclick=async()=>{
   if(callPending||ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
   else await startCall();
@@ -396,16 +451,8 @@ function setupStudent(){
   updateConversationOverlay();
  };
  $('#keyboard-btn').onclick=async()=>{
-  keyboardOpen=!keyboardOpen;
-  $('#text-form').classList.toggle('hidden',!keyboardOpen);
-  if(keyboardOpen){
-   stopMicrophone();
-   $('#text-message').focus();
-  }else if(!mutedByUser&&ws?.readyState===WebSocket.OPEN){
-   const ok=await startMicrophone();
-   if(!ok)mutedByUser=true;
-  }
-  updateConversationOverlay();
+  if(keyboardOpen)await closeTextKeyboard();
+  else openTextKeyboard();
  };
  $('#text-form').onsubmit=e=>{
   e.preventDefault();const inp=$('#text-message'),txt=inp.value.trim();if(!txt)return;
@@ -413,7 +460,8 @@ function setupStudent(){
   ws.send(JSON.stringify({type:'text',text:txt}));inp.value='';
   // El teclado permanece abierto tras enviar y se recupera el foco del campo.
   keyboardOpen=true;$('#text-form').classList.remove('hidden');
-  updateConversationOverlay();requestAnimationFrame(()=>inp.focus({preventScroll:true}));
+  syncKeyboardViewport();updateConversationOverlay();
+  requestAnimationFrame(()=>inp.focus({preventScroll:true}));
  };
  $('#reset-btn').onclick=()=>$('#reset-modal').classList.remove('hidden');
  $('#cancel-reset').onclick=()=>$('#reset-modal').classList.add('hidden');
