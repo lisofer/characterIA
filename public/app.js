@@ -1,12 +1,12 @@
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const el={login:$('#login-view'),student:$('#student-view'),admin:$('#admin-view'),subtitle:$('#subtitle-text'),subBox:$('#subtitle'),avatar:$('#avatar-images'),placeholder:$('#avatar-placeholder')};
 const VOICES=['Zephyr','Puck','Charon','Kore','Fenrir','Leda','Orus','Aoede','Callirrhoe','Autonoe','Enceladus','Iapetus','Umbriel','Algieba','Despina','Erinome','Algenib','Rasalgethi','Laomedeia','Achernar','Alnilam','Schedar','Gacrux','Pulcherrima','Achird','Zubenelgenubi','Vindemiatrix','Sadachbia','Sadaltager','Sulafat'];
-let audioSegments=[];let role=null,config={},frames=Array(8).fill(false),ws=null,microphone=null,mediaStream=null,processor=null,sourceNode=null,micOn=false,audioContext=null,gain=null,analyser=null,nextAudioTime=0,animationId=0,blinkingUntil=0,nextBlink=0,currentFrame=-1,subtitleLine='',subtitleCarry='',spokenText='',smoothedEnergy=0,currentModel='',roleLoading=false;
+let audioSegments=[];let role=null,config={},frames=Array(8).fill(false),ws=null,microphone=null,mediaStream=null,processor=null,sourceNode=null,micOn=false,micBusy=false,micRequestEpoch=0,callPending=false,audioContext=null,gain=null,analyser=null,nextAudioTime=0,animationId=0,blinkingUntil=0,nextBlink=0,currentFrame=-1,subtitleLine='',subtitleCarry='',spokenText='',smoothedEnergy=0,currentModel='',roleLoading=false;
 const toast=(msg)=>{const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),4500)};
 async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin',...opt,headers:{...(opt.body&&! (opt.body instanceof FormData)?{'Content-Type':'application/json'}:{}),...opt.headers}});let data;try{data=await r.json()}catch{data={error:'Respuesta inesperada'}}if(!r.ok)throw Error(data.error||`Error ${r.status}`);return data}
 const post=(url,body)=>api(url,{method:'POST',body:JSON.stringify(body)});
 const setVisible=view=>{for(const v of ['login','student','admin'])el[v].classList.toggle('hidden',view!==v)};
-function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;ensureAudio().catch(()=>{});const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.innerHTML='Ingresar <span>↗</span>';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password');t.type=t.type==='password'?'text':'password';});
+function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.innerHTML='Ingresar <span>↗</span>';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password');t.type=t.type==='password'?'text':'password';});
  $('#student-logout').addEventListener('click',logout);$('#admin-logout').addEventListener('click',logout)}
 async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setVisible('login')}
 async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){setVisible('student');applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();setStatus('Sin conectar');}else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
@@ -177,70 +177,87 @@ async function connectLive(){
   let m;try{m=JSON.parse(e.data)}catch{return}
   switch(m.type){
    case 'connected':
-    currentModel=m.model;setStatus(m.fallback?'Respaldo':'Conectado',true);
-    socket.send(JSON.stringify({type:'start'}));
-    if(micPending){micPending=false;startMicrophone().catch(()=>{});}
+    currentModel=m.model;setStatus(micOn?'Escuchando':'Micrófono apagado',true);
+    if(micOn && socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
     break;
    case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
-   case 'input_transcript':break;
+   case 'input_transcript':if(m.text?.trim())setStatus('Te escucho',true);break;
    case 'turn_complete':captionFinished=true;commitCaptionLines(true);break;
    case 'profile':break;
    case 'document':setDocuments([{id:m.id}]);toast('Currículum listo para descargar');break;
    case 'interrupted':stopPlayback(true);break;
-   case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');break;
+   case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
    case 'notice':toast(m.message);break;
-   case 'closed':setStatus('Desconectado');toast(m.message||'La llamada se cerró');break;
+   case 'closed':setStatus('Desconectado');stopMicrophone();toast(m.message||'La llamada se cerró');break;
   }
  };
- socket.onclose=()=>{if(attempt!==connectAttempt)return;setStatus('Desconectado');stopMicrophone();stopPlayback();};
+ socket.onclose=()=>{if(attempt!==connectAttempt)return;ws=null;setStatus('Desconectado');stopMicrophone();stopPlayback();};
  socket.onerror=()=>{if(attempt!==connectAttempt)return;setStatus('Error de red');toast('No se pudo abrir la llamada.')};
 }
 function stopCall(){
- connectAttempt++;micPending=false;stopMicrophone();
+ connectAttempt++;stopMicrophone();
  if(ws){ws.onclose=null;try{ws.close()}catch{}ws=null}
  stopPlayback();setStatus('Desconectado');
 }
 async function startMicrophone(){
- if(micOn)return;
+ if(micOn||micBusy)return micOn;
+ micBusy=true;const epoch=micRequestEpoch;let stream=null,context=null;
  try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('El micrófono requiere un navegador con HTTPS.');
+  // Desbloquea la salida de audio a partir del toque de la persona.
   await ensureAudio(true);
-  if(!ws||ws.readyState!==WebSocket.OPEN){micPending=true;await connectLive();return;}
-  mediaStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-  microphone=new (window.AudioContext||window.webkitAudioContext)();
-  if(microphone.state==='suspended')await microphone.resume();
-  sourceNode=microphone.createMediaStreamSource(mediaStream);
-  processor=microphone.createScriptProcessor(4096,1,1);
-  sourceNode.connect(processor);const silent=microphone.createGain();silent.gain.value=0;processor.connect(silent);silent.connect(microphone.destination);
-  processor.onaudioprocess=e=>{
-   if(!micOn||!ws||ws.readyState!==1)return;
-   const input=e.inputBuffer.getChannelData(0),rate=microphone.sampleRate,ratio=rate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
-   for(let j=0;j<n;j++){
-    const from=Math.floor(j*ratio),to=Math.min(input.length,Math.floor((j+1)*ratio));let sum=0;
-    for(let k=from;k<to;k++)sum+=input[k];
-    const val=Math.max(-1,Math.min(1,sum/Math.max(1,to-from)));
-    out[j]=val<0?val*32768:val*32767;
-   }
-   const bytes=new Uint8Array(out.buffer);let str='';for(const b of bytes)str+=String.fromCharCode(b);
-   ws.send(JSON.stringify({type:'audio',pcm:btoa(str)}));
+  // El pedido de permisos ocurre ANTES de abrir Gemini y generar el saludo.
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  if(epoch!==micRequestEpoch){stream.getTracks().forEach(t=>t.stop());return false;}
+  context=new (window.AudioContext||window.webkitAudioContext)();
+  if(context.state==='suspended')await context.resume();
+  const node=context.createMediaStreamSource(stream),proc=context.createScriptProcessor(2048,1,1),silent=context.createGain();
+  silent.gain.value=0;node.connect(proc);proc.connect(silent);silent.connect(context.destination);
+  mediaStream=stream;microphone=context;sourceNode=node;processor=proc;
+  proc.onaudioprocess=e=>{
+   if(!micOn||!ws||ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>200000)return;
+   const input=e.inputBuffer.getChannelData(0),rate=context.sampleRate,ratio=rate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
+   for(let j=0;j<n;j++){const from=Math.floor(j*ratio),to=Math.min(input.length,Math.floor((j+1)*ratio));let sum=0;for(let k=from;k<to;k++)sum+=input[k];const v=Math.max(-1,Math.min(1,sum/Math.max(1,to-from)));out[j]=v<0?v*32768:v*32767;}
+   const bytes=new Uint8Array(out.buffer);let binary='';for(const b of bytes)binary+=String.fromCharCode(b);
+   ws.send(JSON.stringify({type:'audio',pcm:btoa(binary)}));
   };
   micOn=true;$('#mic-btn').classList.add('active');$('#mic-btn').setAttribute('aria-pressed','true');
- }catch(e){toast('Micrófono: '+e.message);stopMicrophone()}
+  $('#mic-btn').setAttribute('aria-label','Silenciar micrófono');
+  if(ws?.readyState===WebSocket.OPEN)setStatus('Escuchando',true);
+  return true;
+ }catch(e){
+  stream?.getTracks().forEach(t=>t.stop());context?.close().catch(()=>{});
+  toast(e?.name==='NotAllowedError'?'Permiso de micrófono denegado. Permitilo en Chrome o usá el teclado.':'Micrófono: '+String(e?.message||e));
+  return false;
+ }finally{micBusy=false}
 }
 function stopMicrophone(){
- if(micOn&&ws?.readyState===1)ws.send(JSON.stringify({type:'audio_end'}));
+ micRequestEpoch++;
+ if(micOn&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'audio_end'}));
  micOn=false;try{processor?.disconnect();sourceNode?.disconnect()}catch{}
  mediaStream?.getTracks().forEach(t=>t.stop());microphone?.close().catch(()=>{});
  processor=null;sourceNode=null;mediaStream=null;microphone=null;
  $('#mic-btn').classList.remove('active');$('#mic-btn').setAttribute('aria-pressed','false');
+ $('#mic-btn').setAttribute('aria-label','Activar micrófono');
+ if(ws?.readyState===WebSocket.OPEN)setStatus('Micrófono apagado',true);
+}
+async function startCall(){
+ if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
+ callPending=true;setStatus('Activando micro…');
+ try{
+  if(!(await startMicrophone())){setStatus('Micrófono requerido');return;}
+  await connectLive();
+ }catch(e){toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error')}
+ finally{callPending=false}
 }
 function setDocuments(docs){const doc=docs[0];$('#document-strip').classList.toggle('hidden',!doc);if(doc)$('#download-link').href=`/api/cv/${encodeURIComponent(doc.id)}`}
 function setupStudent(){
  $('#call-btn').onclick=async()=>{
   if(ws&&(ws.readyState===0||ws.readyState===1))stopCall();
-  else{await ensureAudio(true);await connectLive()}
+  else await startCall()
  };
- $('#mic-btn').onclick=async()=>{if(micOn)stopMicrophone();else await startMicrophone()};
+ $('#mic-btn').onclick=async()=>{if(micOn){stopMicrophone();return;}if(ws?.readyState===WebSocket.OPEN){await startMicrophone();return;}await startCall()};
  $('#keyboard-btn').onclick=()=>{
   const form=$('#text-form');form.classList.toggle('hidden');
   if(!form.classList.contains('hidden'))$('#text-message').focus();
@@ -254,7 +271,7 @@ function setupStudent(){
  $('#reset-btn').onclick=()=>$('#reset-modal').classList.remove('hidden');
  $('#cancel-reset').onclick=()=>$('#reset-modal').classList.add('hidden');
  $('#confirm-reset').onclick=async()=>{
-  try{stopCall();await post('/api/reset',{confirm:true});$('#reset-modal').classList.add('hidden');setDocuments([]);resetSubtitle();await connectLive()}
+  try{stopCall();await post('/api/reset',{confirm:true});$('#reset-modal').classList.add('hidden');setDocuments([]);resetSubtitle();setStatus('Sin conectar')}
   catch(e){toast(e.message)}
  };
 }
