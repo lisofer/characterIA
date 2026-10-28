@@ -40,7 +40,7 @@ app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();co
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1}});
 app.post('/api/admin/frames/:index',auth('admin'),upload.single('image'),(req,res)=>{const i=Number(req.params.index);if(!Number.isInteger(i)||i<0||i>7)return res.sendStatus(404);const b=req.file?.buffer;if(!b||b.length<24||b.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')return res.status(400).json({error:'Seleccioná un archivo PNG válido.'});const width=b.readUInt32BE(16),height=b.readUInt32BE(20);if(width>4096||height>4096||width<100||height<100)return res.status(400).json({error:'Dimensiones no válidas'});fs.writeFileSync(path.join(DATA_DIR,'frames',`${i}.png`),b);res.json({ok:true,width,height});});
 app.post('/api/admin/voice-sample',auth('admin'),rateLimit({windowMs:60000,limit:6}),async(req,res)=>{try{const v=req.body?.voice||allSettings().voice;if(!VOICE_NAMES.includes(v))return res.status(400).json({error:'Voz inválida'});const sample=await voiceSample(v);res.type('audio/wav');res.set('X-Gemini-Model',sample.model);res.send(wav(sample.bytes));}catch(e){res.status(502).json({error:String(e.message||e)});}});
-app.use(express.static(path.join(ROOT,'public'),{index:'index.html',maxAge:'1h'}));
+app.use(express.static(path.join(ROOT,'public'),{index:'index.html',maxAge:0}));
 app.get('*',(req,res)=>res.sendFile(path.join(ROOT,'public','index.html')));
 app.use((err,req,res,next)=>res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:err.message||'Error'}));
 const server=http.createServer(app);const wss=new WebSocketServer({noServer:true,maxPayload:150000});
