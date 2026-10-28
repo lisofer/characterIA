@@ -63,8 +63,17 @@ app.get('/api/frames/:index',auth(),async(req,res)=>{
  }
  res.type('png').sendFile(path.resolve(file));
 });
-app.post('/api/reset',auth('student'),(req,res)=>{if(req.body?.confirm!==true)return res.status(400).json({error:'Confirmá el reinicio para borrar todo el CV.'});const old=req.profileId;for(const f of eraseProfile(old)){try{fs.unlinkSync(path.join(DATA_DIR,'cvs',f))}catch{}}const fresh=createProfile();replaceSessionProfile(parseCookie(req),fresh);res.json({ok:true,profile:{},documents:[]});});
+app.post('/api/reset',auth('student'),(req,res)=>{if(req.body?.confirm!==true)return res.status(400).json({error:'Confirmá el reinicio para borrar todo el CV.'});const old=req.profileId;for(const f of eraseProfile(old)){for(const filename of [f,f.replace(/\.pdf$/i,'.docx')])try{fs.unlinkSync(path.join(DATA_DIR,'cvs',filename))}catch{}}const fresh=createProfile();replaceSessionProfile(parseCookie(req),fresh);res.json({ok:true,profile:{},documents:[]});});
 app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,'Mi_Curriculum.pdf');});
+app.get('/api/cv/:doc/word',auth('student'),(req,res)=>{
+ const d=lookupDoc(req.params.doc,req.profileId);
+ if(!d)return res.sendStatus(404);
+ const filename=d.filename.replace(/\.pdf$/i,'.docx');
+ const file=path.join(DATA_DIR,'cvs',filename);
+ if(!fs.existsSync(file))return res.sendStatus(404);
+ res.type('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+ res.download(file,'Mi_Curriculum_Editable.docx');
+});
 app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY}));
 app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();const next={};for(const [k,v]of Object.entries(req.body?.config||{})){if(!Object.hasOwn(old,k))continue;if(typeof old[k]==='number'){const n=Number(v);if(!Number.isFinite(n))continue;next[k]=k==='subtitleDelay'?Math.max(-1200,Math.min(1200,n)):Math.max(-500,Math.min(2000,n));}else if(typeof old[k]==='string'){if(!['prompt','personality'].includes(k)&&String(v).length>200)continue;if(k==='prompt'&&String(v).length>32000)return res.status(400).json({error:'El prompt supera el máximo de 32.000 caracteres; no se guardó incompleto.'});next[k]=String(v).slice(0,k==='prompt'?32000:4000);}}
  if(next.voice&&!VOICE_NAMES.includes(next.voice))return res.status(400).json({error:'Voz no reconocida'});

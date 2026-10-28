@@ -268,23 +268,26 @@ function showDownloadNotice(message){
  n.classList.remove('hidden');clearTimeout(downloadNoticeTimer);
  downloadNoticeTimer=setTimeout(()=>n.classList.add('hidden'),5200);
 }
-async function downloadCVAutomatically(id){
- if(!id||startedDownloads.has(id))return;
- startedDownloads.add(id);
+async function downloadCVAutomatically(id,format='pdf'){
+ const kind=format==='word'?'word':'pdf';
+ const key=kind+':'+id;
+ if(!id||startedDownloads.has(key))return;
+ startedDownloads.add(key);
  try{
-  const response=await fetch('/api/cv/'+encodeURIComponent(id),{credentials:'same-origin'});
-  if(!response.ok)throw Error('No se pudo obtener el PDF (HTTP '+response.status+').');
+  const endpoint=kind==='word'?'/api/cv/'+encodeURIComponent(id)+'/word':'/api/cv/'+encodeURIComponent(id);
+  const response=await fetch(endpoint,{credentials:'same-origin'});
+  if(!response.ok)throw Error('No se pudo obtener '+(kind==='word'?'el Word':'el PDF')+' (HTTP '+response.status+').');
   const blob=await response.blob();
-  if(!blob.size)throw Error('El PDF llegó vacío.');
+  if(!blob.size)throw Error('El archivo llegó vacío.');
   const url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download='Mi_Curriculum.pdf';a.style.display='none';
+  a.href=url;a.download=kind==='word'?'Mi_Curriculum_Editable.docx':'Mi_Curriculum.pdf';a.style.display='none';
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
-  showDownloadNotice('Tu CV se está descargando en este dispositivo.');
+  showDownloadNotice(kind==='word'?'Se está descargando tu CV editable en Word.':'Tu CV en PDF se está descargando en este dispositivo.');
  }catch(error){
-  startedDownloads.delete(id);
-  showDownloadNotice('No se pudo descargar el CV.');
-  toast(error.message||'Falló la descarga del PDF.');
+  startedDownloads.delete(key);
+  showDownloadNotice('No se pudo descargar el '+(kind==='word'?'Word.':'PDF.'));
+  toast(error.message||'Falló la descarga.');
  }
 }
 async function connectLive(){
@@ -316,7 +319,7 @@ async function connectLive(){
    case 'input_transcript':if(m.text?.trim()&&micOn)setStatus('Te escucho',true);break;
    case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn&&!connectingUi)setStatus('Escuchando',true);break;
    case 'profile':break;
-   case 'document':setDocuments([{id:m.id}]);void downloadCVAutomatically(m.id);break;
+   case 'document':setDocuments([{id:m.id}]);void downloadCVAutomatically(m.id,m.format||'pdf');break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
    case 'notice':toast(m.message);break;
