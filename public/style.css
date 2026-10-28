@@ -10,3 +10,41 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
 .control-symbol svg{display:block;width:29px;height:29px;stroke:white;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.2}.control-amber .control-symbol svg{width:27px;height:27px}.subtitle span{transform-origin:center center}
+
+/* v1.1 · vista sin textos promocionales; el avatar y los controles son el centro */
+.student-page{height:100dvh;min-height:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);overflow:hidden;background:radial-gradient(ellipse at 50% 50%,#15253c,#081321 78%)}
+.student-page .topbar{height:64px;min-height:64px;padding:0 clamp(15px,3vw,28px);border-bottom:1px solid #d1e4ff16;z-index:20;flex-shrink:0}
+.student-page .topbar-right{gap:10px}.student-page .live-pill{max-width:145px;white-space:nowrap;overflow:hidden;font-size:12px;padding:8px 11px}
+.student-page .ghost-btn{font-size:13px;padding:9px 4px;color:#dce7f5}
+.conversation-shell{flex:1;min-height:0;width:100%;max-width:1000px;display:flex;flex-direction:column;justify-content:stretch;margin:0 auto}
+.conversation-topline,.student-footer,.control-hint{display:none!important}
+.stage{flex:1 1 auto;width:100%;height:auto;min-height:0;max-height:none;overflow:hidden;display:block;position:relative}
+.stage-glow,.stage-halo{opacity:.35;pointer-events:none}
+.avatar-stage{position:absolute;inset:0;width:100%;height:100%;display:grid;place-items:center;overflow:hidden}
+.avatar-images{position:absolute;inset:0;transform:translate(var(--avatar-x,0px),var(--avatar-y,0px)) scale(var(--avatar-scale,1));transform-origin:center center;overflow:hidden;pointer-events:none}
+.avatar-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center center;visibility:hidden;opacity:0;pointer-events:none;user-select:none;will-change:opacity}
+.avatar-frame.is-visible{visibility:visible;opacity:1}
+.avatar-placeholder{max-width:80%;max-height:100%}
+.subtitle-holder{width:100%;bottom:12px;left:0;right:0;padding:0 clamp(10px,3vw,20px)}
+.subtitle{height:44px;max-width:100%;min-width:0;font-size:clamp(15px,2vw,var(--subtitle-size,20px));padding:0 12px;border-radius:12px;background:#03070cdb;box-shadow:0 7px 35px #0009}
+.subtitle span{overflow:visible;white-space:nowrap;max-width:none}
+.controls-bar{padding:12px 16px 17px;flex:0 0 auto;width:100%;gap:0}
+.controls-group{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(10px,3vw,18px);width:min(100%,380px);margin:0 auto}
+.control,.control-amber{width:100%;height:auto;aspect-ratio:1;min-height:0;display:grid;place-items:center;border-radius:19px;box-shadow:0 8px 22px #0004}
+.control-symbol svg,.control-amber .control-symbol svg{width:clamp(26px,8vw,34px);height:clamp(26px,8vw,34px)}
+.control-name{display:none!important}
+.text-composer{flex:0 0 auto;margin:2px auto 8px;width:calc(100% - 30px);max-width:670px}
+.document-strip{position:absolute;z-index:22;right:15px;top:75px;margin:0;background:#122f2fe9;box-shadow:0 6px 16px #0005}
+.simple-login-title{margin:0 0 26px!important;font-size:28px!important;letter-spacing:0!important}
+.auth-card{padding:32px}.auth-card label{font-size:14px}.auth-page .login-wrap{max-width:410px}.auth-page .wordmark{justify-content:center}
+@media(max-width:600px){
+ .student-page .topbar{height:56px;min-height:56px;padding:0 14px}.student-page .topbar .wordmark{font-size:21px;gap:7px}.student-page .topbar .brand-mark{height:29px;width:29px;border-radius:9px;font-size:19px}
+ .topbar-right{gap:5px}.student-page .live-pill{font-size:11px;max-width:125px;padding:7px 8px}.student-page .ghost-btn{font-size:12px}
+ .stage{height:auto!important;min-height:0!important;max-height:none!important}.avatar-images{inset:0}
+ .subtitle-holder{bottom:5px;padding:0 12px}.subtitle{height:40px;font-size:clamp(16px,4.3vw,var(--subtitle-size,20px));padding:0 10px}
+ .controls-bar{padding:9px 15px 14px}.controls-group{gap:12px;width:min(100%,380px)}.control,.control-amber{width:100%;height:auto;aspect-ratio:1;border-radius:17px}
+ .admin-page .admin-side{padding:10px 12px;gap:8px}.admin-page .admin-main{padding:15px}.admin-page .nav-item{padding:10px 12px;font-size:12px}
+ .voice-picker{flex-direction:column;align-items:stretch}.voice-picker .setting-label{width:100%}
+}
+@media(max-height:600px){.student-page .topbar{height:45px;min-height:45px}.controls-bar{padding:6px 16px 8px}.controls-group{width:min(100%,285px)}.subtitle{height:34px}}
+@media(max-width:370px){.student-page .wordmark{font-size:18px!important}.student-page .topbar-right{gap:2px}.student-page .live-pill{max-width:115px}.controls-group{gap:8px}}
