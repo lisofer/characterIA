@@ -307,25 +307,53 @@ let savedDocuments=[];
 function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
 function setupStudent(){
  $('#call-btn').onclick=async()=>{
-  if(ws&&(ws.readyState===0||ws.readyState===1))stopCall();
-  else await startCall()
+  if(ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
+  else await startCall();
  };
- $('#mic-btn').onclick=async()=>{if(micOn){stopMicrophone();return;}if(ws?.readyState===WebSocket.OPEN){await startMicrophone();return;}await startCall()};
- $('#keyboard-btn').onclick=()=>{
-  const form=$('#text-form');form.classList.toggle('hidden');
-  if(!form.classList.contains('hidden'))$('#text-message').focus();
+ $('#mic-btn').onclick=async()=>{
+  if(!ws||ws.readyState!==WebSocket.OPEN){toast('Pulsá el botón rojo para conectarte.');return;}
+  mutedByUser=!mutedByUser;
+  if(mutedByUser)stopMicrophone();
+  else if(!keyboardOpen){
+   const ok=await startMicrophone();
+   if(!ok)mutedByUser=true;
+  }
+  updateConversationOverlay();
+ };
+ $('#keyboard-btn').onclick=async()=>{
+  keyboardOpen=!keyboardOpen;
+  $('#text-form').classList.toggle('hidden',!keyboardOpen);
+  if(keyboardOpen){
+   stopMicrophone();
+   $('#text-message').focus();
+  }else if(!mutedByUser&&ws?.readyState===WebSocket.OPEN){
+   const ok=await startMicrophone();
+   if(!ok)mutedByUser=true;
+  }
+  updateConversationOverlay();
  };
  $('#text-form').onsubmit=e=>{
   e.preventDefault();const inp=$('#text-message'),txt=inp.value.trim();if(!txt)return;
-  if(!ws||ws.readyState!==1){toast('Conectá la llamada primero');return}
+  if(!ws||ws.readyState!==WebSocket.OPEN){toast('Conectá la llamada con el botón rojo.');return;}
   ws.send(JSON.stringify({type:'text',text:txt}));inp.value='';
-  $('#text-form').classList.add('hidden');
+  // El teclado permanece abierto y el micrófono apagado hasta pulsar el azul.
+  updateConversationOverlay();
  };
  $('#reset-btn').onclick=()=>$('#reset-modal').classList.remove('hidden');
  $('#cancel-reset').onclick=()=>$('#reset-modal').classList.add('hidden');
  $('#confirm-reset').onclick=async()=>{
-  try{stopCall();await post('/api/reset',{confirm:true});$('#reset-modal').classList.add('hidden');setDocuments([]);resetSubtitle();setStatus('Sin conectar')}
-  catch(e){toast(e.message)}
+  const btn=$('#confirm-reset');btn.disabled=true;
+  try{
+   ensureAudio(true).catch(()=>{});
+   stopCall();
+   await post('/api/reset',{confirm:true});
+   $('#reset-modal').classList.add('hidden');
+   mutedByUser=false;keyboardOpen=false;callEnded=false;
+   setDocuments([]);startedDownloads.clear();hideDownloadNotice();
+   resetSubtitle();updateConversationOverlay();
+   await startCall();
+  }catch(e){toast(e.message);updateConversationOverlay()}
+  finally{btn.disabled=false}
  };
 }
 // Administración: lista de ocho fotogramas y vista previa responsive.
@@ -360,4 +388,4 @@ function setupAdmin(){$$('#admin-nav .nav-item').forEach(b=>b.onclick=()=>{const
 setupAuth();setupStudent();setupAdmin();
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 if(isLocal&&new URLSearchParams(location.search).get('demo')){const demo=new URLSearchParams(location.search).get('demo');if(demo==='student'){setVisible('student');applySettings({subtitleFont:20,subtitleWidth:760,avatarScale:100});showFrame(0);setStatus('Conectado',true);$('#connection-label').textContent='Vista previa';}else if(demo==='admin'){setVisible('admin');config={avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',voice:'Aoede'};buildFrames();syncOutputs();}else setVisible('login');}
-else restoreRole().catch(()=>setVisible('login'));
+else restoreRole().then(()=>{if(role==='student')void startCall();}).catch(()=>setVisible('login'));
