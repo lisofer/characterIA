@@ -558,3 +558,27 @@ body:has(#login-view:not(.hidden)){
 @media(max-width:600px){
  .student-page .control{transition:none!important}
 }
+
+/* Estabilidad Android: evitar el parpadeo al cambiar el estado de la llamada.
+   Filtrar solo el WebP visible evita crear una capa GPU para las ocho imágenes. */
+.student-page .stage.connecting .avatar-images,
+.student-page .stage.call-ended .avatar-images{
+ filter:none!important;
+ transition:none!important;
+}
+.student-page .stage.connecting .avatar-frame.is-visible{
+ filter:grayscale(1) brightness(.54);
+ transition:none!important;
+}
+.student-page .stage.call-ended .avatar-frame.is-visible{
+ filter:grayscale(1) brightness(.52);
+ transition:none!important;
+}
+.student-page .avatar-frame{backface-visibility:hidden}
+@media(max-width:600px){
+ .student-page .conversation-overlay-card{
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+ }
+ .student-page .stage-glow{filter:none!important}
+}

@@ -17,28 +17,39 @@ async function restoreRole(force){let me=await api('/api/me');role=force||me.rol
  }else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
 let frameLoadEpoch=0;
 async function refreshFrames(){
- // La conversación arranca sin esperar los ocho PNG; caché revalidable, sin URL aleatoria.
- const epoch=++frameLoadEpoch,parent=el.avatar;
- parent.replaceChildren();frames=Array(8).fill(false);currentFrame=-1;showFrame(0);
+ // Mantener la imagen existente al reingresar; nunca borrar un avatar visible.
+ const parent=el.avatar;
+ if(parent.querySelector('.avatar-frame.is-visible')?.naturalWidth>0)return;
+ const epoch=++frameLoadEpoch;
+ if(parent.children.length)parent.replaceChildren();
+ frames=Array(8).fill(false);currentFrame=-1;showFrame(0);
  const loadFrame=i=>new Promise(resolve=>{
   const img=document.createElement('img');
   img.className='avatar-frame';img.alt='';img.draggable=false;img.dataset.frame=String(i);
   img.decoding='async';img.fetchPriority=i===0?'high':'low';
-  img.onload=()=>{
-   if(epoch!==frameLoadEpoch){resolve(false);return;}
+  img.onload=async()=>{
+   // onload no garantiza que la GPU haya terminado de decodificar la imagen.
+   // Nunca mostrar el fotograma siguiente sin haber terminado img.decode().
+   try{if(img.decode)await img.decode();}catch{img.remove();resolve(false);return;}
+   if(epoch!==frameLoadEpoch){img.remove();resolve(false);return;}
    frames[i]=true;
    if(currentFrame<0||i===0)showFrame(0);
    resolve(true);
   };
-  img.onerror=()=>{if(epoch===frameLoadEpoch)frames[i]=false;resolve(false);};
-  parent.appendChild(img);img.src=`/api/frames/${i}`;
+  img.onerror=()=>{
+   if(epoch===frameLoadEpoch)frames[i]=false;
+   img.remove();resolve(false);
+  };
+  parent.appendChild(img);img.src=`/api/frames/${i}?optimized=1`;
  });
+ // Primero el fotograma de reposo. Después dos descargas simultáneas,
+ // sin cargar PNG originales de resolución gigante en Chrome Android.
  void loadFrame(0).then(ok=>{
   if(epoch!==frameLoadEpoch)return;
-  if(!ok)console.warn('No se encontró el fotograma de reposo. Revisá los PNG de Administración.');
+  if(!ok)console.warn('No se pudo cargar el fotograma de reposo.');
   const order=[2,4,6,1,3,5,7];let cursor=0;
   const worker=async()=>{while(epoch===frameLoadEpoch&&cursor<order.length)await loadFrame(order[cursor++]);};
-  setTimeout(()=>{if(epoch===frameLoadEpoch){void worker();void worker();}},200);
+  setTimeout(()=>{if(epoch===frameLoadEpoch){void worker();void worker();}},150);
  });
 }
 function applySettings(c){
@@ -55,10 +66,14 @@ function applySettings(c){
 function showFrame(index){
  const real=frames[index]?index:(frames[index%2]?index%2:(frames[0]?0:-1));
  if(real===currentFrame)return;
+ const next=real>=0?el.avatar.querySelector(`[data-frame="${real}"]`):null;
+ // La imagen anterior permanece hasta que la nueva esté decodificada.
+ if(real>=0&&(!next||!next.naturalWidth))return;
  const previous=currentFrame;
  currentFrame=real;
- if(previous>=0)el.avatar.querySelector(`[data-frame="${previous}"]`)?.classList.remove('is-visible');
- if(real>=0)el.avatar.querySelector(`[data-frame="${real}"]`)?.classList.add('is-visible');
+ if(next)next.classList.add('is-visible');
+ if(previous>=0&&previous!==real)
+  el.avatar.querySelector(`[data-frame="${previous}"]`)?.classList.remove('is-visible');
  el.placeholder.classList.toggle('hidden',real>=0);
 }
 let frameVersions=Array(8).fill(0);
@@ -527,8 +542,8 @@ function setupStudent(){
 }
 // Administración: lista de ocho fotogramas y vista previa responsive.
 const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
-function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?v=${frameVersions[i]||0}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
-function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
+function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?optimized=1&v=${frameVersions[i]||0}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
+function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?optimized=1&v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
 function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+((o.dataset.for==='mouthDelay'||o.dataset.for==='subtitleDelay')?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
 function fillVoiceSelector(list, current){
  const select=$('#voice-select');

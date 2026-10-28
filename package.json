@@ -4,15 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Portal accesible con Gemini Live, memoria persistente y CV PDF",
-  "engines": { "node": ">=22.13.0" },
-  "scripts": {"start":"node server.js","dev":"node --watch server.js","test":"node --test test/*.test.js"},
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js"
+  },
   "dependencies": {
-    "@google/genai":"^2.24.0",
-    "express":"^4.21.2",
-    "ws":"^8.18.0",
-    "pdfkit":"^0.17.2",
-    "multer":"^2.0.2",
-    "helmet":"^8.1.0",
-    "express-rate-limit":"^8.0.0"
+    "@google/genai": "^2.24.0",
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "pdfkit": "^0.17.2",
+    "multer": "^2.0.2",
+    "helmet": "^8.1.0",
+    "express-rate-limit": "^8.0.0",
+    "sharp": "^0.34.0"
   }
 }

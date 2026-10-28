@@ -1,6 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
+import sharp from 'sharp';
 import {rateLimit} from 'express-rate-limit';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -28,7 +29,40 @@ app.post('/api/login',loginLimiter,(req,res)=>{const pwd=req.body?.password;let 
 app.post('/api/logout',auth(),(req,res)=>{removeSession(parseCookie(req));cookie(res,'',0);res.json({ok:true});});
 app.get('/api/me',(req,res)=>{const s=session(req);if(!s)return res.json({role:null});res.json({role:s.role,profile:s.role==='student'?getProfile(s.profile_id)?.fields||{}:null,documents:s.role==='student'?listDocs(s.profile_id):[],config:s.role==='student'?publicSettings():allSettings()});});
 function publicSettings(){const s=allSettings();return Object.fromEntries(['subtitleFont','subtitleWidth','subtitleDelay','mouthDelay','mouthSensitivity','mouthSmoothing','blinkRate','mouthAmplitude','avatarScale','avatarOffsetX','avatarOffsetY','avatarFit'].map(k=>[k,s[k]]));}
-app.get('/api/frames/:index',auth(),(req,res)=>{const i=Number(req.params.index);if(!Number.isInteger(i)||i<0||i>7)return res.sendStatus(404);const file=path.join(DATA_DIR,'frames',`${i}.png`);if(!fs.existsSync(file))return res.sendStatus(404);res.set('Cache-Control','no-cache');res.type('png').sendFile(path.resolve(file));});
+// Los PNG originales permanecen en /data. Para Android, se envían variantes
+// WebP reducidas: evita decodificar ocho texturas de hasta 4096 x 4096 en Chrome.
+const optimizedFrameCache=new Map();
+async function optimizedFrame(i,file){
+ const stat=await fs.promises.stat(file);
+ const version=`${stat.mtimeMs}:${stat.size}`;
+ const cached=optimizedFrameCache.get(i);
+ if(cached?.version===version)return cached.promise;
+ const promise=sharp(file,{limitInputPixels:20000000})
+  .resize({width:1024,height:1536,fit:'inside',withoutEnlargement:true})
+  .webp({quality:82,effort:4}).toBuffer();
+ optimizedFrameCache.set(i,{version,promise});
+ promise.catch(()=>{if(optimizedFrameCache.get(i)?.promise===promise)optimizedFrameCache.delete(i);});
+ return promise;
+}
+app.get('/api/frames/:index',auth(),async(req,res)=>{
+ const i=Number(req.params.index);
+ if(!Number.isInteger(i)||i<0||i>7)return res.sendStatus(404);
+ const file=path.join(DATA_DIR,'frames',`${i}.png`);
+ if(!fs.existsSync(file))return res.sendStatus(404);
+ res.set('Cache-Control','private, no-cache');
+ if(req.query.optimized==='1'){
+  try{
+   const webp=await optimizedFrame(i,file);
+   if(res.headersSent)return;
+   res.type('webp').send(webp);
+  }catch(err){
+   console.warn('No se pudo optimizar fotograma',i,err.message);
+   if(!res.headersSent)res.type('png').sendFile(path.resolve(file));
+  }
+  return;
+ }
+ res.type('png').sendFile(path.resolve(file));
+});
 app.post('/api/reset',auth('student'),(req,res)=>{if(req.body?.confirm!==true)return res.status(400).json({error:'Confirmá el reinicio para borrar todo el CV.'});const old=req.profileId;for(const f of eraseProfile(old)){try{fs.unlinkSync(path.join(DATA_DIR,'cvs',f))}catch{}}const fresh=createProfile();replaceSessionProfile(parseCookie(req),fresh);res.json({ok:true,profile:{},documents:[]});});
 app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,'Mi_Curriculum.pdf');});
 app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY}));
