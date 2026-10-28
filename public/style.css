@@ -460,3 +460,86 @@ body:has(#login-view:not(.hidden)){
 @media(prefers-reduced-motion:reduce){
  .connecting-dots span{animation:none;opacity:1}
 }
+
+
+/* NEXO CV / Chrome Android: formulario y subtítulos anclados al teclado virtual. */
+.student-page.keyboard-open .text-composer{
+ position:fixed!important;
+ z-index:62;
+ left:50%;
+ right:auto;
+ bottom:calc(var(--nexo-keyboard-inset,0px) + 10px)!important;
+ transform:translateX(-50%)!important;
+ display:flex;
+ flex-direction:row;
+ align-items:center;
+ gap:5px;
+ box-sizing:border-box;
+ width:min(calc(100vw - 24px),580px)!important;
+ height:58px;
+ min-height:58px;
+ margin:0!important;
+ padding:5px 6px;
+ border:1px solid #7aa3d3aa;
+ border-radius:15px;
+ background:#142940f5;
+ box-shadow:0 14px 36px #0008;
+}
+.student-page.keyboard-open .text-composer input{
+ min-width:0;
+ flex:1 1 auto;
+ height:100%;
+ padding:0 5px;
+ font-size:clamp(14px,4.1vw,17px);
+}
+.student-page.keyboard-open .text-composer .close-keyboard-btn{
+ flex:0 0 42px;
+ height:44px;
+ padding:0;
+ border:0;
+ border-radius:10px;
+ display:grid;
+ place-items:center;
+ background:#263e5c;
+ color:#ecf4ff;
+ font:600 29px/1 Arial,sans-serif;
+ cursor:pointer;
+}
+.student-page.keyboard-open .text-composer .send-btn{
+ flex:0 0 46px;
+ width:46px;
+ height:44px;
+ padding:0;
+ display:grid;
+ place-items:center;
+ border-radius:10px;
+ font-size:22px;
+}
+.student-page.keyboard-open .subtitle-holder{
+ position:fixed!important;
+ z-index:58;
+ left:0;
+ right:0;
+ top:auto;
+ bottom:calc(var(--nexo-keyboard-inset,0px) + 78px)!important;
+ width:100%;
+ padding:0 12px;
+ margin:0;
+ pointer-events:none;
+}
+.student-page.keyboard-open .subtitle{
+ height:43px;
+ max-width:min(calc(100% - 2px),760px);
+}
+.student-page.keyboard-open .controls-bar{z-index:1}
+@media(max-width:400px){
+ .student-page.keyboard-open .text-composer{width:calc(100vw - 18px)!important}
+ .student-page.keyboard-open .subtitle-holder{padding:0 9px}
+ .student-page.keyboard-open .text-composer input{font-size:14px}
+}
+@media(prefers-reduced-motion:no-preference){
+ .student-page.keyboard-open .text-composer,
+ .student-page.keyboard-open .subtitle-holder{
+  transition:bottom .12s ease-out;
+ }
+}
