@@ -27,7 +27,7 @@ export function makeLive(client,profileId,{voiceOverride,preview=false}={}){
       if(result.ok)write('profile',{profile:getProfile(profileId)?.fields||{}});
     }else if(call.name==='generar_cv'){
       if(call.args?.confirmacion!==true)result={ok:false,mensaje:'Pedí confirmación al usuario antes de generar.'};
-      else {const file=await createDocument(profileId);result={ok:true,archivo:`/api/cv/${file.id}`};write('document',{id:file.id});}
+      else {const file=await createDocument(profileId);result={ok:true,archivo:`/api/cv/${file.id}`,mensaje:'El currículum está listo. La aplicación iniciará la descarga automática en el dispositivo del usuario. Decile de forma breve que su CV se está descargando en su dispositivo, sin prometer que ya se guardó.'};write('document',{id:file.id});}
     }
    }catch(e){result={ok:false,error:String(e.message||e)};}
    responses.push({id:call.id,name:call.name,response:{result}});
