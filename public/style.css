@@ -81,3 +81,97 @@
 .admin-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
 .admin-header-actions .admin-logout{display:inline-flex;align-items:center;justify-content:center;border:1px solid #3d5476;background:#172a43;border-radius:11px;padding:12px 17px;min-height:43px;color:#f2f7ff;font-size:13px;white-space:nowrap}
 @media(max-width:600px){.admin-header{align-items:center;gap:12px}.admin-header-actions{width:100%;justify-content:space-between;flex-wrap:nowrap}.admin-header-actions .compact{margin:0;min-height:43px;white-space:nowrap}.admin-header-actions .admin-logout{min-width:79px}}
+
+
+/* NEXO CV · revisión de composición 2026-10-28. No modifica perfiles ni PNG. */
+body.student-active{height:100dvh;min-height:0;overflow:hidden;overscroll-behavior-y:none}
+.student-page{position:fixed;inset:0;width:100%;height:100dvh;min-height:0;overscroll-behavior-y:none;overflow:hidden}
+.student-page .topbar{min-height:0;height:100%;padding-inline:clamp(9px,3vw,22px);gap:6px}
+.student-page .topbar-right{min-width:0;flex-shrink:0;gap:7px;display:flex;align-items:center}
+.student-page .live-pill,
+.student-page #student-logout{
+  display:inline-flex;align-items:center;justify-content:center;
+  box-sizing:border-box;height:41px;min-height:41px;
+  border:1px solid #435979;background:#172840;border-radius:12px;
+  color:#edf5ff;font-size:14px;font-weight:700;line-height:1;
+  letter-spacing:0;white-space:nowrap;box-shadow:0 2px 8px #0001;
+}
+.student-page .live-pill{max-width:none;min-width:0;padding:0 11px;gap:8px;overflow:visible}
+.student-page #student-logout{padding:0 14px;min-width:58px}
+.student-page .status-dot{flex:0 0 8px;height:8px;width:8px}
+.student-page .conversation-shell{grid-template-rows:minmax(0,1fr) auto;min-height:0}
+.student-page .controls-bar{padding:5px 12px max(3px,env(safe-area-inset-bottom,0px));margin:0;align-self:end}
+.student-page .controls-group{
+  width:min(100%,420px);max-width:420px;display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:clamp(7px,2.25vw,12px);align-items:stretch;justify-content:stretch
+}
+.student-page .control,
+.student-page .control-amber{
+  width:100%!important;height:auto!important;aspect-ratio:1/1!important;
+  min-width:0;min-height:0;max-width:none!important;max-height:none!important;
+  margin:0!important;padding:0!important;align-self:stretch;justify-self:stretch;
+  border-radius:clamp(13px,4vw,20px);
+}
+.student-page .control-symbol{display:grid;place-items:center}
+.student-page .control-symbol svg{width:clamp(26px,7vw,36px);height:clamp(26px,7vw,36px)}
+.admin-main{min-height:100dvh}
+.admin-header{
+  position:sticky;top:0;z-index:40;display:flex;flex-direction:column;
+  align-items:stretch;gap:13px;padding:12px 0 15px;margin:0 0 18px;
+  background:#0b1628;border-bottom:1px solid #aabde21c;
+}
+.admin-header-actions{order:0;display:flex;width:100%;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:12px}
+.admin-header h2{order:1;margin:0;font-size:clamp(22px,2.4vw,30px)}
+.admin-header-actions .primary-btn,
+.admin-header-actions .admin-logout{
+  min-height:43px;height:43px;border-radius:11px;display:inline-flex;
+  align-items:center;justify-content:center;gap:9px;
+  margin:0;padding:0 16px;box-shadow:none;
+  font-size:14px;font-weight:750;line-height:1;white-space:nowrap
+}
+.admin-header-actions .admin-logout{border:1px solid #4a6283;background:#172a43;color:#f2f7ff}
+.admin-header-actions .primary-btn span{font-size:16px}
+.admin-pane [data-setting="prompt"]{font:500 14px/1.65 ui-monospace,Consolas,monospace;min-height:370px}
+.show-pass{display:grid;place-items:center;width:45px;height:44px;min-width:45px;padding:0;border-radius:9px;color:#b9d1f1}
+.show-pass svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}
+.show-pass .eye-closed{display:none}
+.show-pass.showing .eye-open{display:none}
+.show-pass.showing .eye-closed{display:block}
+.show-pass:focus-visible{outline:2px solid #8bbaff;outline-offset:1px}
+@media(max-width:600px){
+  .student-page{grid-template-rows:56px minmax(0,1fr)}
+  .student-page .topbar{height:56px;padding-inline:12px}
+  .student-page .wordmark{font-size:clamp(18px,4.8vw,21px)!important;gap:6px}
+  .student-page .topbar .brand-mark{width:29px;height:29px;border-radius:9px}
+  .student-page .live-pill,.student-page #student-logout{
+    min-height:39px;height:39px;font-size:13px!important;border-radius:11px
+  }
+  .student-page .live-pill{padding:0 8px!important;gap:6px;max-width:none}
+  .student-page #student-logout{padding:0 10px!important;min-width:50px}
+  .student-page .topbar-right{gap:6px}
+  .student-page .controls-bar{padding:3px 11px max(2px,env(safe-area-inset-bottom,0px))!important}
+  .student-page .controls-group{width:min(100%,420px);gap:clamp(7px,2.2vw,11px)}
+  .admin-page .admin-main{padding:0 14px 18px;min-height:0}
+  .admin-page .admin-header{padding:12px 0 11px;margin:0 0 14px;gap:0}
+  .admin-page .admin-header h2{display:none}
+  .admin-header-actions .primary-btn,.admin-header-actions .admin-logout{
+    height:44px;min-height:44px;font-size:14px;padding:0 15px
+  }
+  .admin-pane [data-setting="prompt"]{font-size:13px;min-height:340px}
+}
+@media(max-width:360px){
+  .student-page .topbar{padding-inline:9px}
+  .student-page .topbar .wordmark{font-size:17px!important;gap:5px}
+  .student-page .topbar .brand-mark{width:26px;height:26px}
+  .student-page .topbar-right{gap:4px}
+  .student-page .live-pill,.student-page #student-logout{font-size:12px!important;height:37px;min-height:37px}
+  .student-page .live-pill{padding:0 7px!important;gap:5px}
+  .student-page #student-logout{padding:0 8px!important;min-width:43px}
+}
+@media(max-height:620px){
+  .student-page{grid-template-rows:46px minmax(0,1fr)}
+  .student-page .topbar{height:46px}
+  .student-page .controls-bar{padding:2px 12px max(2px,env(safe-area-inset-bottom,0px))!important}
+  .student-page .controls-group{max-width:300px}
+}
