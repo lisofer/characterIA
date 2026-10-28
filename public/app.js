@@ -9,17 +9,21 @@ const setVisible=view=>{for(const v of ['login','student','admin'])el[v].classLi
 function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;ensureAudio().catch(()=>{});const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.innerHTML='Ingresar <span>↗</span>';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password');t.type=t.type==='password'?'text':'password';});
  $('#student-logout').addEventListener('click',logout);$('#admin-logout').addEventListener('click',logout)}
 async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setVisible('login')}
-async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){setVisible('student');applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();await connectLive();}else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
+async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){setVisible('student');applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();setStatus('Sin conectar');}else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
 async function refreshFrames(){
- frames=await Promise.all(Array.from({length:8},(_,i)=>fetch(`/api/frames/${i}`,{method:'HEAD',cache:'no-store'}).then(r=>r.ok).catch(()=>false)));
- const parent=el.avatar;parent.replaceChildren();
- for(let i=0;i<8;i++){
+ // Verificamos cada PNG por carga real, sin confiar en solicitudes HEAD.
+ const parent=el.avatar;parent.replaceChildren();frames=Array(8).fill(false);
+ const stamp=Date.now();
+ const results=await Promise.all(Array.from({length:8},(_,i)=>new Promise(resolve=>{
   const img=document.createElement('img');img.className='avatar-frame';img.alt='';img.draggable=false;img.dataset.frame=String(i);
-  if(frames[i]){img.src=`/api/frames/${i}?v=${frameVersions[i]||0}`;img.decode?.().catch(()=>{});}
-  parent.appendChild(img);
- }
+  img.onload=()=>{frames[i]=true;resolve(true)};
+  img.onerror=()=>{frames[i]=false;resolve(false)};
+  parent.appendChild(img);img.src=`/api/frames/${i}?v=${stamp}`;
+ })));
  currentFrame=-1;showFrame(0);
+ if(!results[0])console.warn('No se encontró el primer PNG. Revisá volumen /data e imágenes en Administración.');
 }
+
 function applySettings(c){
  config={...config,...c};
  document.documentElement.style.setProperty('--subtitle-size',(config.subtitleFont||20)+'px');
@@ -29,7 +33,7 @@ function applySettings(c){
  el.avatar.style.setProperty('--avatar-scale',Math.max(.5,Math.min(1.2,s)));
  el.avatar.style.setProperty('--avatar-x',(config.avatarOffsetX||0)+'px');
  el.avatar.style.setProperty('--avatar-y',(config.avatarOffsetY||0)+'px');
- el.avatar.querySelectorAll('.avatar-frame').forEach(img=>img.style.objectFit='contain');
+ el.avatar.querySelectorAll('.avatar-frame').forEach(img=>{img.style.objectFit='contain';img.style.objectPosition='center center';});
 }
 function showFrame(index){
  let real=frames[index]?index:(frames[index%2]?index%2:(frames[0]?0:-1));
@@ -154,7 +158,7 @@ function animateMouth(){
  showFrame(index);
  audioSegments=audioSegments.filter(x=>x.end>(audioContext?.currentTime||0)-.2);
 }
-function setStatus(label,connected=false){$('#connection-label').textContent=label;$('.status-dot').classList.toggle('connected',connected);$('#call-btn').title=connected?'Colgar llamada':'Iniciar llamada';}
+function setStatus(label,connected=false){$('#connection-label').textContent=label;$('.status-dot').classList.toggle('connected',connected);$('#call-btn').title=connected?'Colgar llamada':'Iniciar llamada';$('#call-btn').setAttribute('aria-label',connected?'Colgar llamada':'Iniciar llamada');}
 async function connectLive(){
  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const attempt=++connectAttempt;
@@ -180,9 +184,9 @@ async function connectLive(){
    case 'profile':break;
    case 'document':setDocuments([{id:m.id}]);toast('Currículum listo para descargar');break;
    case 'interrupted':stopPlayback(true);break;
-   case 'error':toast(m.message);setStatus('Error');break;
+   case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');break;
    case 'notice':toast(m.message);break;
-   case 'closed':setStatus('Desconectado');break;
+   case 'closed':setStatus('Desconectado');toast(m.message||'La llamada se cerró');break;
   }
  };
  socket.onclose=()=>{if(attempt!==connectAttempt)return;setStatus('Desconectado');stopMicrophone();stopPlayback();};
@@ -230,7 +234,7 @@ function setDocuments(docs){const doc=docs[0];$('#document-strip').classList.tog
 function setupStudent(){
  $('#call-btn').onclick=async()=>{
   if(ws&&(ws.readyState===0||ws.readyState===1))stopCall();
-  else{ensureAudio(true).catch(()=>{});await connectLive()}
+  else{await ensureAudio(true);await connectLive()}
  };
  $('#mic-btn').onclick=async()=>{if(micOn)stopMicrophone();else await startMicrophone()};
  $('#keyboard-btn').onclick=()=>{
@@ -255,8 +259,30 @@ const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Oj
 function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?v=${Date.now()}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
 function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
 function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+(o.dataset.for==='mouthDelay'?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
-async function loadAdmin(){const data=await api('/api/admin/config');config=data.config;frames=data.frames;buildFrames();$('#voice-select').innerHTML=(data.voices||VOICES).map(x=>`<option value="${x}">${x}</option>`).join('');for(const inp of $$('[data-setting]')){const val=config[inp.dataset.setting];if(val!==undefined)inp.value=val;}syncOutputs();if(!data.geminiReady)toast('Falta GEMINI_API_KEY para activar llamadas y muestras de voz.');}
-function setupAdmin(){$$('#admin-nav .nav-item').forEach(b=>b.onclick=()=>{const name=b.dataset.pane;$$('#admin-nav .nav-item').forEach(x=>x.classList.toggle('selected',x===b));$$('.admin-pane').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));$('#admin-title').innerHTML={appearance:'Personaje y <em>vista previa</em>',voice:'Voz e <em>inteligencia</em>',behavior:'Personalidad del <em>personaje</em>',accessibility:'Accesibilidad y <em>sincronía</em>'}[name];});$$('[data-setting]').forEach(inp=>inp.addEventListener('input',syncOutputs));$$('.device-btn').forEach(b=>b.onclick=()=>{$$('.device-btn').forEach(x=>x.classList.toggle('selected',x===b));$('#admin-preview').classList.toggle('mobile',b.dataset.device==='mobile')});$('#save-settings').onclick=async()=>{const next={};for(const i of $$('[data-setting]'))next[i.dataset.setting]=i.type==='range'?Number(i.value):i.value;try{const saved=await api('/api/admin/config',{method:'PUT',body:JSON.stringify({config:next})});config=saved.config;toast('Configuración guardada en Railway.')}catch(e){toast(e.message)}};$('#test-voice').onclick=async()=>{const btn=$('#test-voice'),status=$('#voice-test-status');btn.disabled=true;btn.textContent='Preparando muestra…';status.textContent='Generando audio con la voz seleccionada…';try{const r=await fetch('/api/admin/voice-sample',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:$('#voice-select').value})});if(!r.ok){const data=await r.json();throw Error(data.error||'Error de voz')}const blob=await r.blob(),url=URL.createObjectURL(blob),a=new Audio(url);a.onended=()=>URL.revokeObjectURL(url);await a.play();status.textContent=`Reproduciendo · ${r.headers.get('X-Gemini-Model')||'Gemini Live'}`;}catch(e){status.textContent='No se pudo generar la muestra: '+e.message;toast(e.message)}finally{btn.disabled=false;btn.textContent='▶ Escuchar prueba'}}}
+function fillVoiceSelector(list, current){
+ const select=$('#voice-select');
+ const all=Array.isArray(list)&&list.length?list:VOICES;
+ const valid=all.filter(v=>typeof v==='string'&&v.trim());
+ select.replaceChildren(...valid.map(v=>new Option(v,v)));
+ const selected=valid.includes(current)?current:(valid.includes('Aoede')?'Aoede':valid[0]);
+ if(selected)select.value=selected;
+ select.disabled=!valid.length;
+ return selected;
+}
+async function loadAdmin(){
+ fillVoiceSelector(VOICES,config.voice||'Aoede');
+ const data=await api('/api/admin/config');config=data.config||{};frames=data.frames||Array(8).fill(false);
+ buildFrames();
+ for(const inp of $$('[data-setting]')){
+  if(inp.dataset.setting==='voice')continue;
+  const val=config[inp.dataset.setting];if(val!==undefined&&val!==null)inp.value=val;
+ }
+ config.voice=fillVoiceSelector(data.voices,config.voice);
+ syncOutputs();
+ if(!data.geminiReady)$('#voice-test-status').textContent='Falta configurar GEMINI_API_KEY en Railway.';
+}
+
+function setupAdmin(){$$('#admin-nav .nav-item').forEach(b=>b.onclick=()=>{const name=b.dataset.pane;$$('#admin-nav .nav-item').forEach(x=>x.classList.toggle('selected',x===b));$$('.admin-pane').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));$('#admin-title').innerHTML={appearance:'Personaje y <em>vista previa</em>',voice:'Voz e <em>inteligencia</em>',behavior:'Personalidad del <em>personaje</em>',accessibility:'Accesibilidad y <em>sincronía</em>'}[name];});$$('[data-setting]').forEach(inp=>inp.addEventListener('input',syncOutputs));$$('.device-btn').forEach(b=>b.onclick=()=>{$$('.device-btn').forEach(x=>x.classList.toggle('selected',x===b));$('#admin-preview').classList.toggle('mobile',b.dataset.device==='mobile')});$('#save-settings').onclick=async()=>{const next={};for(const i of $$('[data-setting]'))next[i.dataset.setting]=i.type==='range'?Number(i.value):i.value;if(!next.voice||!VOICES.includes(next.voice))next.voice='Aoede';try{const saved=await api('/api/admin/config',{method:'PUT',body:JSON.stringify({config:next})});config=saved.config;toast('Configuración guardada en Railway.')}catch(e){toast(e.message)}};$('#test-voice').onclick=async()=>{const btn=$('#test-voice'),status=$('#voice-test-status');btn.disabled=true;btn.textContent='Preparando muestra…';status.textContent='Generando audio con la voz seleccionada…';try{const r=await fetch('/api/admin/voice-sample',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:$('#voice-select').value||'Aoede'})});if(!r.ok){const data=await r.json();throw Error(data.error||'Error de voz')}const blob=await r.blob(),url=URL.createObjectURL(blob),a=new Audio(url);a.onended=()=>URL.revokeObjectURL(url);await a.play();status.textContent=`Reproduciendo · ${r.headers.get('X-Gemini-Model')||'Gemini Live'}`;}catch(e){status.textContent='No se pudo generar la muestra: '+e.message;toast(e.message)}finally{btn.disabled=false;btn.textContent='▶ Escuchar prueba'}}}
 setupAuth();setupStudent();setupAdmin();
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 if(isLocal&&new URLSearchParams(location.search).get('demo')){const demo=new URLSearchParams(location.search).get('demo');if(demo==='student'){setVisible('student');applySettings({subtitleFont:20,subtitleWidth:760,avatarScale:100});showFrame(0);setStatus('Conectado',true);$('#connection-label').textContent='Vista previa';}else if(demo==='admin'){setVisible('admin');config={avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',voice:'Aoede'};buildFrames();syncOutputs();}else setVisible('login');}
