@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'nexocv-test-'));
+process.env.DATA_DIR=temp;
+const {createProfile,getProfile,updateField,addEvent,createSession,resolveSession,replaceSessionProfile,eraseProfile,listDocs,allSettings,db}=await import('../db.js');
+test('Perfil persistente y actualizaciones conservan el último valor',()=>{const id=createProfile();updateField(id,'nombre','María');updateField(id,'localidad','Pilar');updateField(id,'localidad','Escobar');assert.equal(getProfile(id).fields.nombre,'María');assert.equal(getProfile(id).fields.localidad,'Escobar');assert.equal(getProfile(id).recentEvents.filter(e=>e.type==='field').length,3);assert.ok(allSettings().prompt.includes('currículum'));});
+test('Sesión reconoce perfil y borrar no conserva CV viejo',()=>{const id=createProfile();const token=createSession('student',id);assert.equal(resolveSession(token).profile_id,id);updateField(id,'nombre','Prueba');eraseProfile(id);assert.equal(getProfile(id),null);const next=createProfile();replaceSessionProfile(token,next);assert.equal(resolveSession(token).profile_id,next);assert.deepEqual(getProfile(next).fields,{});});
+test('No se aceptan campos arbitrarios ni valores vacíos',()=>{const id=createProfile();assert.throws(()=>updateField(id,'diagnostico','X'));assert.throws(()=>updateField(id,'nombre',' '));});
+test.after(()=>{db.close();fs.rmSync(temp,{recursive:true,force:true})});
