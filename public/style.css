@@ -399,3 +399,18 @@ body:has(#login-view:not(.hidden)){
   .auth-page .simple-login-title{margin-bottom:12px!important}
   .auth-page #login-btn{min-height:50px;height:50px;margin-top:10px}
 }
+
+/* UI: call state overlays */
+.student-page .stage.call-ended .avatar-images{filter:grayscale(1) brightness(.52)}
+.conversation-overlay{position:absolute;inset:0;z-index:24;display:flex;align-items:center;justify-content:center;pointer-events:none;padding:18px}
+.conversation-overlay-card{width:min(94%,430px);text-align:center;padding:23px 18px 16px;border-radius:18px;border:1px solid #c9deff48;background:#07111fe8;box-shadow:0 18px 54px #0008;backdrop-filter:blur(9px)}
+.overlay-message{font:800 clamp(19px,5vw,27px)/1.24 'Outfit',Arial,sans-serif;color:#f6f9ff}
+.overlay-message small{display:block;font:600 clamp(14px,3.7vw,18px)/1.55 'DM Sans',Arial,sans-serif;color:#e4ebf4;margin-top:10px}
+.overlay-message .accent-red{color:#ff717b}.overlay-message .accent-yellow{color:#ffbc5c}
+.overlay-arrow{font:800 32px/1 Arial,sans-serif;margin-top:5px;color:#d3e5fb}
+.student-page #mic-btn,.student-page #mic-btn.active,.student-page #mic-btn.is-muted{box-shadow:0 8px 22px #0004!important;filter:none!important}
+#mic-btn.is-muted .control-symbol{opacity:.75}
+#mic-btn.is-muted::after{content:'';position:absolute;z-index:2;width:44%;height:3px;border-radius:3px;background:white;transform:rotate(-48deg);pointer-events:none}
+#keyboard-btn[aria-pressed="true"]{outline:2px solid #ffffff90;outline-offset:-5px}
+.student-page .text-composer{position:absolute;z-index:45;left:50%;transform:translateX(-50%);bottom:clamp(93px,14vw,136px);width:min(calc(100% - 28px),580px);margin:0;box-shadow:0 15px 35px #0008}
+@media(max-width:600px){.student-page .text-composer{bottom:clamp(84px,23vw,110px)}}
