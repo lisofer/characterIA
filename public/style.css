@@ -414,3 +414,8 @@ body:has(#login-view:not(.hidden)){
 #keyboard-btn[aria-pressed="true"]{outline:2px solid #ffffff90;outline-offset:-5px}
 .student-page .text-composer{position:absolute;z-index:45;left:50%;transform:translateX(-50%);bottom:clamp(93px,14vw,136px);width:min(calc(100% - 28px),580px);margin:0;box-shadow:0 15px 35px #0008}
 @media(max-width:600px){.student-page .text-composer{bottom:clamp(84px,23vw,110px)}}
+
+/* UI: automatic CV download feedback */
+.download-notice{position:fixed;z-index:75;top:50%;left:50%;transform:translate(-50%,-50%);width:min(calc(100% - 32px),450px);min-height:84px;padding:20px 19px;display:flex;align-items:center;justify-content:center;gap:14px;color:#e6fff7;background:#0d3930f7;border:1px solid #76d7bc80;border-radius:18px;box-shadow:0 20px 70px #0009;font:700 clamp(16px,4.5vw,20px)/1.35 'DM Sans',Arial,sans-serif;text-align:center;pointer-events:none}
+.download-notice-icon{flex:0 0 35px;width:35px;height:35px;display:grid;place-items:center;border-radius:50%;background:#55c7a6;color:#09392c;font:900 23px/1 Arial,sans-serif}
+#toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;max-width:min(90vw,420px);text-align:center;line-height:1.45;padding:14px 18px;border-radius:14px;font-size:14px}
