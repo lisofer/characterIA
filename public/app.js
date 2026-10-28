@@ -274,6 +274,11 @@ async function connectLive(){
     setStatus(connectingUi?'Conectando…':micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);
     updateConversationOverlay();
     if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'start'}));
+    clearTimeout(voiceStartTimer);
+    voiceStartTimer=setTimeout(()=>{
+     if(connectingUi&&!callEnded&&ws===socket&&socket.readyState===WebSocket.OPEN)
+      socket.close();
+    },20000);
     break;
    case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
@@ -346,17 +351,32 @@ function stopMicrophone(){
  if(ws?.readyState===WebSocket.OPEN)setStatus(mutedByUser?'Silenciado':'Solo teclado',true);
  updateConversationOverlay();
 }
-async function startCall(){
+async function startCall({reconnect=false}={}){
  if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
- const thisCall=++callGeneration;callPending=true;callEnded=false;hasConnected=false;mutedByUser=false;keyboardOpen=false;
- $('#text-form').classList.add('hidden');updateConversationOverlay();setStatus('Activando micro…');
+ const thisCall=++callGeneration;
+ callPending=true;callEnded=false;hasConnected=false;connectingUi=true;
+ clearTimeout(reconnectTimer);reconnectTimer=null;
+ if(!reconnect){
+  mutedByUser=false;keyboardOpen=false;
+  $('#text-form').classList.add('hidden');
+ }
+ updateConversationOverlay();setStatus('Conectando…');
  try{
-  const micReady=await startMicrophone();
+  let micReady=false;
+  if(!mutedByUser&&!keyboardOpen)micReady=await startMicrophone();
   if(thisCall!==callGeneration)return;
-  if(!micReady){mutedByUser=true;updateConversationOverlay();toast('Permití el micrófono en Chrome o usá el teclado.');}
+  if(!micReady&&!mutedByUser&&!keyboardOpen){
+   mutedByUser=true;
+   toast('Permití el micrófono en Chrome o usá el teclado.');
+  }
+  updateConversationOverlay();
   if(thisCall===callGeneration)await connectLive();
- }catch(e){callEnded=true;toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error');updateConversationOverlay()}
- finally{callPending=false}
+ }catch(e){
+  if(thisCall!==callGeneration)return;
+  console.warn('Reconexión de llamada:',e);
+  stopMicrophone();connectingUi=true;updateConversationOverlay();
+  scheduleReconnect();
+ }finally{callPending=false}
 }
 let savedDocuments=[];
 function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
@@ -402,6 +422,7 @@ function setupStudent(){
   try{
    ensureAudio(true).catch(()=>{});
    stopCall();
+   connectingUi=true;callEnded=false;updateConversationOverlay();setStatus('Conectando…');
    await post('/api/reset',{confirm:true});
    $('#reset-modal').classList.add('hidden');
    mutedByUser=false;keyboardOpen=false;callEnded=false;
@@ -445,3 +466,14 @@ setupAuth();setupStudent();setupAdmin();
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 if(isLocal&&new URLSearchParams(location.search).get('demo')){const demo=new URLSearchParams(location.search).get('demo');if(demo==='student'){setVisible('student');applySettings({subtitleFont:20,subtitleWidth:760,avatarScale:100});showFrame(0);setStatus('Conectado',true);$('#connection-label').textContent='Vista previa';}else if(demo==='admin'){setVisible('admin');config={avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',voice:'Aoede'};buildFrames();syncOutputs();}else setVisible('login');}
 else restoreRole().then(()=>{if(role==='student')void startCall();}).catch(()=>setVisible('login'));
+window.addEventListener('offline',()=>{
+ if(role!=='student'||callEnded)return;
+ connectingUi=true;updateConversationOverlay();setStatus('Sin señal');
+ if(ws&&ws.readyState!==WebSocket.CLOSED)ws.close();
+ else scheduleReconnect();
+});
+window.addEventListener('online',()=>{
+ if(role!=='student'||callEnded||!connectingUi)return;
+ clearTimeout(reconnectTimer);reconnectTimer=null;
+ if(!ws&&!callPending)void startCall({reconnect:true});
+});
