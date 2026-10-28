@@ -47,7 +47,7 @@ let frameVersions=Array(8).fill(0);
 let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0;
 let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
 let sources=new Set(),connectAttempt=0,playbackGeneration=0;
-let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,downloadNoticeTimer=null;
+let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,downloadNoticeTimer=null,callGeneration=0;
 const startedDownloads=new Set();
 // A cada línea se le asigna un inicio estimado según audio PCM, NO se escribe palabra por palabra.
 const measureCanvas=document.createElement('canvas'),ctx=measureCanvas.getContext('2d');
@@ -245,7 +245,7 @@ async function connectLive(){
  socket.onerror=()=>{if(attempt!==connectAttempt)return;setStatus('Error de red');toast('No se pudo abrir la llamada.')};
 }
 function stopCall(){
- connectAttempt++;hasConnected=false;callEnded=true;stopMicrophone();
+ connectAttempt++;callGeneration++;hasConnected=false;callEnded=true;stopMicrophone();
  if(ws){ws.onclose=null;try{ws.close()}catch{}ws=null}
  stopPlayback();setStatus('Desconectado');updateConversationOverlay();
 }
@@ -294,12 +294,13 @@ function stopMicrophone(){
 }
 async function startCall(){
  if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
- callPending=true;callEnded=false;hasConnected=false;mutedByUser=false;keyboardOpen=false;
+ const thisCall=++callGeneration;callPending=true;callEnded=false;hasConnected=false;mutedByUser=false;keyboardOpen=false;
  $('#text-form').classList.add('hidden');updateConversationOverlay();setStatus('Activando micro…');
  try{
   const micReady=await startMicrophone();
+  if(thisCall!==callGeneration)return;
   if(!micReady){mutedByUser=true;updateConversationOverlay();toast('Permití el micrófono en Chrome o usá el teclado.');}
-  await connectLive();
+  if(thisCall===callGeneration)await connectLive();
  }catch(e){callEnded=true;toast('No se pudo iniciar la llamada: '+e.message);stopMicrophone();setStatus('Error');updateConversationOverlay()}
  finally{callPending=false}
 }
