@@ -9,7 +9,12 @@ const setVisible=view=>{for(const v of ['login','student','admin'])el[v].classLi
 function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;ensureAudio(true).catch(()=>{});const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);if(data.role==='student')await startCall();}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.textContent='INGRESAR';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password'),b=$('#toggle-password'),visible=t.type==='password';t.type=visible?'text':'password';b.classList.toggle('showing',visible);b.setAttribute('aria-pressed',String(visible));b.setAttribute('aria-label',visible?'Ocultar contraseña':'Mostrar contraseña');b.title=visible?'Ocultar contraseña':'Mostrar contraseña';});
  $('#student-logout').addEventListener('click',logout);$('#admin-logout').addEventListener('click',logout)}
 async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setVisible('login')}
-async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){setVisible('student');applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();setStatus('Sin conectar');}else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
+async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){
+  connectingUi=true;callEnded=false;
+  setVisible('student');updateConversationOverlay();setStatus('Conectando…');
+  applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();
+  if(connectingUi)setStatus('Conectando…');
+ }else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
 async function refreshFrames(){
  // Verificamos cada PNG por carga real, sin confiar en solicitudes HEAD.
  const parent=el.avatar;parent.replaceChildren();frames=Array(8).fill(false);
@@ -48,6 +53,7 @@ let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,capti
 let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
 let sources=new Set(),connectAttempt=0,playbackGeneration=0;
 let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,downloadNoticeTimer=null,callGeneration=0;
+let connectingUi=false,reconnectTimer=null,reconnectAttempt=0,voiceStartTimer=null;
 const startedDownloads=new Set();
 // A cada línea se le asigna un inicio estimado según audio PCM, NO se escribe palabra por palabra.
 const measureCanvas=document.createElement('canvas'),ctx=measureCanvas.getContext('2d');
@@ -176,15 +182,45 @@ function animateMouth(){
 function setStatus(label,connected=false){$('#connection-label').textContent=label;$('.status-dot').classList.toggle('connected',connected);$('#call-btn').title=connected?'Colgar llamada':'Iniciar llamada';$('#call-btn').setAttribute('aria-label',connected?'Colgar llamada':'Iniciar llamada');}
 function updateConversationOverlay(){
  const overlay=$('#conversation-overlay'),msg=$('#overlay-message'),stage=$('#stage');
- const hung=callEnded,muted=mutedByUser&&!hung;
- stage.classList.toggle('call-ended',hung);
- if(hung)msg.innerHTML='Llamada terminada.<small>Pulsá el botón <strong class="accent-red">rojo</strong> para volver a conectarte.</small>';
- else if(muted)msg.innerHTML='Estás muteado.<small>Presioná el botón <strong class="accent-yellow">amarillo</strong> para activar el micrófono.</small>';
- overlay.classList.toggle('hidden',!(hung||muted));
+ const loading=connectingUi,ended=callEnded&&!loading,muted=mutedByUser&&!ended&&!loading;
+ stage.classList.toggle('connecting',loading);
+ stage.classList.toggle('call-ended',ended);
+ overlay.classList.toggle('is-connecting',loading);
+ if(loading){
+  msg.innerHTML='<span class="connecting-title">Conectando<span class="connecting-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>';
+ }else if(ended){
+  msg.innerHTML='Llamada terminada.<small>Pulsá el botón <strong class="accent-red">rojo</strong> para volver a conectarte.</small>';
+ }else if(muted){
+  msg.innerHTML='Estás muteado.<small>Presioná el botón <strong class="accent-yellow">amarillo</strong> para activar el micrófono.</small>';
+ }
+ overlay.classList.toggle('hidden',!(loading||ended||muted));
  $('#mic-btn').classList.toggle('is-muted',mutedByUser||keyboardOpen);
  $('#mic-btn').setAttribute('aria-pressed',String(mutedByUser||keyboardOpen));
  $('#mic-btn').setAttribute('aria-label',mutedByUser||keyboardOpen?'Activar micrófono':'Silenciar micrófono');
  $('#keyboard-btn').setAttribute('aria-pressed',String(keyboardOpen));
+}
+function voicePlaybackStarted(){
+ if(!connectingUi||role!=='student'||callEnded)return;
+ connectingUi=false;reconnectAttempt=0;
+ if(voiceStartTimer){clearTimeout(voiceStartTimer);voiceStartTimer=null;}
+ updateConversationOverlay();
+ setStatus(micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);
+}
+function scheduleReconnect(){
+ if(role!=='student'||callEnded)return;
+ if(reconnectTimer)clearTimeout(reconnectTimer);
+ connectingUi=true;hasConnected=false;
+ updateConversationOverlay();
+ setStatus(navigator.onLine===false?'Sin señal':'Conectando…');
+ const delay=Math.min(1000*Math.pow(1.6,Math.min(reconnectAttempt,7)),10000);
+ reconnectAttempt++;
+ reconnectTimer=setTimeout(()=>{
+  reconnectTimer=null;
+  if(role!=='student'||callEnded)return;
+  if(!navigator.onLine){scheduleReconnect();return;}
+  if(!callPending&&!ws)void startCall({reconnect:true});
+  else if(!ws)scheduleReconnect();
+ },delay);
 }
 function hideDownloadNotice(){
  clearTimeout(downloadNoticeTimer);$('#download-notice').classList.add('hidden');
