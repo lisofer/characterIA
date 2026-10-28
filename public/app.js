@@ -54,6 +54,7 @@ function showSubtitle(text){el.subtitle.textContent=text||' ';el.subtitle.style.
 function resetSubtitle(){captionRaw='';captionLines=[];captionCommitted=0;captionFinished=false;captionVisible=-1;captionWordCount=0;captionLastTextAt=0;showSubtitle(' ')}
 function appendTranscription(text){
  if(!text)return;
+ if(captionFinished){resetSubtitle();firstAudioTime=null;finalAudioTime=0;}
  const incoming=String(text);
  if(incoming.startsWith(captionRaw)&&captionRaw)captionRaw=incoming;
  else if(!captionRaw.endsWith(incoming)){
@@ -183,7 +184,7 @@ async function connectLive(){
    case 'transcript':appendTranscription(m.text);break;
    case 'audio':playAudio(m.pcm);break;
    case 'input_transcript':if(m.text?.trim())setStatus('Te escucho',true);break;
-   case 'turn_complete':captionFinished=true;commitCaptionLines(true);break;
+   case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn)setStatus('Escuchando',true);break;
    case 'profile':break;
    case 'document':setDocuments([{id:m.id}]);toast('Currículum listo para descargar');break;
    case 'interrupted':stopPlayback(true);break;
