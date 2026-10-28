@@ -543,3 +543,18 @@ body:has(#login-view:not(.hidden)){
   transition:bottom .12s ease-out;
  }
 }
+
+/* Performance: el teclado abre/cierra sin animar el campo ni los subtítulos.
+   El movimiento del teclado propio de Android lo controla el sistema. */
+.student-page .text-composer,
+.student-page .subtitle-holder{
+ transition:none!important;
+ animation:none!important;
+}
+.student-page .avatar-frame{
+ transition:none!important;
+ will-change:auto!important;
+}
+@media(max-width:600px){
+ .student-page .control{transition:none!important}
+}

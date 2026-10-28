@@ -15,20 +15,32 @@ async function restoreRole(force){let me=await api('/api/me');role=force||me.rol
   applySettings(me.config||{});setDocuments(me.documents||[]);await refreshFrames();
   if(connectingUi)setStatus('Conectando…');
  }else if(role==='admin'){setVisible('admin');await loadAdmin();}else setVisible('login');}
+let frameLoadEpoch=0;
 async function refreshFrames(){
- // Verificamos cada PNG por carga real, sin confiar en solicitudes HEAD.
- const parent=el.avatar;parent.replaceChildren();frames=Array(8).fill(false);
- const stamp=Date.now();
- const results=await Promise.all(Array.from({length:8},(_,i)=>new Promise(resolve=>{
-  const img=document.createElement('img');img.className='avatar-frame';img.alt='';img.draggable=false;img.dataset.frame=String(i);
-  img.onload=()=>{frames[i]=true;resolve(true)};
-  img.onerror=()=>{frames[i]=false;resolve(false)};
-  parent.appendChild(img);img.src=`/api/frames/${i}?v=${stamp}`;
- })));
- currentFrame=-1;showFrame(0);
- if(!results[0]){console.warn('No se encontró el fotograma 1. Revisá /data y PNG del administrador.');toast('No se cargó el personaje. Revisá las ocho imágenes en Administración.');}
+ // La conversación arranca sin esperar los ocho PNG; caché revalidable, sin URL aleatoria.
+ const epoch=++frameLoadEpoch,parent=el.avatar;
+ parent.replaceChildren();frames=Array(8).fill(false);currentFrame=-1;showFrame(0);
+ const loadFrame=i=>new Promise(resolve=>{
+  const img=document.createElement('img');
+  img.className='avatar-frame';img.alt='';img.draggable=false;img.dataset.frame=String(i);
+  img.decoding='async';img.fetchPriority=i===0?'high':'low';
+  img.onload=()=>{
+   if(epoch!==frameLoadEpoch){resolve(false);return;}
+   frames[i]=true;
+   if(currentFrame<0||i===0)showFrame(0);
+   resolve(true);
+  };
+  img.onerror=()=>{if(epoch===frameLoadEpoch)frames[i]=false;resolve(false);};
+  parent.appendChild(img);img.src=`/api/frames/${i}`;
+ });
+ void loadFrame(0).then(ok=>{
+  if(epoch!==frameLoadEpoch)return;
+  if(!ok)console.warn('No se encontró el fotograma de reposo. Revisá los PNG de Administración.');
+  const order=[2,4,6,1,3,5,7];let cursor=0;
+  const worker=async()=>{while(epoch===frameLoadEpoch&&cursor<order.length)await loadFrame(order[cursor++]);};
+  setTimeout(()=>{if(epoch===frameLoadEpoch){void worker();void worker();}},200);
+ });
 }
-
 function applySettings(c){
  config={...config,...c};
  document.documentElement.style.setProperty('--subtitle-size',(config.subtitleFont||20)+'px');
@@ -41,11 +53,12 @@ function applySettings(c){
  el.avatar.querySelectorAll('.avatar-frame').forEach(img=>{img.style.objectFit='contain';img.style.objectPosition='center center';});
 }
 function showFrame(index){
- let real=frames[index]?index:(frames[index%2]?index%2:(frames[0]?0:-1));
+ const real=frames[index]?index:(frames[index%2]?index%2:(frames[0]?0:-1));
  if(real===currentFrame)return;
+ const previous=currentFrame;
  currentFrame=real;
- const imgs=el.avatar.querySelectorAll('.avatar-frame');
- imgs.forEach(img=>img.classList.toggle('is-visible',Number(img.dataset.frame)===real));
+ if(previous>=0)el.avatar.querySelector(`[data-frame="${previous}"]`)?.classList.remove('is-visible');
+ if(real>=0)el.avatar.querySelector(`[data-frame="${real}"]`)?.classList.add('is-visible');
  el.placeholder.classList.toggle('hidden',real>=0);
 }
 let frameVersions=Array(8).fill(0);
@@ -139,7 +152,7 @@ function playAudio(b64){
 }
 function stopPlayback(keepContext=false){
  playbackGeneration++;
- if(animationId){cancelAnimationFrame(animationId);animationId=0;}
+ if(animationId){cancelAnimationFrame(animationId);animationId=0;}lastAvatarPaint=0;
  sources.forEach(src=>{try{src.stop();src.disconnect()}catch{}});sources.clear();
  if(!keepContext){
   if(audioContext){try{gain?.disconnect();analyser?.disconnect();audioContext.close().catch(()=>{})}catch{}}
@@ -157,8 +170,11 @@ function scheduledEnergy(t){
  }
  return 0;
 }
-function animateMouth(){
+let lastAvatarPaint=0;
+function animateMouth(timestamp=performance.now()){
  animationId=requestAnimationFrame(animateMouth);
+ if(timestamp-lastAvatarPaint<32)return; // 30 fps: menos CPU/GPU y decodificación.
+ lastAvatarPaint=timestamp;
  renderCaptions();
  const now=performance.now();
  if(now>=nextBlink){blinkingUntil=now+105;nextBlink=now+(Math.max(1,Number(config.blinkRate||4))+Math.random()*1.4)*1000;}
@@ -309,7 +325,18 @@ function stopCall(){
  stopPlayback();setStatus('Desconectado');updateConversationOverlay();
 }
 async function startMicrophone(){
- if(micOn||micBusy)return micOn;
+ if(micOn)return true;
+ // Reconexión local al mismo MediaStream sin iniciar otra captura ni interrumpir la voz.
+ if(mediaStream&&processor&&microphone&&mediaStream.getAudioTracks().some(t=>t.readyState==='live')){
+  await ensureAudio(true);
+  mediaStream.getAudioTracks().forEach(t=>{if(t.readyState==='live')t.enabled=true;});
+  if(microphone.state==='suspended')microphone.resume().catch(()=>{});
+  micOn=true;$('#mic-btn').classList.add('active');
+  $('#mic-btn').setAttribute('aria-label','Silenciar micrófono');
+  if(ws?.readyState===WebSocket.OPEN)setStatus('Escuchando',true);
+  updateConversationOverlay();return true;
+ }
+ if(micBusy)return false;
  micBusy=true;const epoch=micRequestEpoch;let stream=null,context=null;
  try{
   if(!navigator.mediaDevices?.getUserMedia)throw Error('El micrófono requiere un navegador con HTTPS.');
@@ -340,10 +367,20 @@ async function startMicrophone(){
   return false;
  }finally{micBusy=false}
 }
+function pauseMicrophone(){
+ // No mandar audioStreamEnd: Gemini puede interpretar que terminó el turno
+ // e interrumpir la respuesta que todavía está reproduciendo.
+ if(micBusy&&!mediaStream)micRequestEpoch++;
+ micOn=false;mediaStream?.getAudioTracks().forEach(track=>{track.enabled=false;});
+ $('#mic-btn').classList.remove('active');
+ $('#mic-btn').setAttribute('aria-label','Activar micrófono');
+ if(ws?.readyState===WebSocket.OPEN)setStatus(mutedByUser?'Silenciado':'Solo teclado',true);
+ updateConversationOverlay();
+}
 function stopMicrophone(){
- micRequestEpoch++;
- if(micOn&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'audio_end'}));
- micOn=false;try{processor?.disconnect();sourceNode?.disconnect()}catch{}
+ // Liberar la captura solo al colgar/desconectarse.
+ micRequestEpoch++;micOn=false;
+ try{processor?.disconnect();sourceNode?.disconnect()}catch{}
  mediaStream?.getTracks().forEach(t=>t.stop());microphone?.close().catch(()=>{});
  processor=null;sourceNode=null;mediaStream=null;microphone=null;
  $('#mic-btn').classList.remove('active');$('#mic-btn').setAttribute('aria-pressed','false');
@@ -383,15 +420,21 @@ let savedDocuments=[];
 function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
 // El teclado móvil reduce el visualViewport sin necesariamente modificar
 // window.innerHeight. Conservamos los botones abajo y ubicamos el campo sobre el IME.
+let keyboardViewportFrame=0,lastKeyboardInset=-1;
 function syncKeyboardViewport(){
- const viewport=window.visualViewport;
- const visibleHeight=viewport?.height??window.innerHeight;
- const visibleTop=viewport?.offsetTop??0;
- const keyboardInset=keyboardOpen
-   ?Math.max(0,Math.round(window.innerHeight-visibleHeight-visibleTop))
-   :0;
- document.documentElement.style.setProperty('--nexo-keyboard-inset',keyboardInset+'px');
  $('#student-view').classList.toggle('keyboard-open',keyboardOpen);
+ if(keyboardViewportFrame)return;
+ keyboardViewportFrame=requestAnimationFrame(()=>{
+  keyboardViewportFrame=0;
+  const viewport=window.visualViewport;
+  const height=viewport?.height??window.innerHeight;
+  const top=viewport?.offsetTop??0;
+  const inset=keyboardOpen?Math.max(0,Math.round(window.innerHeight-height-top)):0;
+  if(inset!==lastKeyboardInset){
+   lastKeyboardInset=inset;
+   document.documentElement.style.setProperty('--nexo-keyboard-inset',inset+'px');
+  }
+ });
 }
 async function closeTextKeyboard(){
  if(!keyboardOpen)return;
@@ -408,7 +451,8 @@ async function closeTextKeyboard(){
 function openTextKeyboard(){
  if(keyboardOpen)return;
  keyboardOpen=true;
- stopMicrophone();
+ ensureAudio(true).catch(()=>{});
+ pauseMicrophone();
  $('#text-form').classList.remove('hidden');
  syncKeyboardViewport();updateConversationOverlay();
  $('#text-message').focus({preventScroll:true});
@@ -437,13 +481,13 @@ function setupStudent(){
  window.addEventListener('orientationchange',syncKeyboardViewport);
  $('#text-message').addEventListener('focus',()=>requestAnimationFrame(syncKeyboardViewport));
  $('#call-btn').onclick=async()=>{
-  if(callPending||ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
+  if(connectingUi||callPending||ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
   else await startCall();
  };
  $('#mic-btn').onclick=async()=>{
   if(!ws||ws.readyState!==WebSocket.OPEN){toast('Pulsá el botón rojo para conectarte.');return;}
   mutedByUser=!mutedByUser;
-  if(mutedByUser)stopMicrophone();
+  if(mutedByUser)pauseMicrophone();
   else if(!keyboardOpen){
    const ok=await startMicrophone();
    if(!ok)mutedByUser=true;
@@ -483,7 +527,7 @@ function setupStudent(){
 }
 // Administración: lista de ocho fotogramas y vista previa responsive.
 const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
-function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?v=${Date.now()}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
+function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?v=${frameVersions[i]||0}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
 function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
 function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+((o.dataset.for==='mouthDelay'||o.dataset.for==='subtitleDelay')?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
 function fillVoiceSelector(list, current){
