@@ -21,7 +21,7 @@ async function refreshFrames(){
   parent.appendChild(img);img.src=`/api/frames/${i}?v=${stamp}`;
  })));
  currentFrame=-1;showFrame(0);
- if(!results[0])console.warn('No se encontró el primer PNG. Revisá volumen /data e imágenes en Administración.');
+ if(!results[0]){console.warn('No se encontró el fotograma 1. Revisá /data y PNG del administrador.');toast('No se cargó el personaje. Revisá las ocho imágenes en Administración.');}
 }
 
 function applySettings(c){
@@ -30,7 +30,7 @@ function applySettings(c){
  document.documentElement.style.setProperty('--subtitle-width',(config.subtitleWidth||760)+'px');
  const s=(config.avatarScale??100)/100;
  // Si el PNG es muy alto, contain mantiene cabeza y torso completos dentro del escenario.
- el.avatar.style.setProperty('--avatar-scale',Math.max(.5,Math.min(1.2,s)));
+ el.avatar.style.setProperty('--avatar-scale',Math.max(.5,Math.min(1,s)));
  el.avatar.style.setProperty('--avatar-x',(config.avatarOffsetX||0)+'px');
  el.avatar.style.setProperty('--avatar-y',(config.avatarOffsetY||0)+'px');
  el.avatar.querySelectorAll('.avatar-frame').forEach(img=>{img.style.objectFit='contain';img.style.objectPosition='center center';});
@@ -145,14 +145,14 @@ function animateMouth(){
  const talking=Boolean(isPlaying&&smoothedEnergy*(Number(config.mouthAmplitude??78)/80)>threshold);
  let shape=0;
  if(talking){
-  // Fonemas aproximados: la palabra escuchada orienta E/O/A; energía y tiempo determinan cuándo abrir/cerrar.
-  const vowels=(captionCurrentWord.toLowerCase().match(/[aeoáéó]/g)||[]).map(v=>v==='ó'?'o':v==='é'?'e':v==='á'?'a':v);
-  const idx=Math.floor((audioContext.currentTime-firstAudioTime)*7.1)%Math.max(1,vowels.length);
-  const base=vowels[idx]||(['a','o','e'][Math.floor((audioContext.currentTime-firstAudioTime)*4.7)%3]);
-  const phase=Math.floor((audioContext.currentTime-firstAudioTime)*5.8)%5;
-  const v=(vowels.length<2&&phase===3)?'o':(vowels.length<2&&phase===4)?'a':base;
-  shape=v==='o'?2:v==='e'?3:1;
+  // Aproximación A/O/E ligada al audio reproducido; Gemini no ofrece tiempos de fonemas.
+  const t=audioContext.currentTime-firstAudioTime;
+  const sequence=[1,2,1,3,1,2,3,1,2,3,1,3];
+  const beat=Math.floor(t*7.5);
+  shape=sequence[((beat%sequence.length)+sequence.length)%sequence.length];
+  if(smoothedEnergy<threshold*1.12 && beat%2===0)shape=0;
  }
+
  const index=shape===0?blink:shape*2+blink;
  el.placeholder.classList.toggle('talking',talking);
  showFrame(index);
