@@ -175,3 +175,152 @@ body.student-active{height:100dvh;min-height:0;overflow:hidden;overscroll-behavi
   .student-page .controls-bar{padding:2px 12px max(2px,env(safe-area-inset-bottom,0px))!important}
   .student-page .controls-group{max-width:300px}
 }
+
+
+/* 2026-10-28 | Admin: acciones en la misma barra que el logo. */
+.admin-page{
+  display:grid;
+  grid-template-columns:256px minmax(0,1fr);
+  grid-template-rows:70px minmax(0,1fr);
+  align-items:start;
+}
+.admin-topbar{
+  grid-column:1/-1;
+  grid-row:1;
+  position:sticky;
+  top:0;
+  z-index:60;
+  width:100%;
+  min-width:0;
+  height:70px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:0 clamp(14px,2.5vw,32px);
+  background:#0b182b;
+  border-bottom:1px solid var(--edge);
+}
+.admin-topbar .wordmark{margin:0;flex-shrink:0}
+.admin-topbar .admin-header-actions{
+  order:initial;
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  width:auto;
+  flex:0 0 auto;
+  gap:9px;
+}
+.admin-topbar .admin-header-actions .primary-btn,
+.admin-topbar .admin-header-actions .admin-logout{
+  height:42px;
+  min-height:42px;
+  margin:0;
+  padding:0 16px;
+  border-radius:12px;
+  font-size:14px;
+  font-weight:750;
+  white-space:nowrap;
+}
+.admin-page .admin-side{
+  grid-column:1;
+  grid-row:2;
+  top:70px;
+  height:calc(100dvh - 70px);
+  min-height:0;
+}
+.admin-page .admin-main{
+  grid-column:2;
+  grid-row:2;
+  min-height:calc(100dvh - 70px);
+}
+.admin-page .admin-header{
+  position:static;
+  display:flex;
+  flex-direction:row;
+  justify-content:flex-start;
+  align-items:center;
+  padding:0 0 17px;
+  margin:0 0 20px;
+  border-bottom:1px solid var(--edge);
+  background:transparent;
+}
+.admin-page .admin-header h2{order:initial;margin:0}
+
+/* Subtítulo sobre el collar; permanece en un solo renglón. */
+.student-page .subtitle-holder{bottom:clamp(66px,10dvh,126px)}
+
+/* El botón naranja no brilla ni tiene contorno persistente por estar activo. */
+.student-page #mic-btn,
+.student-page #mic-btn.active,
+.student-page #mic-btn:hover{
+  box-shadow:0 8px 22px #0004 !important;
+  filter:none !important;
+}
+.student-page #mic-btn:focus-visible{
+  outline:3px solid white;
+  outline-offset:3px;
+}
+@media(max-width:800px) and (min-width:601px){
+  .admin-page{grid-template-columns:190px minmax(0,1fr)}
+}
+@media(max-width:600px){
+  .admin-page{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    min-height:100dvh;
+  }
+  .admin-page .admin-topbar{
+    order:0;
+    flex:none;
+    height:60px;
+    min-height:60px;
+    padding:0 12px;
+    gap:7px;
+  }
+  .admin-topbar .wordmark{font-size:clamp(17px,5vw,21px);gap:6px}
+  .admin-topbar .brand-mark{width:29px;height:29px;font-size:20px;border-radius:9px}
+  .admin-topbar .admin-header-actions{gap:6px}
+  .admin-topbar .admin-header-actions .primary-btn,
+  .admin-topbar .admin-header-actions .admin-logout{
+    height:39px;
+    min-height:39px;
+    padding:0 11px;
+    font-size:13px;
+    border-radius:10px;
+  }
+  .admin-page .admin-side{
+    order:1;
+    grid-column:auto;
+    grid-row:auto;
+    width:100%;
+    height:auto;
+    position:relative;
+    top:auto;
+    flex:none;
+    border-right:none;
+    border-bottom:1px solid var(--edge);
+  }
+  .admin-page .admin-main{
+    order:2;
+    grid-column:auto;
+    grid-row:auto;
+    width:100%;
+    min-height:0;
+    flex:1 1 auto;
+  }
+  .admin-page .admin-header{display:none}
+  .student-page .subtitle-holder{bottom:clamp(84px,12dvh,130px)}
+}
+@media(max-width:360px){
+  .admin-topbar{padding-inline:8px!important}
+  .admin-topbar .wordmark{font-size:17px;gap:4px}
+  .admin-topbar .brand-mark{width:26px;height:26px;font-size:18px}
+  .admin-topbar .admin-header-actions .primary-btn,
+  .admin-topbar .admin-header-actions .admin-logout{font-size:12px;padding:0 9px}
+  .admin-topbar .admin-header-actions .primary-btn span{display:none}
+}
+@media(max-height:620px){
+  .student-page .subtitle-holder{bottom:clamp(48px,9dvh,75px)}
+}
