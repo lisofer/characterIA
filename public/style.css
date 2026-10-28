@@ -76,3 +76,8 @@
  .student-page .avatar-placeholder{transform:scale(.48)!important}
 }
 @media(max-height:620px){.student-page{grid-template-rows:46px minmax(0,1fr)}.student-page .topbar{height:46px}.student-page .controls-bar{padding:4px 14px 7px}.student-page .controls-group{max-width:290px}}
+
+/* Panel admin: Salir siempre accesible, inclusive en celular. */
+.admin-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.admin-header-actions .admin-logout{display:inline-flex;align-items:center;justify-content:center;border:1px solid #3d5476;background:#172a43;border-radius:11px;padding:12px 17px;min-height:43px;color:#f2f7ff;font-size:13px;white-space:nowrap}
+@media(max-width:600px){.admin-header{align-items:center;gap:12px}.admin-header-actions{width:100%;justify-content:space-between;flex-wrap:nowrap}.admin-header-actions .compact{margin:0;min-height:43px;white-space:nowrap}.admin-header-actions .admin-logout{min-width:79px}}
