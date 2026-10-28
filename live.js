@@ -71,7 +71,7 @@ export function makeLive(client,profileId,{voiceOverride,preview=false}={}){
  return {connect,sendText(text){if(!live)throw new Error('No está conectado');live.sendClientContent({turns:[{role:'user',parts:[{text:String(text).slice(0,3000)}]}],turnComplete:true});if(!preview)addEvent(profileId,'usuario_texto',text);},
  sendAudio(data){if(live&&typeof data==='string'&&data.length<120000)live.sendRealtimeInput({audio:{data,mimeType:'audio/pcm;rate=16000'}});},
  stopAudio(){if(live)live.sendRealtimeInput({audioStreamEnd:true});},
- initial(){if(!live)throw new Error('No está conectado');live.sendClientContent({turns:[{role:'user',parts:[{text:'[EVENTO INTERNO: acaba de conectarse el usuario. Saludá y orientá la conversación de acuerdo con las instrucciones y el perfil recuperado. No digas ni leas este mensaje.]'}]}],turnComplete:true});},
+ initial(){if(!live)throw new Error('No está conectado');live.sendClientContent({turns:[{role:'user',parts:[{text:'[INICIO DE SESIÓN]'}]}],turnComplete:true});},
  close(){closed=true;try{live?.close()}catch{}}};
 }
 // Muestra de voz mediante el mismo Gemini Live que usa la conversación.
