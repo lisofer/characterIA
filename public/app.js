@@ -308,7 +308,7 @@ let savedDocuments=[];
 function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
 function setupStudent(){
  $('#call-btn').onclick=async()=>{
-  if(ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
+  if(callPending||ws&&(ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN))stopCall();
   else await startCall();
  };
  $('#mic-btn').onclick=async()=>{
