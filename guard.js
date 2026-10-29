@@ -137,6 +137,10 @@ export function makeGuardLive(ws){
    authPending=false;
    try{
     live.sendClientContent({turns:[{role:'user',parts:[{text:intentText.retry}]}],turnComplete:true});
+    // La confirmación llega por el MISMO WebSocket, detrás de cualquier audio
+    // viejo que ya estuviera en tránsito. El cliente vuelve a escuchar solo
+    // después de ella.
+    send(ws,'auth_resumed');
    }catch{send(ws,'error',{message:'No se pudo reanudar la conversación.'});}
    return;
   }
