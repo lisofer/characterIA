@@ -1,114 +1,113 @@
-/* Erik: SOLO Gemini 3.8 Live. Independiente del motor de NEXO.
- * Reconocimiento por navegador -> clasificador local -> contraseña o conversación.
- * Jamás enviar contraseñas al Live ni alterar el formulario original.
- */
-const one=sel=>document.querySelector(sel);
-const clean=value=>String(value||'').normalize('NFC').trim();
+/* Erik · Gemini 3.8 Live · captura continua como NEXO CV.
+   Una sola captura getUserMedia: no hay reinicios de reconocimiento de Chrome.
+   Se muestran exclusivamente los subtítulos de Erik. */
+const one=s=>document.querySelector(s),clean=x=>String(x||'').normalize('NFC').trim();
 const guardVisual=one('#guard-avatar'),status=one('#guard-status');
 const frameDescriptions=['Abiertos · reposo','Cerrados · reposo','Abiertos · A','Cerrados · A','Abiertos · O','Cerrados · O','Abiertos · E','Cerrados · E'];
 let guardConfig={},guardFrames=[],guardFramesFullyReady=false,guardFrameLoadEpoch=0;
 let guardActive=false,guardMuted=false,guardNeedsGesture=false,guardEpoch=0,guardTalking=false;
 let painted=-1,rAF=0,nextBlink=0,blinkEnd=0,amplitude=0,spokenAt=0;
 let ws=null,liveReady=false,pendingIntent=null,connectionRetries=0;
-let recognizer=null,recognizing=false,recognitionWanted=false,recognitionRestartTimer=null,recognitionErrors=0;
-let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCaption='',turnComplete=false;
-let scheduledSources=new Set(),audioGeneration=0,tailTimer=null;
-// Micrófono en escucha continua. La clasificación de claves sigue siendo local.
-let bargeInPending=false,bargeInTimer=null,lastSpokenCaption='',lastFinalRecognitionIndex=-1;
-// Chrome entrega frases de a pedazos. Acumular segmentos finales y esperar silencio
-// antes de interpretar una clave: nunca enviar al login la primera palabra de una oración.
-let pendingSpokenSegments=[],speechFlushTimer=null,lastInterimSpeech='';
-const statusText=text=>{if(status)status.textContent=String(text||'');};
+let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCaption='';
+let scheduledSources=new Set(),tailTimer=null;
+let micStream=null,micContext=null,micSource=null,micProcessor=null,micSilent=null;
+let micOn=false,micBusy=false,micRequestEpoch=0,micPromptAttempted=false;
+let pendingInput='',inputTimer=null;
+const statusText=s=>{if(status)status.textContent=String(s||'')};
 const isLoginVisible=()=>!one('#login-view')?.classList.contains('hidden');
-async function readJSON(url,opt={}){
- const r=await fetch(url,{credentials:'same-origin',...opt});
- const data=await r.json().catch(()=>({}));
- if(!r.ok)throw Error(data.error||'Error '+r.status);
- return data;
-}
+async function readJSON(url,opt={}){const r=await fetch(url,{credentials:'same-origin',...opt});const v=await r.json().catch(()=>({}));if(!r.ok)throw Error(v.error||'Error '+r.status);return v}
 function setMuteAppearance(){
- const button=one('#guard-toggle'),dock=one('#guard-dock');
- dock?.classList.toggle('is-muted',guardMuted);
- button?.setAttribute('aria-pressed',String(guardMuted));
- const label=guardMuted?'Volver a hablar con Erik':guardNeedsGesture?'Activar el sonido de Erik y el micrófono':'Silenciar a Erik y el micrófono';
- button?.setAttribute('aria-label',label);button?.setAttribute('title',label);
+ const btn=one('#guard-toggle'),dock=one('#guard-dock');
+ dock?.classList.toggle('is-muted',guardMuted);btn?.setAttribute('aria-pressed',String(guardMuted));
+ const label=guardMuted?'Volver a hablar con Erik':guardNeedsGesture?'Activar el micrófono y el sonido':'Silenciar a Erik y el micrófono';
+ btn?.setAttribute('aria-label',label);btn?.setAttribute('title',label);
  const hint=one('#guard-hint');if(hint)hint.textContent=label;
 }
-function resetUtterance(){
- clearTimeout(speechFlushTimer);speechFlushTimer=null;
- pendingSpokenSegments=[];lastInterimSpeech='';
+function pauseMic(){
+ micOn=false;micStream?.getAudioTracks().forEach(t=>{t.enabled=false});
 }
-function stopRecognition(){
- recognitionWanted=false;recognizing=false;
- clearTimeout(recognitionRestartTimer);recognitionRestartTimer=null;
- resetUtterance();
- try{recognizer?.abort();}catch{}
+function releaseMic(){
+ pauseMic();micRequestEpoch++;micPromptAttempted=false;
+ try{micProcessor?.disconnect();micSource?.disconnect();micSilent?.disconnect()}catch{}
+ micStream?.getTracks().forEach(t=>t.stop());micContext?.close().catch(()=>{});
+ micStream=null;micContext=null;micSource=null;micProcessor=null;micSilent=null;
 }
-function queueUtteranceFlush(ms=1450){
- clearTimeout(speechFlushTimer);
- if(!pendingSpokenSegments.length)return;
- speechFlushTimer=setTimeout(()=>{
-  speechFlushTimer=null;
-  // Si sigue llegando una frase parcial, dar un poco más de tiempo a Chrome.
-  if(lastInterimSpeech){
-   lastInterimSpeech='';
-   queueUtteranceFlush(850);
-   return;
-  }
-  const entireSpeech=clean(pendingSpokenSegments.join(' ').replace(/\s+/g,' '));
-  resetUtterance();
-  if(entireSpeech&&guardActive&&!guardMuted&&isLoginVisible())
-   void handleVoice(entireSpeech);
- },ms);
+async function startMic(gesture=false){
+ if(!guardActive||guardMuted||!isLoginVisible())return false;
+ if(micOn&&micStream?.getAudioTracks().some(t=>t.readyState==='live'))return true;
+ if(micStream&&micContext&&micProcessor&&micStream.getAudioTracks().some(t=>t.readyState==='live')){
+  await micContext.resume().catch(()=>{});
+  micStream.getAudioTracks().forEach(t=>{t.enabled=true});
+  micOn=true;guardNeedsGesture=false;setMuteAppearance();return true;
+ }
+ if(micBusy||(!gesture&&micPromptAttempted))return false;
+ micBusy=true;micPromptAttempted=true;const epoch=micRequestEpoch;let stream=null,ctx=null;
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('Se necesita un navegador con micrófono.');
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  if(epoch!==micRequestEpoch||!guardActive||guardMuted){stream.getTracks().forEach(t=>t.stop());return false;}
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  if(ctx.state==='suspended')await ctx.resume().catch(()=>{});
+  const src=ctx.createMediaStreamSource(stream),proc=ctx.createScriptProcessor(2048,1,1),silent=ctx.createGain();
+  silent.gain.value=0;src.connect(proc);proc.connect(silent);silent.connect(ctx.destination);
+  micStream=stream;micContext=ctx;micSource=src;micProcessor=proc;micSilent=silent;
+  proc.onaudioprocess=e=>{
+   if(!micOn||guardMuted||!guardActive||!liveReady||!ws||
+     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>180000||document.hidden||
+     document.activeElement===one('#password'))return;
+   const input=e.inputBuffer.getChannelData(0),ratio=ctx.sampleRate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
+   for(let j=0;j<n;j++){
+    const a=Math.floor(j*ratio),b=Math.min(input.length,Math.floor((j+1)*ratio));
+    let sum=0;for(let k=a;k<b;k++)sum+=input[k];
+    const v=Math.max(-1,Math.min(1,sum/Math.max(1,b-a)));
+    out[j]=v<0?v*32768:v*32767;
+   }
+   const bytes=new Uint8Array(out.buffer);let str='';
+   for(let k=0;k<bytes.length;k++)str+=String.fromCharCode(bytes[k]);
+   ws.send(JSON.stringify({type:'audio',pcm:btoa(str)}));
+  };
+  stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>{
+   if(guardActive&&!guardMuted){micOn=false;guardNeedsGesture=true;setMuteAppearance();}
+  }));
+  micOn=true;guardNeedsGesture=false;setMuteAppearance();return true;
+ }catch(err){
+  stream?.getTracks().forEach(t=>t.stop());ctx?.close().catch(()=>{});
+  guardNeedsGesture=true;setMuteAppearance();
+  statusText('Soy Erik. Tocame para habilitar el micrófono, o escribí tu contraseña.');
+  return false;
+ }finally{micBusy=false;}
 }
-function canListen(){
- // La escucha continúa también mientras Erik habla: así lo pueden interrumpir.
- // No depende del permiso de reproducción automática del altavoz.
- return guardActive&&!guardMuted&&liveReady&&!document.hidden
-  &&isLoginVisible()&&document.activeElement!==one('#password');
-}
-function queueRecognitionRestart(ms=350){
- clearTimeout(recognitionRestartTimer);
- if(!recognitionWanted||!canListen())return;
- recognitionRestartTimer=setTimeout(()=>{recognitionRestartTimer=null;if(recognitionWanted&&canListen())listen();},ms);
-}
+function clearInput(){clearTimeout(inputTimer);inputTimer=null;pendingInput='';}
 function stopPlayback(){
- audioGeneration++;clearTimeout(tailTimer);tailTimer=null;
- for(const src of scheduledSources){try{src.stop();src.disconnect();}catch{}}
- scheduledSources.clear();nextAudioTime=0;turnComplete=false;outputCaption='';
- guardTalking=false;amplitude=0;displayFrame(0);
- clearTimeout(bargeInTimer);bargeInTimer=null;
+ clearTimeout(tailTimer);tailTimer=null;
+ for(const src of scheduledSources){try{src.stop();src.disconnect()}catch{}}
+ scheduledSources.clear();nextAudioTime=0;guardTalking=false;amplitude=0;outputCaption='';displayFrame(0);
 }
 function stopGuard({hide=false}={}){
- guardEpoch++;stopRecognition();stopPlayback();guardActive=false;guardMuted=false;
- liveReady=false;pendingIntent=null;guardNeedsGesture=false;
- bargeInPending=false;lastSpokenCaption='';
- if(ws){const old=ws;ws=null;try{old.close(1000,'Dejando el ingreso')}catch{}}
+ guardEpoch++;releaseMic();clearInput();stopPlayback();
+ guardActive=false;guardMuted=false;liveReady=false;pendingIntent=null;guardNeedsGesture=false;
+ if(ws){const previous=ws;ws=null;try{previous.close()}catch{}}
  if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;
- if(hide)one('#guard-dock')?.classList.add('hidden');
- setMuteAppearance();
+ if(hide)one('#guard-dock')?.classList.add('hidden');setMuteAppearance();
 }
 function displayFrame(index){
- const f=(guardFramesFullyReady?guardFrames[index]:null)||guardFrames[0];
- if(!f||!f.complete||!f.naturalWidth)return;
- const next=Number(f.dataset.frame);
- if(next===painted)return;
- painted=next;guardFrames.forEach(x=>x?.classList.toggle('is-visible',x===f));
+ const frame=(guardFramesFullyReady?guardFrames[index]:null)||guardFrames[0];
+ if(!frame||!frame.complete||!frame.naturalWidth)return;
+ const next=Number(frame.dataset.frame);if(next===painted)return;
+ painted=next;guardFrames.forEach(x=>x?.classList.toggle('is-visible',x===frame));
  one('#guard-fallback')?.classList.add('hidden');
 }
 function renderGuard(){
  if(!guardActive||!isLoginVisible()){rAF=0;return;}
- rAF=requestAnimationFrame(renderGuard);
- const now=performance.now();
- if(now>nextBlink){blinkEnd=now+130;nextBlink=now+Math.max(2,Number(guardConfig.blinkRate)||4)*1000+Math.random()*900;}
- const blink=now<blinkEnd?1:0;
- let shape=0;
+ rAF=requestAnimationFrame(renderGuard);const now=performance.now();
+ if(now>nextBlink){blinkEnd=now+130;nextBlink=now+(Number(guardConfig.blinkRate)||4)*1000+Math.random()*900;}
+ const blink=now<blinkEnd?1:0;let shape=0;
  if(!guardMuted&&guardTalking&&audioContext?.state==='running'&&audioContext.currentTime<nextAudioTime+.04){
   let energy=.05;
   if(voiceAnalyser){
    const sample=new Float32Array(voiceAnalyser.fftSize);
-   voiceAnalyser.getFloatTimeDomainData(sample);
-   let sum=0;for(let i=0;i<sample.length;i+=4)sum+=sample[i]*sample[i];
+   voiceAnalyser.getFloatTimeDomainData(sample);let sum=0;
+   for(let i=0;i<sample.length;i+=4)sum+=sample[i]*sample[i];
    energy=Math.sqrt(sum/Math.max(1,sample.length/4));
   }
   const sm=Math.max(.05,Math.min(.95,Number(guardConfig.mouthSmoothing??40)/100));
@@ -122,8 +121,7 @@ function renderGuard(){
  displayFrame(shape*2+blink);
 }
 async function initAudio(){
- if(!('AudioContext' in window||'webkitAudioContext' in window))throw new Error('Este navegador no tiene salida de audio compatible');
- const Ctx=window.AudioContext||window.webkitAudioContext;
+ const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return false;
  if(!audioContext){
   audioContext=new Ctx({sampleRate:24000});
   audioGain=audioContext.createGain();audioGain.gain.value=.95;
@@ -131,125 +129,31 @@ async function initAudio(){
   audioGain.connect(voiceAnalyser);voiceAnalyser.connect(audioContext.destination);
  }
  if(audioContext.state==='suspended')await audioContext.resume().catch(()=>{});
- guardNeedsGesture=audioContext.state!=='running';
- setMuteAppearance();
- return !guardNeedsGesture;
+ return audioContext.state==='running';
 }
 function playLiveAudio(pcm){
  if(!pcm||!guardActive||guardMuted)return;
- let bytes;try{bytes=atob(pcm);}catch{return;}
+ let bytes;try{bytes=atob(pcm)}catch{return}
  if(bytes.length<2||bytes.length>1400000)return;
- if(!audioContext){void initAudio().catch(()=>{});return;}
+ if(!audioContext){void initAudio();return;}
  const samples=new Float32Array(Math.floor(bytes.length/2));
- for(let i=0;i<samples.length;i++){
-  let n=bytes.charCodeAt(i*2)|(bytes.charCodeAt(i*2+1)<<8);
-  if(n&0x8000)n-=0x10000;samples[i]=n/32768;
- }
- const buffer=audioContext.createBuffer(1,samples.length,24000);
- buffer.copyToChannel(samples,0);
+ for(let i=0;i<samples.length;i++){let n=bytes.charCodeAt(2*i)|(bytes.charCodeAt(2*i+1)<<8);if(n&0x8000)n-=0x10000;samples[i]=n/32768;}
+ const buffer=audioContext.createBuffer(1,samples.length,24000);buffer.copyToChannel(samples,0);
  const src=audioContext.createBufferSource();src.buffer=buffer;src.connect(audioGain);
- // Si la persona empezó a hablar, descartar cualquier fragmento anterior.
- if(bargeInPending)return;
  const when=Math.max(nextAudioTime,audioContext.currentTime+.045);
- nextAudioTime=when+buffer.duration;
- src.start(when);scheduledSources.add(src);
+ nextAudioTime=when+buffer.duration;src.start(when);scheduledSources.add(src);
  src.onended=()=>{scheduledSources.delete(src);try{src.disconnect()}catch{}};
- guardTalking=true;spokenAt=performance.now();turnComplete=false;
- if(audioContext.state!=='running'){
-  guardNeedsGesture=true;setMuteAppearance();
-  statusText('Soy Erik. Tocame para activar el sonido de Gemini Live.');
- }
+ guardTalking=true;spokenAt=performance.now();
+ if(audioContext.state==='suspended')statusText('Soy Erik. Tocame para escucharme.');
 }
 function completedTurn(){
- turnComplete=true;
- clearTimeout(tailTimer);
- if(audioContext?.state==='suspended'){
-  guardNeedsGesture=true;setMuteAppearance();
-  statusText('Soy Erik. Tocame para escucharme con la voz de Gemini Live.');
-  return;
- }
- const epoch=guardEpoch,remaining=audioContext?Math.max(0,(nextAudioTime-audioContext.currentTime)*1000+120):100;
+ clearTimeout(tailTimer);const epoch=guardEpoch;
+ const remaining=audioContext?Math.max(0,(nextAudioTime-audioContext.currentTime)*1000+120):100;
  tailTimer=setTimeout(()=>{
   if(epoch!==guardEpoch||guardMuted)return;
   guardTalking=false;amplitude=0;displayFrame(0);
-  if(guardActive)listen();
+  if(!outputCaption)statusText('Te escucho.');
  },Math.min(25000,remaining));
-}
-function handleLiveMessage(e){
- let m;try{m=JSON.parse(String(e.data));}catch{return;}
- if(!guardActive||guardMuted)return;
- if(m.type==='connected'){
-  if(m.model!=='gemini-3.8-live'){statusText('Se recibió un modelo incorrecto.');try{ws?.close()}catch{};return;}
-  liveReady=true;connectionRetries=0;statusText('Erik se está presentando…');
-  // Arrancar la escucha en cuanto se conecta, sin esperar al fin del saludo.
-  listen();
-  if(pendingIntent){sendIntent(pendingIntent);pendingIntent=null;}
- }else if(m.type==='audio'){if(!bargeInPending)playLiveAudio(m.pcm);}
- else if(m.type==='transcript'){
-  const t=String(m.text||'').replace(/\s+/g,' ').trim();
-  if(t){
-   if(t.startsWith(outputCaption)&&outputCaption)outputCaption=t;
-   else if(!outputCaption.endsWith(t))outputCaption+=(outputCaption?' ':'')+t;
-   lastSpokenCaption=outputCaption;
-   if(!guardNeedsGesture&&!bargeInPending)statusText(outputCaption.slice(-550));
-  }
- }else if(m.type==='turn_complete')completedTurn();
- else if(m.type==='interrupted'){stopPlayback();bargeInPending=false;listen();}
- else if(m.type==='notice'){statusText(m.message||'Te escucho.');listen();}
- else if(m.type==='error'||m.type==='closed'){
-  statusText(String(m.message||'Gemini Live no está disponible.').slice(0,220));
-  guardTalking=false;listen();
- }
-}
-function connectLive(){
- if(!guardActive||guardMuted||!isLoginVisible())return;
- if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
- liveReady=false;
- const epoch=guardEpoch;
- const protocol=location.protocol==='https:'?'wss:':'ws:';
- const socket=new WebSocket(protocol+'//'+location.host+'/api/guard/live');
- ws=socket;statusText('Conectando con Erik · Gemini 3.8 Live…');
- socket.onmessage=e=>{if(guardEpoch===epoch&&ws===socket)handleLiveMessage(e);};
- socket.onerror=()=>{if(guardEpoch===epoch)statusText('No pude conectar con Erik. Tocame para reintentar.')};
- socket.onclose=()=>{
-  if(ws!==socket||guardEpoch!==epoch)return;
-  ws=null;liveReady=false;stopRecognition();stopPlayback();
-  if(guardActive&&!guardMuted&&isLoginVisible()&&connectionRetries<1){
-   connectionRetries++;setTimeout(()=>{if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive();},1500);
-  }else if(guardActive&&!guardMuted){guardNeedsGesture=true;setMuteAppearance();statusText('Gemini 3.8 Live se desconectó. Tocame para volver a llamar a Erik.');}
- };
-}
-function sendIntent(intent){
- if(!liveReady||!ws||ws.readyState!==WebSocket.OPEN){pendingIntent=intent;connectLive();return;}
- bargeInPending=false;stopPlayback();guardTalking=true;
- statusText('Erik está respondiendo…');
- ws.send(JSON.stringify({type:'intent',intent}));
-}
-function sendConversation(text){
- if(!liveReady||!ws||ws.readyState!==WebSocket.OPEN){statusText('Erik todavía está conectando.');return;}
- // No mostrar lo que dice el visitante, tampoco mientras lo reconoce.
- bargeInPending=false;stopPlayback();guardTalking=true;
- statusText('Erik está respondiendo…');
- ws.send(JSON.stringify({type:'text',text:String(text).slice(0,300)}));
-}
-async function toggleGuard(){
- if(!guardActive)return;
- if(guardNeedsGesture&&!guardMuted){
-  const sound=await initAudio().catch(()=>false);
-  if(!sound){statusText('Chrome bloqueó el audio. Tocá de nuevo para activarlo.');return;}
-  guardNeedsGesture=false;setMuteAppearance();listen();
-  if(!liveReady){connectionRetries=0;connectLive();}
-  else if(!guardTalking||nextAudioTime<=audioContext.currentTime){
-   ws?.send(JSON.stringify({type:'repeat'}));guardTalking=true;statusText('Erik está saludando…');
-  }else if(turnComplete)completedTurn();
-  return;
- }
- guardMuted=!guardMuted;stopRecognition();stopPlayback();
- setMuteAppearance();
- if(guardMuted){statusText('Erik está silenciado. Tocame para continuar.');return;}
- connectionRetries=0;
- // Si estaba conectado, retomar la misma sesión; si no, abrir una nueva.
- if(liveReady){sendIntent('ask');listen();}else connectLive();
 }
 async function frameImages(list,versions=[]){
  const epoch=++guardFrameLoadEpoch,dock=one('#guard-dock');
@@ -331,130 +235,100 @@ function spokenIntent(heard){
  return {type:'conversation',text:original.slice(0,300)};
 }
 
-// Evitar que el altavoz del propio personaje sea confundido con una respuesta.
-// Se compara con la transcripción de salida de Gemini; no se publica la entrada.
-function normalizeEcho(text){
- return noAccents(String(text||'')).replace(/[^a-z0-9\s]/g,' ')
-  .replace(/\s+/g,' ').trim();
+
+function appendInput(text){
+ if(!guardActive||guardMuted||!micOn)return;
+ const s=clean(text).replace(/\s+/g,' ');if(!s)return;
+ if(s.startsWith(pendingInput)&&pendingInput)pendingInput=s;
+ else if(!pendingInput.endsWith(s)){
+  let overlap=0;
+  for(let k=Math.min(s.length,pendingInput.length);k>0;k--)if(pendingInput.endsWith(s.slice(0,k))){overlap=k;break;}
+  const tail=s.slice(overlap),space=!overlap&&/[\p{L}\p{N}]$/u.test(pendingInput)&&/^[\p{L}\p{N}]/u.test(tail);
+  pendingInput+=(space?' ':'')+tail;
+ }
+ pendingInput=pendingInput.slice(-350);
+ clearTimeout(inputTimer);inputTimer=setTimeout(processInput,1000);
 }
-function isLikelyEcho(text){
- if(!guardTalking&&!bargeInPending)return false;
- const candidate=normalizeEcho(text);
- const speech=normalizeEcho([lastSpokenCaption,outputCaption].filter(Boolean).join(' '));
- if(!speech||candidate.length<3)return false;
- if(candidate.length>2&&speech.includes(candidate))return true;
- const words=candidate.split(' ').filter(w=>w.length>=3);
- if(words.length<2)return false;
- const tokens=new Set(speech.split(' ').filter(w=>w.length>=3));
- return words.filter(w=>tokens.has(w)).length/words.length>=.78;
+function processInput(){
+ inputTimer=null;const spoken=clean(pendingInput);clearInput();
+ if(!spoken||!guardActive||guardMuted||!isLoginVisible())return;
+ const intent=spokenIntent(spoken);
+ if(intent.type==='password'){
+  stopPlayback();const input=one('#password');
+  if(input){input.value=intent.value;one('#login-form')?.requestSubmit();}
+ }else if(intent.type==='mute'){
+  guardMuted=true;pauseMic();stopPlayback();setMuteAppearance();
+  statusText('Erik está silenciado. Tocame para continuar.');
+ }else if(intent.type==='keyboard')one('#password')?.focus();
+ // Conversaciones, bromas e interrupciones ya viajan por audio continuo a Live.
 }
-// La interrupción es local e inmediata. El nuevo turno de texto enviado después
-// a Gemini Live interrumpe la generación anterior según su protocolo oficial.
-function beginBargeIn(){
- if(!guardTalking||bargeInPending||guardMuted)return;
- bargeInPending=true;
- stopPlayback();
- bargeInPending=true;
- statusText('Te escucho…');
- clearTimeout(bargeInTimer);
- bargeInTimer=setTimeout(()=>{
-  if(!bargeInPending||!guardActive||guardMuted)return;
-  bargeInPending=false;listen();
- },3200);
+function handleLiveMessage(e){
+ let m;try{m=JSON.parse(String(e.data))}catch{return}
+ if(!guardActive)return;
+ if(m.type==='connected'){
+  if(m.model!=='gemini-3.8-live'){try{ws?.close()}catch{};return;}
+  liveReady=true;connectionRetries=0;statusText('Soy Erik. Te escucho.');
+  if(pendingIntent){sendIntent(pendingIntent);pendingIntent=null;}
+  if(!guardMuted)void startMic();
+ }else if(m.type==='audio'){if(!guardMuted)playLiveAudio(m.pcm);}
+ else if(m.type==='transcript'){
+  if(guardMuted)return;
+  const t=String(m.text||'').replace(/\s+/g,' ').trim();
+  if(t){
+   if(t.startsWith(outputCaption)&&outputCaption)outputCaption=t;
+   else if(!outputCaption.endsWith(t))outputCaption+=(outputCaption?' ':'')+t;
+   statusText(outputCaption.slice(-550));
+  }
+ }else if(m.type==='input_transcript')appendInput(m.text);
+ else if(m.type==='turn_complete')completedTurn();
+ else if(m.type==='interrupted'){stopPlayback();statusText('Te escucho.');}
+ else if(m.type==='notice'){if(!guardTalking)statusText(m.message||'Te escucho.');}
+ else if(m.type==='error'||m.type==='closed')statusText('Soy Erik. Tocame para volver a hablar.');
 }
-async function handleVoice(heard){
+function connectLive(){
  if(!guardActive||guardMuted||!isLoginVisible())return;
- if(isLikelyEcho(heard))return;
- bargeInPending=false;clearTimeout(bargeInTimer);bargeInTimer=null;
- const intent=spokenIntent(heard);
- if(intent.type==='mute'){guardMuted=true;stopRecognition();stopPlayback();setMuteAppearance();statusText('Erik silenciado. Tocame para reactivar.');return;}
- if(intent.type==='interrupt'){
-  // Interrumpe la generación de voz, pero deja el micrófono abierto.
-  stopPlayback();bargeInPending=true;
-  if(liveReady&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'interrupt'}));
-  statusText('Te escucho.');listen();return;
- }
- if(intent.type==='keyboard'){one('#password')?.focus();statusText('Podés escribir tu contraseña.');return;}
- if(['help','listening','ask','clarify'].includes(intent.type)){sendIntent(intent.type);listen();return;}
- if(intent.type==='conversation'){sendConversation(intent.text);listen();return;}
- if(intent.type!=='password'){listen();return;}
- // La clave solo viaja a /api/login: nunca al WebSocket de Gemini Live.
- stopRecognition();stopPlayback();statusText('Comprobando contraseña…');
- const input=one('#password');
- if(input){input.value=intent.value;one('#login-form')?.requestSubmit();}
+ if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
+ liveReady=false;
+ const epoch=guardEpoch,protocol=location.protocol==='https:'?'wss:':'ws:';
+ const socket=new WebSocket(protocol+'//'+location.host+'/api/guard/live');ws=socket;
+ socket.onmessage=e=>{if(guardEpoch===epoch&&ws===socket)handleLiveMessage(e)};
+ socket.onerror=()=>{};
+ socket.onclose=()=>{
+  if(ws!==socket||guardEpoch!==epoch)return;
+  ws=null;liveReady=false;stopPlayback();
+  // No cerrar ni volver a abrir el micrófono: reutilizar el stream continuo.
+  if(guardActive&&!guardMuted&&isLoginVisible()&&connectionRetries<2){
+   connectionRetries++;setTimeout(()=>{if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive()},1300);
+  }else if(guardActive&&!guardMuted)statusText('Soy Erik. Tocame para continuar.');
+ };
 }
-function getRecognizer(){
- if(recognizer)return recognizer;
- const API=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!API)return null;
- const r=new API();r.lang='es-AR';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
- r.onstart=()=>{
-  recognizing=true;recognitionErrors=0;lastFinalRecognitionIndex=-1;
-  if(!guardTalking&&!bargeInPending)statusText('Te escucho. Podés hablar o decir la contraseña.');
- };
- r.onerror=e=>{
-  recognizing=false;
-  if(!recognitionWanted||!guardActive||guardMuted||e.error==='aborted')return;
-  if(e.error==='not-allowed'||e.error==='service-not-allowed'){
-   guardNeedsGesture=true;recognitionWanted=false;setMuteAppearance();
-   statusText('Permití el micrófono para hablar o ingresá por teclado.');
-  }else if(e.error!=='no-speech'){
-   recognitionErrors++;queueRecognitionRestart(500);
-  }
- };
- r.onend=()=>{
-  recognizing=false;
-  // No forzar el procesamiento de un fragmento al reiniciar el micrófono.
-  if(pendingSpokenSegments.length)queueUtteranceFlush(1450);
-  if(recognitionWanted&&canListen())queueRecognitionRestart(180);
- };
- r.onresult=e=>{
-  if(!recognitionWanted||!canListen())return;
-  let hasInterim=false,hasFinal=false;
-  // El resultado final de Chrome puede ser solo el PRIMER tramo de una frase.
-  // Unir todos los tramos, sin exponerlos en los subtítulos del visitante.
-  for(let i=e.resultIndex;i<e.results.length;i++){
-   const result=e.results[i],phrase=clean(result?.[0]?.transcript);
-   if(!phrase||isLikelyEcho(phrase))continue;
-   if(!result.isFinal){
-    hasInterim=true;
-    lastInterimSpeech=phrase;
-    if(guardTalking&&(phrase.split(/\s+/u).length>=2||/^(?:erik[, ]+|para|callate|espera|basta)/i.test(phrase)))
-     beginBargeIn();
-    continue;
-   }
-   if(i<=lastFinalRecognitionIndex)continue;
-   lastFinalRecognitionIndex=i;
-   hasFinal=true;
-   lastInterimSpeech='';
-   const previous=pendingSpokenSegments.at(-1)||'';
-   // Algunos navegadores repiten segmentos finales al emitir nuevos resultados.
-   if(noAccents(previous)!==noAccents(phrase)){
-    pendingSpokenSegments.push(phrase);
-    if(pendingSpokenSegments.join(' ').length>300)
-     pendingSpokenSegments=pendingSpokenSegments.slice(-5);
-   }
-  }
-  if(hasFinal||hasInterim)queueUtteranceFlush(hasInterim?1750:1450);
- };
- recognizer=r;return r;
+function sendIntent(intent){
+ if(!liveReady||!ws||ws.readyState!==WebSocket.OPEN){pendingIntent=intent;connectLive();return;}
+ stopPlayback();ws.send(JSON.stringify({type:'intent',intent}));
 }
-function listen(){
- if(!canListen()||recognizing)return;
- const r=getRecognizer();
- if(!r){statusText('Este navegador no admite dictado. Podés escribir la contraseña.');return;}
- recognitionWanted=true;
- try{r.start();}catch(err){
-  if(err.name==='InvalidStateError'){queueRecognitionRestart(500);return;}
-  if(err.name==='NotAllowedError'){guardNeedsGesture=true;setMuteAppearance();return;}
-  queueRecognitionRestart(800);
+async function toggleGuard(){
+ if(!guardActive)return;
+ if(guardMuted){
+  guardMuted=false;setMuteAppearance();await initAudio();
+  const ok=await startMic(true);
+  if(!ok){guardNeedsGesture=true;setMuteAppearance();return;}
+  if(!liveReady)connectLive();else sendIntent('ask');
+  return;
  }
+ if(guardNeedsGesture||!micOn||audioContext?.state!=='running'){
+  await initAudio();const ok=await startMic(true);
+  if(!ok){statusText('Tocame para habilitar el micrófono.');return;}
+  guardNeedsGesture=false;setMuteAppearance();
+  if(!liveReady)connectLive();else if(!guardTalking)sendIntent('ask');
+  return;
+ }
+ guardMuted=true;pauseMic();stopPlayback();setMuteAppearance();
+ statusText('Erik está silenciado. Tocame para volver a hablar.');
 }
 async function startGuard(){
  if(guardActive||!isLoginVisible())return;
  guardActive=true;guardMuted=false;guardNeedsGesture=false;connectionRetries=0;
- const epoch=++guardEpoch;
- one('#guard-dock')?.classList.remove('hidden');
+ const epoch=++guardEpoch;one('#guard-dock')?.classList.remove('hidden');
  nextBlink=performance.now()+3600;
  try{
   const c=await readJSON('/api/guard/config');
@@ -462,35 +336,28 @@ async function startGuard(){
   if(!c.enabled){stopGuard({hide:true});return;}
   guardConfig={mouthDelay:c.mouthDelay,mouthSensitivity:c.mouthSensitivity,
    mouthSmoothing:c.mouthSmoothing,mouthAmplitude:c.mouthAmplitude,blinkRate:c.blinkRate};
-  void frameImages(c.frames,c.versions);
-  renderGuard();
-  void initAudio().catch(()=>{});
-  connectLive();
- }catch{statusText('Erik no pudo iniciar. Podés ingresar por escrito.');}
+  void frameImages(c.frames,c.versions);renderGuard();void initAudio();connectLive();
+ }catch{statusText('Soy Erik. Podés ingresar por escrito.');}
 }
 function watchLogin(){
  const root=one('#login-view');if(!root)return;
- const observer=new MutationObserver(()=>{
+ const obs=new MutationObserver(()=>{
   if(isLoginVisible()){if(!guardActive)void startGuard();}
   else if(guardActive)stopGuard();
  });
- observer.observe(root,{attributes:true,attributeFilter:['class']});
+ obs.observe(root,{attributes:true,attributeFilter:['class']});
 }
 function setupGuardControls(){
  one('#guard-toggle')?.addEventListener('click',()=>void toggleGuard());
- one('#password')?.addEventListener('focus',()=>{
-  if(guardActive&&!guardMuted){stopRecognition();stopPlayback();statusText('Escribí la contraseña.');}
- });
- one('#password')?.addEventListener('blur',()=>{if(guardActive&&!guardMuted)listen();});
- one('#login-form')?.addEventListener('submit',()=>stopRecognition(),{capture:true});
+ // Escribir contraseña desactiva el envío de audio, sin cerrar el micrófono.
+ one('#login-form')?.addEventListener('submit',()=>clearInput(),{capture:true});
  window.addEventListener('nexo-login-error',()=>{
   if(guardActive&&!guardMuted){one('#password')?.blur();sendIntent('retry');}
  });
  window.addEventListener('nexo-login-ok',()=>stopGuard());
  document.addEventListener('visibilitychange',()=>{
   if(!guardActive)return;
-  if(document.hidden){stopRecognition();}
-  else if(!guardMuted)listen();
+  if(!document.hidden&&!guardMuted&&micStream&&!micOn)void startMic();
  });
 }
 async function makeGuardFrames(list){
@@ -544,6 +411,7 @@ function setupAdminGuard(){
   finally{btn.disabled=false;}
  });
 }
+
 setupGuardControls();setupAdminGuard();watchLogin();
-window.addEventListener('pageshow',event=>{if(event.persisted&&isLoginVisible()){if(guardActive)stopGuard();void startGuard();}});
-readJSON('/api/me').then(me=>{if(!me.role&&isLoginVisible())void startGuard();}).catch(()=>{if(isLoginVisible())void startGuard();});
+window.addEventListener('pageshow',e=>{if(e.persisted&&isLoginVisible()){if(guardActive)stopGuard();void startGuard()}});
+readJSON('/api/me').then(me=>{if(!me.role&&isLoginVisible())void startGuard()}).catch(()=>{if(isLoginVisible())void startGuard()});
