@@ -2,105 +2,120 @@ import PDFDocument from 'pdfkit';
 import fs from 'node:fs';
 import path from 'node:path';
 import {DATA_DIR,getProfile,uid} from './db.js';
-import {cvReadiness,cvContent} from './cv-layout.js';
+import {cvReadiness,cvContent,monthLabel} from './cv-layout.js';
 import {createWordDocument} from './word.js';
 
-// Inspirado en el modelo provisto: nombre y contactos centrados; grilla
-// izquierda para títulos y derecha para información, sin foto ni adornos.
-const TEAL='#476C73',INK='#22292B',MUTED='#40494D';
-const LEFT=62,LABEL_W=161,CONTENT_X=228,RIGHT=536,CONTENT_W=RIGHT-CONTENT_X;
-const PAGE_BOTTOM=786;
-const clean=s=>String(s??'').trim();
-
+// Modelo ATS: una columna, tipografía negra, nombre centrado y líneas divisorias.
+const INK='#111111',LEFT=52,RIGHT=543,WIDTH=RIGHT-LEFT,BOTTOM=788;
 function renderPdf(file,profile){
- const {name,contacts,sections}=cvContent(profile.fields);
+ const cv=cvContent(profile.fields);
  return new Promise((resolve,reject)=>{
-  const doc=new PDFDocument({size:'A4',margin:0,autoFirstPage:true,
-   info:{Title:'Currículum vitae - '+name,Author:'NEXO CV'}});
-  const stream=fs.createWriteStream(file);
-  let settled=false;
-  const done=(err)=>{if(settled)return;settled=true;err?reject(err):resolve();};
-  stream.on('finish',()=>done());stream.on('error',done);doc.on('error',done);
-  doc.pipe(stream);
-  doc.font('Helvetica-Bold').fillColor(TEAL);
-  let titleSize=22;
-  while(titleSize>15&&doc.widthOfString(name,{fontSize:titleSize})>480)titleSize--;
-  doc.fontSize(titleSize).text(name,55,31,{width:485,align:'center',characterSpacing:.65});
-  let hy=31+titleSize+17;
-  doc.fillColor(INK).font('Helvetica').fontSize(10.5);
-  for(const c of contacts){
-   doc.text(c,LEFT,hy,{width:RIGHT-LEFT,align:'center',lineGap:1});
-   hy=doc.y+2;
-  }
-  let y=Math.max(hy+22,120);
-  const newPage=()=>{
+  const doc=new PDFDocument({size:'A4',margin:0,info:{Title:'Currículum vitae - '+cv.name,Author:'NEXO CV'}});
+  const stream=fs.createWriteStream(file);doc.pipe(stream);
+  stream.on('finish',resolve);stream.on('error',reject);doc.on('error',reject);
+  const font=(bold=false,size=10.5)=>doc.font(bold?'Helvetica-Bold':'Helvetica').fontSize(size).fillColor(INK);
+  let y=0;
+  const more=(h=20)=>{
+   if(y+h<=BOTTOM)return;
    doc.addPage();y=55;
-   doc.font('Helvetica-Bold').fontSize(9).fillColor(TEAL)
-      .text(name,LEFT,28,{width:RIGHT-LEFT,align:'right'});
   };
-  const fit=(height)=>{if(y+height>PAGE_BOTTOM)newPage();};
-  const textHeight=(s,width=CONTENT_W,size=10.5,gap=3)=>doc.font('Helvetica')
-    .fontSize(size).heightOfString(s,{width,lineGap:gap,breakLine:false});
-  for(const section of sections){
-   if(!section.text&&!(section.values?.length))continue;
-   fit(48);
-   const top=y;
-   doc.fillColor(TEAL).font('Helvetica-Bold').fontSize(10.6)
-     .text(section.label,LEFT,top,{width:LABEL_W,lineBreak:false});
-   let cy=top;
-   if(section.type==='text'){
-    doc.fillColor(INK).font('Helvetica').fontSize(10.65);
-    const t=clean(section.text);
-    const h=doc.heightOfString(t,{width:CONTENT_W,lineGap:3});
-    doc.text(t,CONTENT_X,cy,{width:CONTENT_W,lineGap:3});
-    cy+=h;
-   }else if(section.type==='skills'){
-    const values=section.values,half=(CONTENT_W-17)/2;
-    for(let k=0;k<values.length;k+=2){
-     const a='•  '+values[k],b=values[k+1]?'•  '+values[k+1]:'';
-     doc.font('Helvetica').fontSize(10.3);
-     const ha=doc.heightOfString(a,{width:half,lineGap:3});
-     const hb=b?doc.heightOfString(b,{width:half,lineGap:3}):0;
-     const rh=Math.max(ha,hb,17)+2;
-     if(cy+rh>PAGE_BOTTOM){newPage();cy=y;}
-     doc.fillColor(INK).text(a,CONTENT_X,cy,{width:half,lineGap:3});
-     if(b)doc.text(b,CONTENT_X+half+17,cy,{width:half,lineGap:3});
-     cy+=rh;
-    }
-   }else{
-    let priorIsBullet=false;
-    for(const raw of section.values){
-     const isBullet=/^(?:[•*\-]|\d+[.)])\s+/.test(raw);
-     const str=isBullet?'•  '+raw.replace(/^(?:[•*\-]|\d+[.)])\s+/,''):raw.replace(/\s*\|\s*/g,' · ');
-     doc.font(isBullet?'Helvetica':'Helvetica').fontSize(10.4);
-     const h=doc.heightOfString(str,{width:isBullet?CONTENT_W-12:CONTENT_W,lineGap:3});
-     if(cy+h+2>PAGE_BOTTOM){newPage();cy=y;}
-     if(isBullet){
-      doc.fillColor(INK).text(str,CONTENT_X+11,cy,{width:CONTENT_W-11,lineGap:3});
-     }else{
-      doc.fillColor(INK).text(str,CONTENT_X,cy,{width:CONTENT_W,lineGap:3});
-     }
-     cy+=h+(isBullet?2:5);
-     priorIsBullet=isBullet;
-    }
-   }
-   y=Math.max(cy,top+16)+22;
+  const height=(text,w=WIDTH,size=10.5)=>{font(false,size);return doc.heightOfString(String(text),{width:w,lineGap:2});};
+  const paragraph=(text,indent=0,size=10.5,extra=7)=>{
+   const t=String(text||'').trim();if(!t)return;
+   const w=WIDTH-indent,h=height(t,w,size);more(h+3);
+   font(false,size).text(t,LEFT+indent,y,{width:w,lineGap:2});
+   y+=h+extra;
+  };
+  const heading=(title)=>{
+   more(62);
+   doc.moveTo(LEFT,y).lineTo(RIGHT,y).strokeColor(INK).lineWidth(.9).stroke();
+   y+=12;
+   font(true,13.4).text(title,LEFT,y,{width:WIDTH});
+   y+=30;
+  };
+  const period=(a,b)=>[monthLabel(a),monthLabel(b)].filter(Boolean).join(' - ');
+  const dated=(title,dates)=>{
+   const datesWidth=218,titleWidth=WIDTH-datesWidth-10;
+   font(true,10.6);
+   const h=doc.heightOfString(title,{width:titleWidth,lineGap:2});
+   more(Math.max(h,18)+3);
+   const rowY=y;
+   font(true,10.6).text(title,LEFT,rowY,{width:titleWidth,lineGap:2});
+   if(dates)font(false,10.2).text(dates,RIGHT-datesWidth,rowY,{width:datesWidth,align:'right',lineGap:2});
+   y+=Math.max(h,15)+3;
+  };
+  const bullet=(text)=>{
+   const t=String(text||'').trim();if(!t)return;
+   const w=WIDTH-29,h=height(t,w,10.2);
+   more(h+2);
+   font(false,10.4).text('•',LEFT+7,y,{width:12});
+   font(false,10.2).text(t,LEFT+26,y,{width:w,lineGap:2});
+   y+=h+3;
+  };
+  // Cabecera visual del modelo aportado.
+  const name=cv.name||'CURRÍCULUM VITAE';
+  font(true,25);
+  let size=25;while(size>16&&doc.widthOfString(name,{fontSize:size})>WIDTH)size--;
+  doc.fontSize(size).text(name,LEFT,48,{width:WIDTH,align:'center'});
+  y=48+size+10;
+  if(cv.roleLine){font(false,11.1).text(cv.roleLine,LEFT,y,{width:WIDTH,align:'center'});y=doc.y+1;}
+  if(cv.contacts.length){font(false,10.3).text(cv.contacts.join(' - '),LEFT,y,{width:WIDTH,align:'center'});y=doc.y+3;}
+  y=Math.max(y+22,132);
+  heading('PERFIL PROFESIONAL');
+  paragraph(cv.profile,0,10.5,10);
+  // El modelo no tiene aptitudes, pero se conserva la información de accesibilidad
+  // recogida por el asistente, en el mismo estilo ATS.
+  if(cv.skills.length){
+   heading('APTITUDES');
+   for(const skill of cv.skills)bullet(skill);
+   y+=8;
   }
+  heading('EXPERIENCIA LABORAL');
+  if(cv.firstExperience){
+   paragraph('En búsqueda de primera experiencia laboral.',0,10.5,10);
+  }else{
+   for(const exp of cv.experience){
+    const dates=period(exp.inicio,exp.fin);
+    dated(exp.puesto,dates);
+    const place=[exp.lugar,exp.ubicacion].filter(Boolean).join(', ');
+    if(place)paragraph(place,0,10.2,4);
+    if(exp.aproximada)paragraph('Fechas aproximadas, confirmadas por la persona.',0,8.3,3);
+    for(const task of exp.actividades)bullet(task);
+    y+=13;
+   }
+  }
+  heading('EDUCACIÓN');
+  if(cv.education.length){
+   for(const education of cv.education){
+    dated(education.titulo,period(education.inicio,education.fin));
+    if(education.institucion)paragraph(education.institucion,0,10.3,3);
+    if(education.estado)paragraph(education.estado,0,9.7,3);
+    if(education.aproximada&&education.inicio)paragraph('Fechas aproximadas.',0,8.3,3);
+    y+=11;
+   }
+  }else{
+   for(const line of cv.educationLegacy)paragraph(line,0,10.5,5);
+  }
+  heading('IDIOMAS');
+  for(const language of cv.languages)bullet(language);
+  y+=9;
+  if(cv.courses.length){heading('CURSOS Y TALLERES');for(const course of cv.courses)bullet(course);y+=10;}
+  if(cv.others.length){heading('INFORMACIÓN ADICIONAL');for(const extra of cv.others)bullet(extra);}
   doc.end();
  });
 }
 export async function createDocument(profileId){
  const p=getProfile(profileId);
  if(!p)throw new Error('Perfil no encontrado.');
- const check=cvReadiness(p.fields);
- if(!check.ok)throw new Error('Todavía faltan datos para completar el CV: '+check.faltantes.map(x=>x.campo).join(', ')+'.');
+ const readiness=cvReadiness(p.fields);
+ if(!readiness.ok)throw new Error('Faltan datos para completar el CV: '+readiness.faltantes.map(x=>x.campo).join(', ')+'.');
  const stem=uid(),pdfFile=path.join(DATA_DIR,'cvs',stem+'.pdf'),wordFile=path.join(DATA_DIR,'cvs',stem+'.docx');
  try{
   await renderPdf(pdfFile,p);
   await createWordDocument(wordFile,p);
- }catch(e){
+ }catch(err){
   for(const file of [pdfFile,wordFile])try{fs.unlinkSync(file)}catch{}
-  throw e;
+  throw err;
  }
  return {pdfFile,wordFile,filename:stem+'.pdf'};
 }
