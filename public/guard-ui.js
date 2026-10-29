@@ -7,7 +7,7 @@ const frameDescriptions=['Abiertos · reposo','Cerrados · reposo','Abiertos · 
 let guardConfig={},guardFrames=[],guardFramesFullyReady=false,guardFrameLoadEpoch=0;
 let guardActive=false,guardMuted=false,guardNeedsGesture=false,guardEpoch=0,guardTalking=false;
 let painted=-1,rAF=0,nextBlink=0,blinkEnd=0,amplitude=0,spokenAt=0;
-let ws=null,liveReady=false,pendingIntent=null,connectionRetries=0;
+let ws=null,liveReady=false,pendingIntent=null,connectionRetries=0,greetingReadySent=false;
 let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCaption='';
 let nextCaptionIsNewTurn=true,openingGreeting=true,openingPlaybackPending=false,lastTurnCompleted=false;
 let scheduledSources=new Set(),tailTimer=null;
@@ -91,7 +91,7 @@ function stopPlayback(){
 }
 function stopGuard({hide=false}={}){
  guardEpoch++;releaseMic();clearInput();stopPlayback();
- guardActive=false;guardMuted=false;liveReady=false;pendingIntent=null;guardNeedsGesture=false;openingGreeting=true;openingPlaybackPending=false;
+ guardActive=false;guardMuted=false;liveReady=false;pendingIntent=null;guardNeedsGesture=false;openingGreeting=true;openingPlaybackPending=false;greetingReadySent=false;
  if(ws){const previous=ws;ws=null;try{previous.close()}catch{}}
  if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;
  if(hide)one('#guard-dock')?.classList.add('hidden');setMuteAppearance();
@@ -315,14 +315,26 @@ function processInput(){
  }else if(intent.type==='keyboard')one('#password')?.focus();
  // Conversaciones, bromas e interrupciones ya viajan por audio continuo a Live.
 }
+function sendGreetingReady(){
+ if(greetingReadySent||!liveReady||guardMuted||!ws||ws.readyState!==WebSocket.OPEN)return;
+ greetingReadySent=true;
+ ws.send(JSON.stringify({type:'ready'}));
+}
 function handleLiveMessage(e){
  let m;try{m=JSON.parse(String(e.data))}catch{return}
  if(!guardActive)return;
  if(m.type==='connected'){
   if(m.model!=='gemini-3.8-live'){try{ws?.close()}catch{};return;}
-  liveReady=true;connectionRetries=0;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;outputCaption='';statusText('Soy Erik.');
-  if(pendingIntent){sendIntent(pendingIntent);pendingIntent=null;}
-  if(!guardMuted)void startMic();
+  liveReady=true;connectionRetries=0;greetingReadySent=false;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;outputCaption='';statusText('Soy Erik.');
+  // El saludo no comienza hasta que Chrome resolvió la solicitud del micrófono.
+  // La captura queda abierta durante toda la sesión; se envía el audio a Gemini
+  // después de terminar la presentación, evitando que Erik se escuche a sí mismo.
+  const token=guardEpoch,currentSocket=ws;
+  void (async()=>{
+   if(!guardMuted)await startMic();
+   if(!guardActive||guardMuted||guardEpoch!==token||ws!==currentSocket||!liveReady)return;
+   sendGreetingReady();
+  })();
  }else if(m.type==='audio'){if(!guardMuted)playLiveAudio(m.pcm);}
  else if(m.type==='transcript'){
   if(guardMuted)return;
@@ -343,7 +355,7 @@ function connectLive(){
  socket.onerror=()=>{};
  socket.onclose=()=>{
   if(ws!==socket||guardEpoch!==epoch)return;
-  ws=null;liveReady=false;stopPlayback();openingGreeting=true;openingPlaybackPending=false;
+  ws=null;liveReady=false;greetingReadySent=false;stopPlayback();openingGreeting=true;openingPlaybackPending=false;
   // No cerrar ni volver a abrir el micrófono: reutilizar el stream continuo.
   if(guardActive&&!guardMuted&&isLoginVisible()&&connectionRetries<2){
    connectionRetries++;setTimeout(()=>{if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive()},1300);
@@ -361,7 +373,7 @@ async function toggleGuard(){
   if(openingPlaybackPending&&lastTurnCompleted)completedTurn();
   const ok=await startMic(true);
   if(!ok){guardNeedsGesture=true;setMuteAppearance();return;}
-  if(!liveReady)connectLive();else sendIntent('ask');
+  if(!liveReady)connectLive();else if(!greetingReadySent)sendGreetingReady();else if(!openingGreeting)sendIntent('ask');
   return;
  }
  if(guardNeedsGesture||!micOn||audioContext?.state!=='running'||micContext?.state!=='running'){
@@ -370,7 +382,7 @@ async function toggleGuard(){
   const ok=await startMic(true);
   if(!ok){statusText('Tocame para habilitar el micrófono.');return;}
   guardNeedsGesture=false;setMuteAppearance();
-  if(!liveReady)connectLive();else if(!guardTalking&&!openingGreeting)sendIntent('ask');
+  if(!liveReady)connectLive();else if(!greetingReadySent)sendGreetingReady();else if(!guardTalking&&!openingGreeting)sendIntent('ask');
   return;
  }
  guardMuted=true;pauseMic();stopPlayback();setMuteAppearance();
