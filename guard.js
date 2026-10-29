@@ -77,8 +77,8 @@ export function makeGuardLive(ws){
     if(sc.outputTranscription?.text)send(ws,'transcript',{text:sc.outputTranscription.text});
     if(sc.turnComplete){turnOpen=false;send(ws,'turn_complete');}
    },
-   onerror:e=>{if(!closed){console.warn('Erik Live error:',String(e?.message||e).slice(0,150));send(ws,'error',{message:'Gemini 3.8 Live no está disponible.'});}},
-   onclose:e=>{if(!closed){send(ws,'closed',{message:'Se cerró Gemini 3.8 Live. Tocá a Erik para reconectar.'});}}
+   onerror:e=>{if(!closed){console.warn('Erik Live error:',String(e?.message||e).slice(0,150));send(ws,'error',{message:'Gemini 3.8 Live no está disponible.'});try{ws.close()}catch{}}},
+   onclose:e=>{if(!closed){send(ws,'closed',{message:'Se cerró Gemini 3.8 Live. Tocá a Erik para reconectar.'});try{ws.close()}catch{}}}
   }});
   if(closed){try{live.close()}catch{};return;}
   ready=true;send(ws,'connected',{model:ERIK_MODEL,voice});
