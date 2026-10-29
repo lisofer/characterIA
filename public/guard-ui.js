@@ -196,7 +196,7 @@ function appendErikCaption(fragment){
    if(outputCaption.endsWith(incoming.slice(0,k))){overlap=k;break;}
   }
   const tail=incoming.slice(overlap);
-  const space=!overlap&&/[\p{L}\p{N}]$/u.test(outputCaption)&&/^[\p{L}\p{N}]/u.test(tail);
+  const space=!overlap&&Boolean(outputCaption)&&!/\s$/u.test(outputCaption)&&/^[\p{L}\p{N}]/u.test(tail);
   outputCaption+=(space?' ':'')+tail;
  }
  outputCaption=outputCaption.slice(-400);
