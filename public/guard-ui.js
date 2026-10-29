@@ -1,7 +1,8 @@
 /* Erik: portero de NEXOCV. La verificación de contraseñas se hace SOLO en /api/login. */
 const one=(s)=>document.querySelector(s);
 let guardConfig={}, guardFrames=[], guardActive=false,guardEpoch=0,guardMuted=false,guardNeedsGesture=false;
-let recognizer=null,recognizing=false,recognitionWanted=false,guardTalking=false;
+let recognizer=null,recognizing=false,recognitionWanted=false,guardTalking=false,recognitionRestartTimer=null,recognitionErrors=0;
+let guardFramesFullyReady=false,guardFrameLoadEpoch=0,guardSpeechTurn=0;
 let voicePlayer=null,voiceContext=null,voiceAnalyser=null,voiceSource=null,speechWait=null,voiceFinish=null,browserVoiceFinish=null;
 let rAF=0,nextBlink=0,blinkEnd=0,painted=-1,amplitude=0,spokenAt=0,voiceGreeting=false;
 const guardVisual=one('#guard-avatar'),status=one('#guard-status');
@@ -10,8 +11,19 @@ const clean=(s)=>String(s||'').normalize('NFC').trim();
 function statusText(t){if(status)status.textContent=t;}
 function isLoginVisible(){return !one('#login-view')?.classList.contains('hidden');}
 async function readJSON(url,opt){const r=await fetch(url,{credentials:'same-origin',...opt});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Error '+r.status);return data;}
-function stopRecognition(){recognitionWanted=false;recognizing=false;if(recognizer){try{recognizer.abort();}catch{}}}
+function stopRecognition(){
+ recognitionWanted=false;recognizing=false;
+ clearTimeout(recognitionRestartTimer);recognitionRestartTimer=null;
+ if(recognizer){try{recognizer.abort();}catch{}}
+}
+function canListen(){return guardActive&&!guardMuted&&!guardNeedsGesture&&isLoginVisible()&&!guardTalking&&!document.hidden&&document.activeElement!==one('#password');}
+function queueRecognitionRestart(delay=400){
+ clearTimeout(recognitionRestartTimer);
+ if(!recognitionWanted||!canListen())return;
+ recognitionRestartTimer=setTimeout(()=>{recognitionRestartTimer=null;if(recognitionWanted&&canListen())listen();},delay);
+}
 function stopAudio(){
+ guardSpeechTurn++;
  if(voicePlayer){voicePlayer.pause();voicePlayer.removeAttribute('src');voicePlayer.load();voicePlayer=null;}
  try{speechSynthesis.cancel();}catch{}
  voiceFinish?.();browserVoiceFinish?.();
@@ -27,7 +39,7 @@ function setMuteAppearance(){
  const hint=one('#guard-hint');if(hint)hint.textContent=label;
 }
 function stopGuard({hide=false}={}){
- guardEpoch++;stopRecognition();stopAudio();guardActive=false;guardMuted=false;guardNeedsGesture=false;
+ guardEpoch++;guardFrameLoadEpoch++;stopRecognition();stopAudio();guardActive=false;guardMuted=false;guardNeedsGesture=false;
  if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;setMuteAppearance();
  if(hide)one('#guard-dock')?.classList.add('hidden');
 }
@@ -45,7 +57,7 @@ function toggleGuard(){
  void audioUnlock();void say('ask');
 }
 function displayFrame(i){
- const frame=guardFrames[i]||guardFrames[(i%2)]||guardFrames[0];
+ const frame=(guardFramesFullyReady?guardFrames[i]:null)||guardFrames[0];
  if(!frame||!frame.complete||!frame.naturalWidth)return;
  const target=Number(frame.dataset.frame);
  if(target===painted)return;
@@ -77,16 +89,34 @@ function renderGuard(){
  }
  displayFrame(shape*2+blink);
 }
-function frameImages(list){
- guardVisual.querySelectorAll('.guard-frame').forEach(x=>x.remove());guardFrames=Array(8).fill(null);
- (list||[]).forEach((found,i)=>{
-  if(!found)return;
-  const im=document.createElement('img');im.className='guard-frame';im.alt='';im.dataset.frame=String(i);
-  im.decoding='async';im.src='/api/guard/frames/'+i+'?optimized=1';
-  im.onload=()=>{if(i===0||!guardFrames[0])displayFrame(0);};
-  guardVisual.appendChild(im);guardFrames[i]=im;
- });
- if(!(list||[]).some(Boolean))one('#guard-fallback')?.classList.remove('hidden');
+async function frameImages(list){
+ const epoch=++guardFrameLoadEpoch,dock=one('#guard-dock');
+ guardFramesFullyReady=false;
+ dock?.classList.remove('frames-ready');
+ guardVisual.querySelectorAll('.guard-frame').forEach(img=>img.remove());
+ guardFrames=Array(8).fill(null);painted=-1;
+ const exists=Array.isArray(list)?list:[];
+ // Sin PNG no se pinta ningún personaje de ejemplo.
+ if(!exists[0])return;
+ const load=async i=>{
+  if(!exists[i])return null;
+  const img=new Image();img.className='guard-frame';img.alt='';img.dataset.frame=String(i);
+  img.decoding='async';img.draggable=false;img.src='/api/guard/frames/'+i+'?optimized=1';
+  try{await img.decode();return img.complete&&img.naturalWidth?img:null;}catch{return null;}
+ };
+ const first=load(0),others=Array.from({length:7},(_,j)=>load(j+1));
+ const base=await first;
+ if(epoch!==guardFrameLoadEpoch||!guardActive)return;
+ if(!base){statusText('No se pudo cargar el PNG de Erik. Revisá la imagen en Administración.');return;}
+ guardFrames[0]=base;guardVisual.appendChild(base);
+ dock?.classList.add('frames-ready');displayFrame(0);
+ // Esperar la decodificación de los fotogramas antes de animar.
+ const rest=await Promise.all(others);
+ if(epoch!==guardFrameLoadEpoch||!guardActive)return;
+ rest.forEach((img,j)=>{if(img){guardFrames[j+1]=img;guardVisual.appendChild(img);}});
+ guardFramesFullyReady=exists.every((found,i)=>!found||Boolean(guardFrames[i]));
+ nextBlink=performance.now()+Math.max(2,Number(guardConfig.blinkRate)||4)*1000;
+ displayFrame(0);
 }
 async function audioUnlock(){
  const AC=window.AudioContext||window.webkitAudioContext;
@@ -135,10 +165,11 @@ async function say(intent,{resumeListening=true}={}){
  if(!guardActive||guardMuted||!isLoginVisible())return;
  stopRecognition();stopAudio();
  const token=guardEpoch;
+ const speechTurn=guardSpeechTurn;
  guardTalking=false;statusText('Erik está preparando su respuesta…');
  try{
   const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent})});
-  if(!guardActive||guardMuted||guardEpoch!==token)return;
+  if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==speechTurn)return;
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
   if(data.engine==='fish'&&data.audio){
@@ -149,7 +180,7 @@ async function say(intent,{resumeListening=true}={}){
   }else await speakBrowser(data.text);
  }catch(e){statusText('Erik: '+e.message);}
  finally{
-  if(guardEpoch===token&&!guardMuted){guardTalking=false;amplitude=0;displayFrame(0);if(resumeListening&&guardActive)listen();}
+  if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted){guardTalking=false;amplitude=0;displayFrame(0);if(resumeListening&&guardActive)listen();}
  }
 }
 function getRecognizer(){
@@ -207,7 +238,7 @@ async function startGuard(){
   const c=await readJSON('/api/guard/config');if(!guardActive||guardEpoch!==token)return;
   if(!c.enabled){stopGuard({hide:true});return;}
   guardConfig={mouthDelay:c.mouthDelay,mouthSensitivity:c.mouthSensitivity,mouthSmoothing:c.mouthSmoothing,mouthAmplitude:c.mouthAmplitude,blinkRate:c.blinkRate};
-  frameImages(c.frames);
+  void frameImages(c.frames);
   renderGuard();
   await say('greeting');
  }catch(e){statusText('Erik no se pudo conectar. El ingreso por contraseña sigue disponible.');}
