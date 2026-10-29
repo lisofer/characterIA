@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {normalizedIdentity,splitSimpleFullName} from './identity.js';
@@ -37,13 +37,6 @@ const erikConversationGuide="\n\nCONVERSACIÓN ESPONTÁNEA: Sos un personaje int
 const erikConversationalPrompt=defaultGuardPrompt.includes('CONVERSACIÓN ESPONTÁNEA:')?defaultGuardPrompt:defaultGuardPrompt+erikConversationGuide;
 const defaults={prompt:defaultPrompt,personality:'Cercana, paciente, profesional, con español argentino natural. Evita hablar en exceso.',voice:'Aoede',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',subtitleFont:20,subtitleWidth:760,subtitleDelay:0,mouthDelay:0,mouthSensitivity:48,mouthSmoothing:40,blinkRate:4.2,mouthAmplitude:78,avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',guardEnabled:'true',guardPrompt:erikConversationalPrompt,guardGreeting:'Eh, buenas. Soy Erik, el guardia. ¿Tenés contraseña para pasar?',guardVoice:'Charon',guardMouthDelay:0,guardMouthSensitivity:48,guardMouthSmoothing:40,guardMouthAmplitude:78,guardBlinkRate:4.2};
 for(const [k,v] of Object.entries(defaults))db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)').run(k,JSON.stringify(v));
-
-// Retirar datos de la integración de voz anterior. Mantener intactos PNG y prompt.
-for(const k of ['guardVoiceId','guardFishModel','guardSampleText','guardTemperature','guardTopP','guardSpeed','erik_fish_free_20261029'])
- db.prepare('DELETE FROM settings WHERE key=?').run(k);
-for(const filename of ['guard-voice-reference.bin','guard-voice-reference.json','erik-welcome-fish.mp3','erik-welcome-fish.json']){
- try{unlinkSync(path.join(DATA_DIR,filename));}catch(err){if(err?.code!=='ENOENT')console.warn('No se pudo limpiar audio anterior de Erik');}
-}
 
 // Actualizar solo el prompt predeterminado antiguo; respetar toda personalización del administrador.
 db.prepare('UPDATE settings SET value=? WHERE key=? AND value=?').run(JSON.stringify(defaultPrompt),'prompt',JSON.stringify(legacyDefaultPrompt));
