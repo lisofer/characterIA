@@ -4,7 +4,7 @@ let guardConfig={}, guardFrames=[], guardActive=false,guardEpoch=0,guardMuted=fa
 let recognizer=null,recognizing=false,recognitionWanted=false,guardTalking=false,recognitionRestartTimer=null,recognitionErrors=0;
 let guardFramesFullyReady=false,guardFrameLoadEpoch=0,guardSpeechTurn=0;
 let guardWelcome='Hola, soy Erik, guardia de NEXOCV. Podés decirme la contraseña de una sola palabra o escribirla. Estoy escuchando.';
-let voicePlayer=null,voiceContext=null,voiceAnalyser=null,voiceSource=null,speechWait=null,voiceFinish=null,browserVoiceFinish=null;
+let voicePlayer=null,voiceContext=null,voiceAnalyser=null,voiceSource=null,speechWait=null,voiceFinish=null;
 let rAF=0,nextBlink=0,blinkEnd=0,painted=-1,amplitude=0,spokenAt=0,voiceGreeting=false;
 const guardVisual=one('#guard-avatar'),status=one('#guard-status');
 const frameDescriptions=['Abiertos · reposo','Cerrados · reposo','Abiertos · A','Cerrados · A','Abiertos · O','Cerrados · O','Abiertos · E','Cerrados · E'];
@@ -28,9 +28,8 @@ function queueRecognitionRestart(delay=400){
 function stopAudio(){
  guardSpeechTurn++;
  if(voicePlayer){voicePlayer.pause();voicePlayer.removeAttribute('src');voicePlayer.load();voicePlayer=null;}
- try{speechSynthesis.cancel();}catch{}
- voiceFinish?.();browserVoiceFinish?.();
- voiceFinish=null;browserVoiceFinish=null;
+ voiceFinish?.();
+ voiceFinish=null;
  guardTalking=false;voiceGreeting=false;
 }
 function setMuteAppearance(){
@@ -49,7 +48,7 @@ function stopGuard({hide=false}={}){
 function toggleGuard(){
  if(!guardActive)return;
  // Si el navegador bloqueó el inicio automático, el primer toque sirve para activar.
- if(guardNeedsGesture&&!guardMuted&&!recognizing&&!recognitionWanted){
+ if(guardNeedsGesture&&!guardMuted){
   guardEpoch++;guardNeedsGesture=false;stopRecognition();stopAudio();setMuteAppearance();
   void audioUnlock();void welcomeGuest();return;
  }
@@ -129,21 +128,6 @@ async function audioUnlock(){
   if(voiceContext.state==='suspended')await voiceContext.resume();
  }catch{}
 }
-function speakBrowser(text){
- return new Promise(resolve=>{
-  if(!('speechSynthesis' in window)){guardNeedsGesture=true;setMuteAppearance();resolve(false);return;}
-  let done=false,started=false;
-  const end=()=>{if(done)return;done=true;clearTimeout(timeout);if(browserVoiceFinish===end)browserVoiceFinish=null;resolve(started);};
-  const u=new SpeechSynthesisUtterance(text);
-  u.lang='es-AR';u.rate=.96;u.pitch=.95;
-  browserVoiceFinish=end;
-  u.onstart=()=>{started=true;guardNeedsGesture=false;setMuteAppearance();};
-  u.onend=end;
-  u.onerror=()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();};
-  const timeout=setTimeout(()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();},Math.max(3500,Math.min(16000,text.length*115)));
-  try{speechSynthesis.cancel();speechSynthesis.speak(u);}catch{guardNeedsGesture=true;setMuteAppearance();end();}
- });
-}
 // El saludo está fijado por accesibilidad, pero se pronuncia con Fish primero.
 async function welcomeGuest(){
  if(!guardActive||guardMuted||!isLoginVisible())return;
@@ -155,19 +139,18 @@ async function welcomeGuest(){
    method:'POST',headers:{'Content-Type':'application/json'},body:'{}'
   });
   if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==turn)return;
+  if(result.engine!=='fish'||!result.audio)throw new Error('Fish no entregó el audio de bienvenida');
   statusText(result.text||guardWelcome);
   guardTalking=true;spokenAt=performance.now();
-  if(result.audio&&(result.engine==='fish'||result.engine==='gemini')){
-   try{await playVoice(result.audio,result.mime);}
-   catch(err){
-    if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted)
-     await speakBrowser(guardWelcome);
-   }
-  }else await speakBrowser(guardWelcome);
+  await playVoice(result.audio,result.mime);
  }catch(err){
   if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted){
-   statusText(guardWelcome);guardTalking=true;spokenAt=performance.now();
-   await speakBrowser(guardWelcome);
+   const blocked=String(err?.name||'')==='NotAllowedError';
+   guardNeedsGesture=true;setMuteAppearance();
+   statusText(blocked?
+    'Soy Erik. Tu navegador bloqueó el sonido. Tocame para oír mi saludo con Fish Audio.':
+    'Soy Erik. Fish Audio no pudo reproducir mi saludo. Tocame para volver a intentarlo con la misma voz.');
+   console.warn('Erik: bienvenida Fish no disponible:',String(err?.name||'Error'));
   }
  }finally{
   if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted){
@@ -191,9 +174,10 @@ async function playVoice(b64,mime){
     voiceSource.connect(voiceAnalyser);voiceAnalyser.connect(voiceContext.destination);
    }catch(e){console.warn('Erik: analizador no disponible:',String(e?.name||''));}
   }
-  const ended=new Promise(resolve=>{
+  const ended=new Promise((resolve,reject)=>{
    const finish=()=>{if(voiceFinish===finish)voiceFinish=null;resolve();};
-   voiceFinish=finish;audio.onended=finish;audio.onerror=finish;
+   voiceFinish=finish;audio.onended=finish;
+   audio.onerror=()=>{if(voiceFinish===finish)voiceFinish=null;reject(new Error('Audio Fish no disponible'));};
   });
   try{await audio.play();}catch(e){guardNeedsGesture=true;setMuteAppearance();throw e;}
   guardNeedsGesture=false;setMuteAppearance();
@@ -247,26 +231,22 @@ async function say(intent,{resumeListening=true,userText=null}={}){
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
   if(data.engine==='stream'&&data.audioUrl){
-   try{await playVoiceUrl(data.audioUrl);}
-   catch(e){
-    console.warn('Erik: audio progresivo no disponible:',String(e?.name||'Error'));
-    if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted)
-     await speakBrowser(data.text);
-   }
-  }else if((data.engine==='fish'||data.engine==='gemini')&&data.audio){
-   try{await playVoice(data.audio,data.mime);}
-   catch(e){
-    if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted)
-     await speakBrowser(data.text);
-   }
-  }else await speakBrowser(data.text);
+   await playVoiceUrl(data.audioUrl);
+  }else if(data.engine==='fish'&&data.audio){
+   await playVoice(data.audio,data.mime);
+  }else{
+   throw new Error('Erik recibió un motor de voz que no es Fish Audio.');
+  }
  }catch(e){
   if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted){
-   const notice=/429|límite de uso/i.test(e.message)
-    ?'Ahora mismo Gemini está ocupado. Igual podés ingresar diciendo tu contraseña.'
-    :'No pude conectarme con Gemini. Podés decir tu contraseña para entrar o escribirla.';
-   statusText(notice);guardTalking=true;spokenAt=performance.now();amplitude=0;
-   await speakBrowser(notice);
+   const audioError=/Fish|audio|reproducir|MediaError|NotAllowed/i.test(String(e?.message||'')+' '+String(e?.name||''));
+   if(audioError){
+    guardNeedsGesture=true;setMuteAppearance();
+    statusText('Fish Audio no pudo hablar. Tocame para reintentar con la misma voz. No voy a cambiar de voz.');
+   }else{
+    statusText('Gemini no pudo responder. Podés decir tu contraseña o escribirla.');
+   }
+   console.warn('Erik:',audioError?'Falló Fish Audio':'Gemini no disponible',String(e?.name||'Error'));
   }
  }
  finally{
