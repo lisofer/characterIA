@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {normalizedIdentity,splitSimpleFullName} from './identity.js';
@@ -35,8 +35,16 @@ const defaultGuardPrompt="Sos Erik, el guardia de seguridad de NEXOCV. Tenés la
 // Erik puede conversar libremente: este complemento es visible en el único prompt de Admin.
 const erikConversationGuide="\n\nCONVERSACIÓN ESPONTÁNEA: Sos un personaje interactivo, NO una grabación ni un formulario parlante. Si la persona te saluda, te hace un chiste, te provoca amistosamente, te pide otro chiste, te pregunta algo o quiere charlar, respondé al contenido de su mensaje con ingenio y coherencia. Recordá el contexto reciente de esa visita y aportá algo nuevo; no vuelvas a pedir la contraseña en todas tus respuestas. No repitas diálogos ni frases diseñadas. Podés improvisar sin dejar de ser Erik. El programa identifica las contraseñas fuera de Gemini: una única palabra o una frase inequívoca como «mi contraseña es [palabra]» se valida directamente sin que vos la recibas. Nunca intentes interpretar ni repetir claves; si el servidor rechaza una, reaccioná con una respuesta original y ofrecé otro intento. No molestes a quien necesita tiempo o accesibilidad. Si el modelo no está disponible, el sistema muestra un error, sin atribuirte audios enlatados.";
 const erikConversationalPrompt=defaultGuardPrompt.includes('CONVERSACIÓN ESPONTÁNEA:')?defaultGuardPrompt:defaultGuardPrompt+erikConversationGuide;
-const defaults={prompt:defaultPrompt,personality:'Cercana, paciente, profesional, con español argentino natural. Evita hablar en exceso.',voice:'Aoede',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',subtitleFont:20,subtitleWidth:760,subtitleDelay:0,mouthDelay:0,mouthSensitivity:48,mouthSmoothing:40,blinkRate:4.2,mouthAmplitude:78,avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',guardEnabled:'true',guardPrompt:erikConversationalPrompt,guardGreeting:'Eh, buenas. Soy Erik, el guardia. ¿Tenés contraseña para pasar?',guardVoiceId:'',guardFishModel:'s2.1-pro-free',guardSampleText:'Hola, soy Erik. ¿Cuál es la contraseña?',guardTemperature:0.7,guardTopP:0.7,guardSpeed:1,guardMouthDelay:0,guardMouthSensitivity:48,guardMouthSmoothing:40,guardMouthAmplitude:78,guardBlinkRate:4.2};
+const defaults={prompt:defaultPrompt,personality:'Cercana, paciente, profesional, con español argentino natural. Evita hablar en exceso.',voice:'Aoede',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',subtitleFont:20,subtitleWidth:760,subtitleDelay:0,mouthDelay:0,mouthSensitivity:48,mouthSmoothing:40,blinkRate:4.2,mouthAmplitude:78,avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',guardEnabled:'true',guardPrompt:erikConversationalPrompt,guardGreeting:'Eh, buenas. Soy Erik, el guardia. ¿Tenés contraseña para pasar?',guardVoice:'Charon',guardMouthDelay:0,guardMouthSensitivity:48,guardMouthSmoothing:40,guardMouthAmplitude:78,guardBlinkRate:4.2};
 for(const [k,v] of Object.entries(defaults))db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)').run(k,JSON.stringify(v));
+
+// Retirar datos de la integración de voz anterior. Mantener intactos PNG y prompt.
+for(const k of ['guardVoiceId','guardFishModel','guardSampleText','guardTemperature','guardTopP','guardSpeed','erik_fish_free_20261029'])
+ db.prepare('DELETE FROM settings WHERE key=?').run(k);
+for(const filename of ['guard-voice-reference.bin','guard-voice-reference.json','erik-welcome-fish.mp3','erik-welcome-fish.json']){
+ try{unlinkSync(path.join(DATA_DIR,filename));}catch(err){if(err?.code!=='ENOENT')console.warn('No se pudo limpiar audio anterior de Erik');}
+}
+
 // Actualizar solo el prompt predeterminado antiguo; respetar toda personalización del administrador.
 db.prepare('UPDATE settings SET value=? WHERE key=? AND value=?').run(JSON.stringify(defaultPrompt),'prompt',JSON.stringify(legacyDefaultPrompt));
 // Si continúa el prompt predeterminado anterior, reemplazarlo por el único prompt visible.
@@ -71,15 +79,6 @@ if(!db.prepare('SELECT value FROM settings WHERE key=?').get(cvFormatPromptKey))
   }catch(err){console.warn('No se pudo actualizar la instrucción de descarga',String(err));}
  }
  db.prepare('INSERT INTO settings(key,value) VALUES (?,?)').run(cvFormatPromptKey,JSON.stringify(true));
-}
-// Erik: mover únicamente el modelo de pago predeterminado anterior a la opción
-// gratuita. Si se eligió otro modelo o se cambia después, no volver a modificarlo.
-const guardFreeMigrationKey='erik_fish_free_20261029';
-if(!db.prepare('SELECT 1 FROM settings WHERE key=?').get(guardFreeMigrationKey)){
- db.prepare('UPDATE settings SET value=? WHERE key=? AND value=?')
-   .run(JSON.stringify('s2.1-pro-free'),'guardFishModel',JSON.stringify('s2.1-pro'));
- db.prepare('INSERT INTO settings(key,value) VALUES (?,?)')
-   .run(guardFreeMigrationKey,JSON.stringify(true));
 }
 // Personalidad editable: todo el estilo de Erik queda visible desde Administración.
 const guardPersonaMigrationKey='erik_personality_visible_20261029';
