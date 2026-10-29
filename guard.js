@@ -254,8 +254,9 @@ function greetingSignature(s){
 async function preferredVoice(text,{welcome=false}={}){
  const settings=allSettings();
  const signature=welcome?greetingSignature(settings):null;
- if(welcome&&greetingCache?.signature===signature&&Date.now()-greetingCache.created<20*60*1000)
-  return greetingCache.value;
+ if(welcome&&greetingCache?.signature===signature&&Date.now()-greetingCache.created<20*60*1000){
+  console.info('Erik TTS: Fish (saludo en caché)');return greetingCache.value;
+ }
  if(welcome&&greetingPending?.signature===signature)return greetingPending.promise;
  const produce=async()=>{
   if(process.env.FISH_API_KEY&&(settings.guardVoiceId||hasReference())){
@@ -263,16 +264,16 @@ async function preferredVoice(text,{welcome=false}={}){
     const bytes=await fishAudio(text,settings);
     const value={engine:'fish',mime:'audio/mpeg',bytes};
     if(welcome)greetingCache={signature,created:Date.now(),value};
-    return value;
+    console.info('Erik TTS: Fish');return value;
    }catch(err){
     const match=String(err?.message||'').match(/HTTP (\d+)/);
     console.warn('Erik: Fish falló; activando Gemini TTS:',match?.[1]||'timeout');
    }
   }else console.warn('Erik: Fish sin voz configurada; activando Gemini TTS');
-  try{return await geminiSpeech(text);}
+  try{const voice=await geminiSpeech(text);console.info('Erik TTS: Gemini (respaldo)');return voice;}
   catch(err){
    console.warn('Erik: Fish y Gemini TTS no disponibles:',String(err?.name||'Error').slice(0,40));
-   return {engine:'browser',mime:null,bytes:null};
+   console.info('Erik TTS: navegador (último respaldo)');return {engine:'browser',mime:null,bytes:null};
   }
  };
  const promise=produce();
