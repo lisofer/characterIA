@@ -400,9 +400,6 @@ function publicConfig(){
 }
 // Diagnóstico puntual al iniciar: pregunta artificial, nunca información de visitantes.
 export function installGuard(app,auth){
- // Prueba de integración de la ruta real, con mensaje sintético y sin secretos.
- void (async()=>{const t=Date.now();try{await phrase('help',crypto.randomUUID());console.info('Erik integración Gemini OK',Date.now()-t,'ms');}
- catch(e){console.warn('Erik integración Gemini ERROR',String(e.message||'').slice(0,120),Date.now()-t,'ms');}})();
  // Generar el audio del saludo al iniciar el servidor para que las personas
  // que no pueden ver la página lo oigan sin esperar una conversión Fish nueva.
  if(allSettings().guardEnabled!=='false'&&process.env.FISH_API_KEY)
