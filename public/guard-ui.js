@@ -89,7 +89,7 @@ function renderGuard(){
  }
  displayFrame(shape*2+blink);
 }
-async function frameImages(list){
+async function frameImages(list,versions=[]){
  const epoch=++guardFrameLoadEpoch,dock=one('#guard-dock');
  guardFramesFullyReady=false;
  dock?.classList.remove('frames-ready');
@@ -101,7 +101,7 @@ async function frameImages(list){
  const load=async i=>{
   if(!exists[i])return null;
   const img=new Image();img.className='guard-frame';img.alt='';img.dataset.frame=String(i);
-  img.decoding='async';img.draggable=false;img.src='/api/guard/frames/'+i+'?optimized=1';
+  img.decoding='async';img.draggable=false;img.src='/api/guard/frames/'+i+'?optimized=1&v='+(versions[i]||0);
   try{await img.decode();return img.complete&&img.naturalWidth?img:null;}catch{return null;}
  };
  const first=load(0),others=Array.from({length:7},(_,j)=>load(j+1));
@@ -284,7 +284,7 @@ async function startGuard(){
   const c=await readJSON('/api/guard/config');if(!guardActive||guardEpoch!==token)return;
   if(!c.enabled){stopGuard({hide:true});return;}
   guardConfig={mouthDelay:c.mouthDelay,mouthSensitivity:c.mouthSensitivity,mouthSmoothing:c.mouthSmoothing,mouthAmplitude:c.mouthAmplitude,blinkRate:c.blinkRate};
-  void frameImages(c.frames);
+  void frameImages(c.frames,c.versions);
   renderGuard();
   await say('greeting');
  }catch(e){statusText('Erik no se pudo conectar. El ingreso por contraseña sigue disponible.');}
