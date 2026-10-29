@@ -108,7 +108,8 @@ async function phrase(intent,sessionId,userText){
  if(!process.env.GEMINI_API_KEY||!persona)throw new Error('Gemini no está disponible para responder. Podés ingresar escribiendo tu contraseña.');
  if(intent==='conversation'&&!userText)throw new Error('No pude interpretar esa frase. Podés intentar de nuevo.');
  try{
-  const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
+  const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,
+   httpOptions:{timeout:6500,retryOptions:{attempts:1}}});
   const recent=ctx.recent.slice(-6);
   const turns=(ctx.turns||[]).slice(-4).map(x=>'VISITANTE: '+x.user+'\nERIK: '+x.erik).join('\n');
   const systemInstruction=[
@@ -128,14 +129,14 @@ async function phrase(intent,sessionId,userText){
   let output='';
   // Prioridad a modelos actuales; 2.5 Flash puede estar restringido para proyectos nuevos.
   // Solo cambiar de modelo ante errores de disponibilidad/cuota, no reintentar errores de clave/API.
-  const modelNames=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-3.8-flash'];
+  const modelNames=['gemini-3.5-flash-lite','gemini-3.1-flash-lite'];
   let lastModelError=null;
   for(const model of modelNames){
    try{
     const result=await ai.models.generateContent({
      model,
      contents:prompt,
-     config:{systemInstruction,temperature:1.05,maxOutputTokens:260}
+     config:{systemInstruction,temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:6500,retryOptions:{attempts:1}}}
     });
     output=String(result.text||'').replace(/[\r\n]+/g,' ')
      .replace(/^[\s"'“”]+|[\s"'“”]+$/g,'').trim().slice(0,430);
@@ -216,14 +217,14 @@ function pcmToWav(pcm,rate=24000){
 async function geminiSpeech(text){
  if(!process.env.GEMINI_API_KEY)throw new Error('GEMINI_API_KEY no configurada');
  const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
- const models=['gemini-3.8-flash-tts','gemini-3.1-flash-tts-preview'];
+ const models=['gemini-3.8-flash-lite-tts','gemini-3.8-flash-tts'];
  let last;
  for(const model of models){
   try{
    const res=await ai.models.generateContent({
     model,
     contents:[{role:'user',parts:[{text:'Hablá en español argentino claro, como un guardia juvenil, un poco gruñón y gracioso. Decí exactamente estas palabras, sin agregar ni omitir nada:\\n'+text}]}],
-    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}}}
+    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},httpOptions:{timeout:5000,retryOptions:{attempts:1}}}
    });
    const part=res.candidates?.[0]?.content?.parts?.find(p=>p.inlineData?.data);
    if(!part)throw new Error('Gemini no devolvió audio');
@@ -238,7 +239,7 @@ async function geminiSpeech(text){
   }catch(err){
    console.warn('Erik Gemini TTS:',model,'HTTP',Number(err?.status||err?.code||0)||'desconocido');
    last=err;
-   if([400,401,403].includes(Number(err?.status||err?.code||0)))break;
+   if(![404,429].includes(Number(err?.status||err?.code||0)))break;
   }
  }
  throw last||new Error('Gemini TTS no respondió');
