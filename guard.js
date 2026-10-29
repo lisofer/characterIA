@@ -8,6 +8,18 @@ import {encode} from '@msgpack/msgpack';
 import {DATA_DIR,allSettings} from './db.js';
 
 const frameDir=path.join(DATA_DIR,'guard-frames');
+const optimizedCache=new Map();
+async function optimizedGuardFrame(index,file){
+ const stat=await fs.promises.stat(file),version=stat.mtimeMs+':'+stat.size;
+ const cached=optimizedCache.get(index);
+ if(cached?.version===version)return cached.promise;
+ const promise=sharp(file,{limitInputPixels:20000000})
+  .resize({width:768,height:1024,fit:'inside',withoutEnlargement:true})
+  .webp({quality:82,effort:3}).toBuffer();
+ optimizedCache.set(index,{version,promise});
+ promise.catch(()=>{if(optimizedCache.get(index)?.promise===promise)optimizedCache.delete(index);});
+ return promise;
+}
 const refAudioFile=path.join(DATA_DIR,'guard-voice-reference.bin');
 const refMetadataFile=path.join(DATA_DIR,'guard-voice-reference.json');
 const hasReference=()=>fs.existsSync(refAudioFile)&&fs.existsSync(refMetadataFile);
@@ -80,7 +92,9 @@ async function fishAudio(text,s){
 }
 function publicConfig(){
  const s=allSettings();
- return {enabled:s.guardEnabled!=='false',frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(frameDir,i+'.png'))),
+ return {enabled:s.guardEnabled!=='false',
+  frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(frameDir,i+'.png'))),
+  versions:Array.from({length:8},(_,i)=>{try{return Math.round(fs.statSync(path.join(frameDir,i+'.png')).mtimeMs);}catch{return 0;}}),
   mouthDelay:s.guardMouthDelay,mouthSensitivity:s.guardMouthSensitivity,mouthSmoothing:s.guardMouthSmoothing,
   mouthAmplitude:s.guardMouthAmplitude,blinkRate:s.guardBlinkRate,fishReady:!!(process.env.FISH_API_KEY&&(s.guardVoiceId||hasReference()))};
 }
@@ -107,9 +121,9 @@ export function installGuard(app,auth){
   if(!Number.isInteger(i)||i<0||i>7)return res.sendStatus(404);
   const file=path.join(frameDir,i+'.png');
   if(!fs.existsSync(file))return res.sendStatus(404);
-  res.set('Cache-Control','public, max-age=40');
+  res.set('Cache-Control','public, max-age=300');
   if(req.query.optimized==='1'){
-   try{const bytes=await sharp(file,{limitInputPixels:20000000}).resize({width:768,height:1024,fit:'inside',withoutEnlargement:true}).webp({quality:86}).toBuffer();return res.type('webp').send(bytes);}
+   try{const bytes=await optimizedGuardFrame(i,file);return res.type('webp').send(bytes);}
    catch(e){console.warn('Error optimizando Erik:',String(e.message||e));}
   }
   return res.type('png').sendFile(path.resolve(file));
@@ -123,7 +137,7 @@ export function installGuard(app,auth){
    const meta=await sharp(buf).metadata();
    if(meta.format!=='png'||!meta.hasAlpha||meta.width<100||meta.height<100||meta.width>4096||meta.height>4096)return res.status(400).json({error:'El PNG debe tener transparencia y medir entre 100 y 4096 píxeles.'});
    for(let other=0;other<8;other++){if(other===i)continue;const reference=path.join(frameDir,other+'.png');if(!fs.existsSync(reference))continue;const m=await sharp(reference).metadata();if(m.width!==meta.width||m.height!==meta.height)return res.status(400).json({error:'Todos los PNG de Erik deben tener el mismo ancho y alto. Referencia: '+m.width+' × '+m.height+' px.'});break;}
-   await fs.promises.writeFile(path.join(frameDir,i+'.png'),buf);
+   await fs.promises.writeFile(path.join(frameDir,i+'.png'),buf);optimizedCache.delete(i);
    res.json({ok:true,width:meta.width,height:meta.height});
   }catch(e){res.status(400).json({error:'No se pudo procesar el PNG.'});}
  });
