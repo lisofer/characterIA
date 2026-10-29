@@ -205,7 +205,15 @@ async function say(intent,{resumeListening=true,userText=null}={}){
     console.warn('Audio bloqueado por navegador:',e);
    }
   }else await speakBrowser(data.text);
- }catch(e){statusText('Erik: '+e.message);}
+ }catch(e){
+  if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted){
+   const notice=/429|límite de uso/i.test(e.message)
+    ?'Ahora mismo Gemini está ocupado. Igual podés ingresar diciendo tu contraseña.'
+    :'No pude conectarme con Gemini. Podés decir tu contraseña para entrar o escribirla.';
+   statusText(notice);guardTalking=true;spokenAt=performance.now();amplitude=0;
+   await speakBrowser(notice);
+  }
+ }
  finally{
   if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted){guardTalking=false;amplitude=0;displayFrame(0);if(resumeListening&&guardActive)listen();}
  }
@@ -448,4 +456,10 @@ function setupAdminGuard(){
  });
 }
 setupGuardControls();setupAdminGuard();watchLogin();
+window.addEventListener('pageshow',event=>{
+ if(event.persisted&&isLoginVisible()){
+  if(guardActive)stopGuard();
+  void startGuard();
+ }
+});
 readJSON('/api/me').then(me=>{if(!me.role&&isLoginVisible())void startGuard();}).catch(()=>{if(isLoginVisible())void startGuard();});
