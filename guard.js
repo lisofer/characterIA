@@ -287,6 +287,100 @@ function spokenResult(text,voice){
  {text,engine:'browser',voiceFallback:true};
 }
 
+
+// Camino de baja latencia: Gemini entrega el texto y Fish transmite audio MP3
+// inmediatamente a HTML Audio; no se espera al archivo MP3 completo.
+// Los tokens son aleatorios, de un solo uso y expiran. Nunca llevan contraseñas.
+const guardAudioJobs=new Map();
+const AUDIO_JOB_LIFETIME=45_000;
+function createAudioJob(text){
+ const now=Date.now();
+ for(const [key,item] of guardAudioJobs)
+  if(item.created+AUDIO_JOB_LIFETIME<now)guardAudioJobs.delete(key);
+ while(guardAudioJobs.size>=70)guardAudioJobs.delete(guardAudioJobs.keys().next().value);
+ const id=crypto.randomBytes(24).toString('base64url');
+ guardAudioJobs.set(id,{text,created:now});
+ return '/api/guard/audio/'+id;
+}
+async function fishStreamingResponse(text,s,signal){
+ if(!process.env.FISH_API_KEY)throw new Error('Fish no está configurado');
+ const voice=String(s.guardVoiceId||'').trim();
+ const reference=!voice?getReference():null;
+ if(!voice&&!reference)throw new Error('Fish no tiene voz configurada');
+ const model=['s2.1-pro-free','s2.1-pro','s2-pro'].includes(s.guardFishModel)?s.guardFishModel:'s2.1-pro-free';
+ const payload={
+  text,format:'mp3',streaming:true,
+  temperature:finite(s.guardTemperature,.7,0,1),
+  top_p:finite(s.guardTopP,.7,0,1),
+  prosody:{speed:finite(s.guardSpeed,1,.7,1.5)}
+ };
+ if(voice)payload.reference_id=voice;
+ else payload.references=[{audio:new Uint8Array(reference.audio),text:reference.text}];
+ const msgpack=!voice;
+ const response=await fetch('https://api.fish.audio/v1/tts',{
+  method:'POST',headers:{
+   Authorization:'Bearer '+process.env.FISH_API_KEY,
+   'Content-Type':msgpack?'application/msgpack':'application/json',model
+  },body:msgpack?encode(payload):JSON.stringify(payload),signal
+ });
+ if(!response.ok||!response.body){
+  if(response.body)await response.body.cancel().catch(()=>{});
+  throw new Error('Fish HTTP '+response.status);
+ }
+ return response;
+}
+async function streamGuardAudio(text,req,res){
+ const started=Date.now(),controller=new AbortController();
+ let closed=false,wroteAudio=false,firstTimer=null,lastTimer=null,reader=null;
+ const disconnect=()=>{closed=true;controller.abort();};
+ res.on('close',()=>{if(!res.writableEnded)disconnect();});
+ res.set('Cache-Control','private, no-store');
+ const settings=allSettings();
+ try{
+  // El primer audio no puede quedar esperando indefinidamente a la cola del modelo.
+  firstTimer=setTimeout(()=>controller.abort(),9000);
+  const fish=await fishStreamingResponse(text,settings,controller.signal);
+  reader=fish.body.getReader();
+  const first=await reader.read();
+  if(first.done||!first.value?.length)throw new Error('Fish streaming sin audio');
+  clearTimeout(firstTimer);firstTimer=null;
+  if(closed)return;
+  res.set('Content-Type','audio/mpeg');
+  res.write(Buffer.from(first.value));
+  wroteAudio=true;
+  console.info('Erik latencia fish_primer_audio_ms',Date.now()-started);
+  // El primer fragmento ya se escucha mientras llega el resto de la respuesta.
+  lastTimer=setTimeout(()=>controller.abort(),28000);
+  while(!closed){
+   const part=await reader.read();
+   if(part.done)break;
+   if(part.value?.length&&!res.writableEnded)res.write(Buffer.from(part.value));
+   if(res.writableLength>1024*1024)await new Promise(resolve=>res.once('drain',resolve));
+  }
+  if(!closed&&!res.writableEnded)res.end();
+  console.info('Erik latencia fish_total_ms',Date.now()-started);
+ }catch(err){
+  console.warn('Erik audio rápido: Fish falló',String(err?.message||err).slice(0,90),'ms',Date.now()-started);
+  if(closed)return;
+  if(wroteAudio){if(!res.writableEnded)res.end();return;}
+  // Si Fish todavía no entregó audio, probar un único respaldo Gemini con límite.
+  const remaining=Date.now();
+  try{
+   const voice=await geminiSpeech(text);
+   if(closed)return;
+   console.info('Erik latencia respaldo_gemini_ms',Date.now()-remaining);
+   res.type(voice.mime).send(voice.bytes);
+  }catch(err2){
+   console.warn('Erik audio rápido: sin TTS externo; usar voz navegador',String(err2?.name||'Error'));
+   if(!closed&&!res.headersSent)res.status(502).json({error:'Audio externo no disponible'});
+  }
+ }finally{
+  clearTimeout(firstTimer);clearTimeout(lastTimer);
+  if(reader)try{await reader.cancel();}catch{}
+  controller.abort();
+ }
+}
+
 function publicConfig(){
  const s=allSettings();
  return {welcome:GUARD_WELCOME,enabled:s.guardEnabled!=='false',
@@ -347,6 +441,32 @@ export function installGuard(app,auth){
    await fs.promises.writeFile(path.join(frameDir,i+'.png'),buf);optimizedCache.delete(i);
    res.json({ok:true,width:meta.width,height:meta.height});
   }catch(e){res.status(400).json({error:'No se pudo procesar el PNG.'});}
+ });
+ // El endpoint rápido devuelve texto en cuanto responde Gemini; el audio se
+ // reproduce mediante una segunda petición HTTP que Fish puede transmitir por partes.
+ app.post('/api/guard/line-fast',limited,async(req,res)=>{
+  const started=Date.now(),intent=String(req.body?.intent||'');
+  if(!Object.hasOwn(intents,intent))return res.status(400).json({error:'Comando no válido.'});
+  if(allSettings().guardEnabled==='false')return res.status(404).json({error:'Erik desactivado.'});
+  const userText=intent==='conversation'?safeConversation(req.body?.userText):null;
+  if(intent==='conversation'&&!userText)
+   return res.status(400).json({error:'Para conversar, decile una frase a Erik; la clave va por separado.'});
+  try{
+   const text=await phrase(intent,req.body?.sessionId,userText);
+   console.info('Erik latencia gemini_texto_ms',Date.now()-started,'tipo',intent);
+   res.set('Cache-Control','no-store').json({text,engine:'stream',audioUrl:createAudioJob(text)});
+  }catch(err){
+   console.warn('Erik latencia texto_fallido_ms',Date.now()-started,'tipo',intent);
+   res.status(503).json({error:String(err?.message||'Gemini no disponible')});
+  }
+ });
+ app.get('/api/guard/audio/:id',limited,async(req,res)=>{
+  const id=String(req.params.id||'');
+  if(!/^[A-Za-z0-9_-]{32}$/.test(id))return res.sendStatus(404);
+  const job=guardAudioJobs.get(id);
+  if(!job||Date.now()-job.created>AUDIO_JOB_LIFETIME)return res.sendStatus(404);
+  guardAudioJobs.delete(id);
+  await streamGuardAudio(job.text,req,res);
  });
  app.post('/api/guard/line',limited,async(req,res)=>{
   const intent=String(req.body?.intent||'');
