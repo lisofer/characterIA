@@ -71,7 +71,7 @@ async function startMic(gesture=false){
   micStream=stream;micContext=ctx;micSource=src;micProcessor=proc;micSilent=silent;
   proc.onaudioprocess=e=>{
    if(!micOn||guardMuted||authPending||!guardActive||!liveReady||!ws||
-     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>200000||document.hidden)return;
+     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>200000)return;
    const input=e.inputBuffer.getChannelData(0),ratio=ctx.sampleRate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
    for(let j=0;j<n;j++){
     const a=Math.floor(j*ratio),b=Math.min(input.length,Math.floor((j+1)*ratio));
@@ -431,7 +431,8 @@ async function startGuard(){
   // Una sola solicitud de micrófono, una sola conexión Live.
   void (async()=>{
    void initAudio().catch(()=>{});
-   await startMic();
+   try{await startMic();}
+   catch{guardNeedsGesture=true;setMuteAppearance();}
    if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive();
   })();
  }catch{statusText('No se pudo iniciar el portero. Podés ingresar por escrito.',true);}
