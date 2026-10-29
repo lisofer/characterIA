@@ -4,9 +4,14 @@ import sharp from 'sharp';
 import multer from 'multer';
 import {rateLimit} from 'express-rate-limit';
 import {GoogleGenAI} from '@google/genai';
+import {encode} from '@msgpack/msgpack';
 import {DATA_DIR,allSettings} from './db.js';
 
 const frameDir=path.join(DATA_DIR,'guard-frames');
+const refAudioFile=path.join(DATA_DIR,'guard-voice-reference.bin');
+const refMetadataFile=path.join(DATA_DIR,'guard-voice-reference.json');
+const hasReference=()=>fs.existsSync(refAudioFile)&&fs.existsSync(refMetadataFile);
+const getReference=()=>{if(!hasReference())return null;try{const j=JSON.parse(fs.readFileSync(refMetadataFile,'utf8'));return {...j,audio:fs.readFileSync(refAudioFile)};}catch{return null;}};
 fs.mkdirSync(frameDir,{recursive:true});
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1}});
 const limited=rateLimit({windowMs:60_000,limit:14,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'Demasiadas solicitudes de voz. Intentá de nuevo en un minuto.'}});
@@ -50,16 +55,19 @@ async function phrase(intent){
 async function fishAudio(text,s){
  if(!process.env.FISH_API_KEY)throw new Error('Configurá FISH_API_KEY en las variables de Railway.');
  const voice=String(s.guardVoiceId||'').trim();
- if(!voice)throw new Error('Configurá un ID de voz Fish en Admin > Erik.');
+ const savedReference=!voice?getReference():null;
+ if(!voice&&!savedReference)throw new Error('Configurá un ID de voz Fish o subí un audio de referencia con su transcripción en Admin > Erik.');
  const model=['s2.1-pro','s2.1-pro-flash','s2-pro'].includes(s.guardFishModel)?s.guardFishModel:'s2.1-pro';
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),18000);
+ const payload={text,format:'mp3',temperature:finite(s.guardTemperature,.7,0,1),top_p:finite(s.guardTopP,.7,0,1),prosody:{speed:finite(s.guardSpeed,1,.7,1.5)}};
+ if(voice)payload.reference_id=voice;
+ else payload.references=[{audio:new Uint8Array(savedReference.audio),text:savedReference.text}];
+ const useMsgpack=!voice;
  try{
   const response=await fetch('https://api.fish.audio/v1/tts',{
    method:'POST',
-   headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':'application/json',model},
-   body:JSON.stringify({text,reference_id:voice,format:'mp3',
-    temperature:finite(s.guardTemperature,.7,0,1),top_p:finite(s.guardTopP,.7,0,1),
-    prosody:{speed:finite(s.guardSpeed,1,.7,1.5)}}),
+   headers:{Authorization:'Bearer '+process.env.FISH_API_KEY,'Content-Type':useMsgpack?'application/msgpack':'application/json',model},
+   body:useMsgpack?encode(payload):JSON.stringify(payload),
    signal:controller.signal
   });
   if(!response.ok){console.warn('Fish Audio HTTP',response.status);throw new Error('Fish Audio respondió '+response.status+'. Revisá la clave y el ID de voz.');}
@@ -74,9 +82,25 @@ function publicConfig(){
  const s=allSettings();
  return {enabled:s.guardEnabled!=='false',frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(frameDir,i+'.png'))),
   mouthDelay:s.guardMouthDelay,mouthSensitivity:s.guardMouthSensitivity,mouthSmoothing:s.guardMouthSmoothing,
-  mouthAmplitude:s.guardMouthAmplitude,blinkRate:s.guardBlinkRate,fishReady:!!(process.env.FISH_API_KEY&&s.guardVoiceId)};
+  mouthAmplitude:s.guardMouthAmplitude,blinkRate:s.guardBlinkRate,fishReady:!!(process.env.FISH_API_KEY&&(s.guardVoiceId||hasReference()))};
 }
 export function installGuard(app,auth){
+ app.get('/api/admin/guard/voice-reference',auth('admin'),(req,res)=>{
+  const info=getReference();res.json(info?{exists:true,name:info.name,text:info.text}:{exists:false});
+ });
+ app.post('/api/admin/guard/voice-reference',auth('admin'),upload.single('audio'),async(req,res)=>{
+  const file=req.file,words=String(req.body?.text||'').trim();
+  if(!file||file.size<1000||file.size>8*1024*1024||words.length<3||words.length>1500)return res.status(400).json({error:'Subí un audio menor a 8 MB e indicá exactamente qué se dice en él.'});
+  const b=file.buffer,head=b.subarray(0,12).toString('latin1');
+  const wav=head.startsWith('RIFF')&&head.includes('WAVE'),flac=head.startsWith('fLaC'),mp3=head.startsWith('ID3')||(b[0]===255&&(b[1]&224)===224);
+  if(!wav&&!flac&&!mp3)return res.status(400).json({error:'El audio debe ser WAV, FLAC o MP3.'});
+  try{
+   await fs.promises.writeFile(refAudioFile,b);
+   const info={name:String(file.originalname||'audio').slice(0,120),text:words,uploadedAt:new Date().toISOString()};
+   await fs.promises.writeFile(refMetadataFile,JSON.stringify(info));
+   return res.json({ok:true,exists:true,name:info.name,text:info.text});
+  }catch{return res.status(500).json({error:'No se pudo guardar el audio en el volumen persistente.'});}
+ });
  app.get('/api/guard/config',(req,res)=>res.json(publicConfig()));
  app.get('/api/guard/frames/:index',async(req,res)=>{
   const i=Number(req.params.index);
@@ -109,7 +133,7 @@ export function installGuard(app,auth){
   if(allSettings().guardEnabled==='false')return res.status(404).json({error:'Erik desactivado.'});
   const text=await phrase(intent);
   const s=allSettings();
-  if(!process.env.FISH_API_KEY||!s.guardVoiceId)return res.json({text,engine:'browser'});
+  if(!process.env.FISH_API_KEY||(!s.guardVoiceId&&!hasReference()))return res.json({text,engine:'browser'});
   try{const audio=await fishAudio(text,s);return res.json({text,engine:'fish',mime:'audio/mpeg',audio:audio.toString('base64')});}
   catch(e){console.warn('Erik TTS:',String(e.message||e));return res.json({text,engine:'browser'});}
  });
