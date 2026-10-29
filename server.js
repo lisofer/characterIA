@@ -124,3 +124,29 @@ wss.on('connection',async(ws,req,s)=>{const live=makeLive(ws,s.profile_id);let c
  ws.on('message',data=>{try{const m=JSON.parse(String(data));if(m.type==='start')live.initial();else if(m.type==='text')live.sendText(m.text);else if(m.type==='audio')live.sendAudio(m.pcm);else if(m.type==='audio_end')live.stopAudio();}catch(e){if(ws.readyState===1)ws.send(JSON.stringify({type:'error',message:String(e.message||e)}));}});
  ws.on('close',()=>live.close());});
 const port=Number(process.env.PORT||3000);server.listen(port,'0.0.0.0',()=>console.log(`CV Accesible escuchando puerto ${port}`));
+
+// Prueba TEMPORAL de conexión de Erik con los nuevos parámetros VAD.
+// Solo abre el canal; no transmite voz, claves ni datos del visitante.
+if(process.env.GEMINI_API_KEY){
+ let finished=false;let session;
+ const timer=setTimeout(()=>{
+  if(finished)return;finished=true;session?.close();
+  console.warn('Erik VAD probe: TIMEOUT');
+ },18000);timer.unref?.();
+ const fake={readyState:1,send(raw){
+  try{
+   const m=JSON.parse(raw);
+   if(!finished&&m.type==='connected'){
+    finished=true;clearTimeout(timer);
+    console.info('Erik VAD probe: OK',m.model);session?.close();
+   }
+  }catch{}
+ }};
+ session=makeGuardLive(fake);
+ void session.connect().catch(e=>{
+  if(finished)return;finished=true;clearTimeout(timer);
+  console.warn('Erik VAD probe: ERROR',String(e?.message||e).slice(0,180));
+  session.close();
+ });
+}
+
