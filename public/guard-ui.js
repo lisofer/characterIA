@@ -34,11 +34,16 @@ function releaseMic(){
 }
 async function startMic(gesture=false){
  if(!guardActive||guardMuted||!isLoginVisible())return false;
- if(micOn&&micStream?.getAudioTracks().some(t=>t.readyState==='live'))return true;
+ if(micOn&&micStream?.getAudioTracks().some(t=>t.readyState==='live')){
+  if(micContext?.state==='suspended'&&gesture)await micContext.resume().catch(()=>{});
+  guardNeedsGesture=micContext?.state!=='running';
+  setMuteAppearance();
+  return !guardNeedsGesture;
+ }
  if(micStream&&micContext&&micProcessor&&micStream.getAudioTracks().some(t=>t.readyState==='live')){
-  await micContext.resume().catch(()=>{});
+  if(micContext.state==='suspended'&&gesture)await micContext.resume().catch(()=>{});
   micStream.getAudioTracks().forEach(t=>{t.enabled=true});
-  micOn=true;guardNeedsGesture=false;setMuteAppearance();return true;
+  micOn=true;guardNeedsGesture=micContext.state!=='running';setMuteAppearance();return !guardNeedsGesture;
  }
  if(micBusy||(!gesture&&micPromptAttempted))return false;
  micBusy=true;micPromptAttempted=true;const epoch=micRequestEpoch;let stream=null,ctx=null;
@@ -47,7 +52,7 @@ async function startMic(gesture=false){
   stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
   if(epoch!==micRequestEpoch||!guardActive||guardMuted){stream.getTracks().forEach(t=>t.stop());return false;}
   ctx=new (window.AudioContext||window.webkitAudioContext)();
-  if(ctx.state==='suspended')await ctx.resume().catch(()=>{});
+  if(ctx.state==='suspended'&&gesture)await ctx.resume().catch(()=>{});
   const src=ctx.createMediaStreamSource(stream),proc=ctx.createScriptProcessor(2048,1,1),silent=ctx.createGain();
   silent.gain.value=0;src.connect(proc);proc.connect(silent);silent.connect(ctx.destination);
   micStream=stream;micContext=ctx;micSource=src;micProcessor=proc;micSilent=silent;
@@ -69,7 +74,7 @@ async function startMic(gesture=false){
   stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>{
    if(guardActive&&!guardMuted){micOn=false;guardNeedsGesture=true;setMuteAppearance();}
   }));
-  micOn=true;guardNeedsGesture=false;setMuteAppearance();return true;
+  micOn=true;guardNeedsGesture=ctx.state!=='running';setMuteAppearance();return !guardNeedsGesture;
  }catch(err){
   stream?.getTracks().forEach(t=>t.stop());ctx?.close().catch(()=>{});
   guardNeedsGesture=true;setMuteAppearance();
@@ -315,7 +320,7 @@ async function toggleGuard(){
   if(!liveReady)connectLive();else sendIntent('ask');
   return;
  }
- if(guardNeedsGesture||!micOn||audioContext?.state!=='running'){
+ if(guardNeedsGesture||!micOn||audioContext?.state!=='running'||micContext?.state!=='running'){
   await initAudio();const ok=await startMic(true);
   if(!ok){statusText('Tocame para habilitar el micrófono.');return;}
   guardNeedsGesture=false;setMuteAppearance();
