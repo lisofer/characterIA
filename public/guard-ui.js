@@ -190,6 +190,11 @@ function completedTurn(){
   guardTalking=false;amplitude=0;displayFrame(0);
   if(openingGreeting){
    openingGreeting=false;openingPlaybackPending=false;
+   if(micContext?.state!=='running'){
+    guardNeedsGesture=true;setMuteAppearance();
+    statusText('Tocá el micrófono de Erik para poder hablarle.',true);
+    return;
+   }
   }
   if(!outputCaption)statusText('');
  },Math.min(25000,remaining));
@@ -345,6 +350,10 @@ function sendGreetingReady(){
 function handleLiveMessage(e){
  let m;try{m=JSON.parse(String(e.data))}catch{return}
  if(!guardActive)return;
+ if(m.type==='auth_resumed'){
+  authPending=false;clearInput();stopPlayback();statusText('');
+  return;
+ }
  if(authPending&&['audio','transcript','input_transcript','turn_complete','interrupted'].includes(m.type))return;
  if(m.type==='connected'){
   if(m.model!=='gemini-3.8-live'){try{ws?.close()}catch{};return;}
@@ -451,12 +460,13 @@ function setupGuardControls(){
  one('#login-form')?.addEventListener('submit',()=>beginAuth(),{capture:true});
  window.addEventListener('nexo-login-error',()=>{
   if(guardActive&&!guardMuted){
-   // Ya sabemos que la clave fue rechazada. RECIÉN AHORA puede responder.
-   const hadPending=authPending;authPending=false;
+   // Solo el error confirmado permite solicitar una respuesta. Mantener
+   // silenciado al modelo hasta que el servidor confirme la reanudación.
+   const hadPending=authPending;
    clearInput();stopPlayback();
    one('#password')?.blur();
    if(hadPending&&liveReady)sendIntent('retry');
-   else if(hadPending&&ws?.readyState!==WebSocket.OPEN)connectLive();
+   else if(hadPending){authPending=false;connectLive();}
   }
  });
  window.addEventListener('nexo-login-ok',()=>stopGuard());
