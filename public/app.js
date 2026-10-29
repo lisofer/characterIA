@@ -8,7 +8,7 @@ const post=(url,body)=>api(url,{method:'POST',body:JSON.stringify(body)});
 const setVisible=view=>{for(const v of ['login','student','admin'])el[v].classList.toggle('hidden',view!==v);document.body.classList.toggle('student-active',view==='student');document.body.classList.toggle('login-active',view==='login')};
 function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;ensureAudio(true).catch(()=>{});const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);if(data.role==='student')await startCall();}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.textContent='INGRESAR';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password'),b=$('#toggle-password'),visible=t.type==='password';t.type=visible?'text':'password';b.classList.toggle('showing',visible);b.setAttribute('aria-pressed',String(visible));b.setAttribute('aria-label',visible?'Ocultar contraseña':'Mostrar contraseña');b.title=visible?'Ocultar contraseña':'Mostrar contraseña';});
  $('#student-logout').addEventListener('click',logout);$('#admin-logout').addEventListener('click',logout)}
-async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setDocuments([]);hideWordDownloadPrompt();setVisible('login')}
+async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setDocuments([]);setVisible('login')}
 async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){
   connectingUi=true;callEnded=false;
   setVisible('student');updateConversationOverlay();setStatus('Conectando…');
@@ -80,7 +80,7 @@ let frameVersions=Array(8).fill(0);
 let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0;
 let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
 let sources=new Set(),connectAttempt=0,playbackGeneration=0;
-let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,downloadNoticeTimer=null,callGeneration=0;
+let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,callGeneration=0;
 let connectingUi=false,reconnectTimer=null,reconnectAttempt=0,voiceStartTimer=null;
 const startedDownloads=new Set();
 // A cada línea se le asigna un inicio estimado según audio PCM, NO se escribe palabra por palabra.
@@ -270,36 +270,38 @@ function scheduleReconnect(){
   else if(!ws)scheduleReconnect();
  },delay);
 }
-function hideDownloadNotice(){
- clearTimeout(downloadNoticeTimer);$('#download-notice').classList.add('hidden');
+// No controles adicionales: al confirmar CV se solicitan ambos archivos.
+// Chrome puede solicitar autorización para varias descargas automáticas.
+function cleanCVName(raw){
+ const n=String(raw||'Curriculum CV').normalize('NFC')
+  .replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim().slice(0,110);
+ return n||'Curriculum CV';
 }
-function showDownloadNotice(message){
- const n=$('#download-notice');$('#download-notice-text').textContent=message;
- n.classList.remove('hidden');clearTimeout(downloadNoticeTimer);
- downloadNoticeTimer=setTimeout(()=>n.classList.add('hidden'),5200);
-}
-async function downloadCVAutomatically(id,format='pdf'){
- const kind=format==='word'?'word':'pdf';
- const key=kind+':'+id;
- if(!id||startedDownloads.has(key))return;
+async function downloadCVAutomatically(id,kind,base){
+ if(!id||!['pdf','word'].includes(kind))return;
+ const key=kind+':'+id;if(startedDownloads.has(key))return;
  startedDownloads.add(key);
  try{
-  const endpoint=kind==='word'?'/api/cv/'+encodeURIComponent(id)+'/word':'/api/cv/'+encodeURIComponent(id);
+  const endpoint='/api/cv/'+encodeURIComponent(id)+(kind==='word'?'/word':'');
   const response=await fetch(endpoint,{credentials:'same-origin'});
-  if(!response.ok)throw Error('No se pudo obtener '+(kind==='word'?'el Word':'el PDF')+' (HTTP '+response.status+').');
-  const blob=await response.blob();
-  if(!blob.size)throw Error('El archivo llegó vacío.');
-  const url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=kind==='word'?'Mi_Curriculum_Editable.docx':'Mi_Curriculum.pdf';a.style.display='none';
-  document.body.appendChild(a);a.click();a.remove();
+  if(!response.ok)throw Error('No se pudo preparar '+kind.toUpperCase()+' (HTTP '+response.status+')');
+  const data=await response.blob();
+  if(!data.size)throw Error('El archivo está vacío');
+  const url=URL.createObjectURL(data),a=document.createElement('a');
+  a.href=url;a.download=cleanCVName(base)+(kind==='word'?'.docx':'.pdf');
+  a.style.display='none';document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
-  showDownloadNotice(kind==='word'?'Word listo. Si no se guardó, tocá «Descargar Word».':'Tu CV en PDF está listo para descargarse.');
  }catch(error){
   startedDownloads.delete(key);
-  showDownloadNotice('No se pudo descargar el '+(kind==='word'?'Word.':'PDF.'));
-  toast(error.message||'Falló la descarga.');
+  toast('No se pudo solicitar la descarga '+kind.toUpperCase()+': '+(error?.message||error));
  }
 }
+function downloadBothDocuments(id,name){
+ void downloadCVAutomatically(id,'pdf',name);
+ // Pequeña separación para que Android detecte dos archivos distintos.
+ setTimeout(()=>void downloadCVAutomatically(id,'word',name),550);
+}
+
 async function connectLive(){
  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const attempt=++connectAttempt;
@@ -331,8 +333,8 @@ async function connectLive(){
    case 'profile':break;
    case 'document':
     setDocuments([{id:m.id}]);
-    if(m.format==='word'){showWordDownloadPrompt(m.id);void downloadCVAutomatically(m.id,'word');}
-    else void downloadCVAutomatically(m.id,'pdf');
+    if(m.format==='both')downloadBothDocuments(m.id,m.filenameBase);
+    else downloadCVAutomatically(m.id,m.format==='word'?'word':'pdf',m.filenameBase);
     break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
@@ -449,29 +451,7 @@ async function startCall({reconnect=false}={}){
  }finally{callPending=false}
 }
 let savedDocuments=[];
-function setDocuments(docs){
- savedDocuments=Array.isArray(docs)?docs:[];
- const latest=savedDocuments[0]?.id;
- const word=$('#cv-word-download'),big=$('#word-ready-link');
- const files=$('#cv-files-banner'),pdf=$('#cv-pdf-link'),docx=$('#cv-word-link');
- if(latest){
-  const id=encodeURIComponent(latest),href='/api/cv/'+id+'/word';
-  word.href=href;big.href=href;word.classList.remove('hidden');
-  pdf.href='/api/cv/'+id;docx.href=href;
-  files.classList.remove('hidden');
- }else{
-  word.classList.add('hidden');word.removeAttribute('href');big.removeAttribute('href');
-  files.classList.add('hidden');pdf.removeAttribute('href');docx.removeAttribute('href');
- }
-}
-function hideWordDownloadPrompt(){$('#word-download-prompt').classList.add('hidden')}
-function showWordDownloadPrompt(id){
- if(!id)return;
- setDocuments([{id}]);
- $('#word-download-prompt').classList.remove('hidden');
- // Foco al botón grande, que genera una descarga real por acción del usuario.
- $('#word-ready-link').focus({preventScroll:true});
-}
+function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
 
 // El teclado móvil reduce el visualViewport sin necesariamente modificar
 // window.innerHeight. Conservamos los botones abajo y ubicamos el campo sobre el IME.
@@ -528,11 +508,6 @@ async function dismissStudentInteraction(event){
  }
 }
 function setupStudent(){
- $('#word-prompt-close').onclick=hideWordDownloadPrompt;
- $('#word-ready-link').addEventListener('click',()=>{hideWordDownloadPrompt();showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.');});
- $('#cv-word-download').addEventListener('click',()=>showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.'));
- $('#cv-word-link').addEventListener('click',()=>{hideWordDownloadPrompt();showDownloadNotice('Chrome abrirá la descarga de Word. Revisá Descargas.');});
- $('#cv-pdf-link').addEventListener('click',()=>showDownloadNotice('Chrome abrirá la descarga de PDF. Revisá Descargas.'));
  $('#close-keyboard').addEventListener('click',()=>void closeTextKeyboard());
  $('#student-view').addEventListener('click',event=>void dismissStudentInteraction(event));
  window.visualViewport?.addEventListener('resize',syncKeyboardViewport);
@@ -578,7 +553,7 @@ function setupStudent(){
    await post('/api/reset',{confirm:true});
    $('#reset-modal').classList.add('hidden');
    mutedByUser=false;keyboardOpen=false;callEnded=false;
-   setDocuments([]);startedDownloads.clear();hideDownloadNotice();hideWordDownloadPrompt();
+   setDocuments([]);startedDownloads.clear();
    resetSubtitle();updateConversationOverlay();
    await startCall();
   }catch(e){toast(e.message);updateConversationOverlay()}

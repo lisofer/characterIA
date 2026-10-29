@@ -65,7 +65,13 @@ app.get('/api/frames/:index',auth(),async(req,res)=>{
  res.type('png').sendFile(path.resolve(file));
 });
 app.post('/api/reset',auth('student'),(req,res)=>{if(req.body?.confirm!==true)return res.status(400).json({error:'Confirmá el reinicio para borrar todo el CV.'});const old=req.profileId;for(const f of eraseProfile(old)){for(const filename of [f,f.replace(/\.pdf$/i,'.docx')])try{fs.unlinkSync(path.join(DATA_DIR,'cvs',filename))}catch{}}const fresh=createProfile();replaceSessionProfile(parseCookie(req),fresh);res.json({ok:true,profile:{},documents:[]});});
-app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,'Mi_Curriculum.pdf');});
+function safeCvDownloadName(profile,ext){
+ const f=profile?.fields||{};
+ const full=[f.nombre,f.apellido].filter(Boolean).join(' ').normalize('NFC')
+  .replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim().slice(0,100);
+ return (full||'Curriculum')+' CV.'+ext;
+}
+app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,safeCvDownloadName(getProfile(req.profileId),'pdf'));});
 app.get('/api/cv/:doc/word',auth('student'),async(req,res)=>{
  const d=lookupDoc(req.params.doc,req.profileId);
  if(!d)return res.sendStatus(404);
@@ -79,7 +85,7 @@ app.get('/api/cv/:doc/word',auth('student'),async(req,res)=>{
    if(!profile)return res.sendStatus(404);
    await createWordDocument(file,profile);
   }
-  res.download(file,'Mi_Curriculum_Editable.docx');
+  res.download(file,safeCvDownloadName(getProfile(req.profileId),'docx'));
  }catch(error){
   console.error('No se pudo preparar el Word',String(error?.message||error));
   if(!res.headersSent)res.status(500).json({error:'No se pudo preparar el Word. Volvé a intentarlo.'});

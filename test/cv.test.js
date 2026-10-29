@@ -99,3 +99,11 @@ test('una única experiencia puede incluir hasta tres tareas confirmadas',()=>{
  assert.equal(entry.ok,true);
  assert.equal(cvContent({...profile,experiencia:entry.valor}).experience[0].actividades.length,3);
 });
+
+test('nombre completo no se duplica en CV ni obliga a preguntar apellido otra vez',()=>{
+ const source={...profile,nombre:'Lisandro Fernández',apellido:'Fernández',
+  experiencia:'En búsqueda de primera experiencia laboral'};
+ assert.equal(cvReadiness(source).ok,true);
+ assert.equal(cvContent(source).name,'Lisandro Fernández');
+ assert.equal(cvContent({...source,apellido:''}).name,'Lisandro Fernández');
+});

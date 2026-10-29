@@ -1,5 +1,6 @@
 // Formato ATS en blanco y negro, basado en el modelo elegido.
 // La fecha puede estimarse CON la persona; nunca la suponemos sin confirmación.
+import {normalizedIdentity} from './identity.js';
 const value=x=>String(x??'').trim();
 const placeholder=/^(?:no s[eé]|ningun[ao]?|nada|no tengo|no corresponde|sin datos?|a[uú]n no|n\/a|desconozco|pendiente|por definir|-+)\.?$/i;
 export const filled=x=>Boolean(value(x)&&!placeholder.test(value(x)));
@@ -41,7 +42,7 @@ export function validExperience(e){
  return true;
 }
 export function cvReadiness(fields={}){
- const f=fields||{},missing=[];
+ const f={...fields,...normalizedIdentity(fields)},missing=[];
  const need=(cond,campo,pregunta)=>{if(!cond)missing.push({campo,pregunta});};
  need(filled(f.nombre),'nombre','¿Cómo es tu nombre?');
  need(filled(f.apellido),'apellido','¿Cuál es tu apellido? Queremos que aparezca tu nombre completo.');
@@ -69,7 +70,7 @@ export function experienceLines(raw){
 // verificable y legible para un CV ATS de una sola página.
 const concise=(text,max=180)=>{const v=value(text).replace(/\s+/g,' ');if(v.length<=max)return v;const part=v.slice(0,max+1);return part.slice(0,part.lastIndexOf(' '))+'…'};
 export function cvContent(fields={}){
- const f=fields||{};
+ const f={...fields,...normalizedIdentity(fields)};
  const name=[value(f.nombre),value(f.apellido)].filter(Boolean).join(' ');
  const briefRole=value(f.objetivo);
  const position=briefRole.length<=65&&!/[.!?;]/.test(briefRole)?briefRole:'';
