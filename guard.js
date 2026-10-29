@@ -69,7 +69,7 @@ async function fishAudio(text,s){
  const voice=String(s.guardVoiceId||'').trim();
  const savedReference=!voice?getReference():null;
  if(!voice&&!savedReference)throw new Error('Configurá un ID de voz Fish o subí un audio de referencia con su transcripción en Admin > Erik.');
- const model=['s2.1-pro','s2.1-pro-flash','s2-pro'].includes(s.guardFishModel)?s.guardFishModel:'s2.1-pro';
+ const model=['s2.1-pro-free','s2.1-pro','s2-pro'].includes(s.guardFishModel)?s.guardFishModel:'s2.1-pro-free';
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),18000);
  const payload={text,format:'mp3',temperature:finite(s.guardTemperature,.7,0,1),top_p:finite(s.guardTopP,.7,0,1),prosody:{speed:finite(s.guardSpeed,1,.7,1.5)}};
  if(voice)payload.reference_id=voice;
@@ -82,7 +82,25 @@ async function fishAudio(text,s){
    body:useMsgpack?encode(payload):JSON.stringify(payload),
    signal:controller.signal
   });
-  if(!response.ok){console.warn('Fish Audio HTTP',response.status);throw new Error('Fish Audio respondió '+response.status+'. Revisá la clave y el ID de voz.');}
+  if(!response.ok){
+   let details='';
+   try{
+    const content=await response.text();
+    const parsed=JSON.parse(content);
+    details=String(parsed.message||parsed.error||parsed.detail||'').slice(0,220);
+   }catch{}
+   // No registrar la clave ni el texto solicitado al proveedor en los logs.
+   console.warn('Fish Audio HTTP',response.status,'modelo',model);
+   if(response.status===402)throw new Error(model==='s2.1-pro-free'
+    ?'Fish Audio devolvió 402 también para S2.1 Pro Free. Revisá en fish.audio/app/developers que tu cuenta tenga acceso a la API gratuita.'
+    :'Fish Audio: saldo insuficiente o facturación pendiente (HTTP 402). Elegí S2.1 Pro Free en Admin > Erik para probar sin cargar créditos.');
+   if(response.status===401||response.status===403)
+    throw new Error('Fish Audio rechazó la autenticación (HTTP '+response.status+'). Revisá FISH_API_KEY en Railway, sin pegarla aquí.');
+   if(response.status===429)throw new Error('Fish Audio limitó las solicitudes (HTTP 429). Esperá unos instantes y volvé a probar.');
+   if(response.status===400||response.status===422)
+    throw new Error('Fish Audio rechazó la solicitud (HTTP '+response.status+'). Revisá la voz, el audio de referencia y el modelo.'+(details?' Detalle: '+details:''));
+   throw new Error('Fish Audio respondió HTTP '+response.status+(details?': '+details:'')+'.');
+  }
   const type=response.headers.get('content-type')||'';
   if(!/audio|octet-stream/i.test(type))throw new Error('Fish Audio no devolvió audio.');
   const bytes=Buffer.from(await response.arrayBuffer());
