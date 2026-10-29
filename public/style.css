@@ -691,3 +691,40 @@ body:has(#login-view:not(.hidden)){
 }
 .student-page .stage.is-muted .avatar-placeholder,
 .student-page .stage.call-ended .avatar-placeholder{filter:grayscale(1) brightness(.56)!important}
+
+
+/* Erik: bocadillo debajo y a la izquierda; cola orientada horizontalmente al rostro. */
+.guard-dock .guard-bubble{
+  left:auto;right:calc(50% + 16px);top:clamp(38px,6.4dvh,78px);
+  width:max-content;max-width:min(235px,49vw);min-width:145px;
+  padding:12px 14px 13px;
+  border-radius:20px 20px 18px 20px;
+  text-align:left;
+}
+.guard-dock .guard-bubble::after{
+  content:'';position:absolute;
+  top:54%;right:-12px;bottom:auto;
+  width:20px;height:20px;
+  transform:translateY(-50%) rotate(45deg);
+  background:#edf6ff;
+  border:0;border-top:2px solid #11294e;border-right:2px solid #11294e;
+  border-radius:2px;
+  z-index:0;
+}
+.guard-dock.is-muted .guard-bubble::after{background:#c3cedc;border-top-color:#53677e;border-right-color:#53677e}
+@media(max-width:600px){
+ .guard-dock .guard-bubble{
+   top:clamp(45px,7dvh,70px);
+   right:calc(50% + 10px);
+   width:max-content;min-width:145px;max-width:min(195px,49vw);
+   padding:11px 12px 12px;
+ }
+ .guard-dock .guard-bubble::after{top:56%;right:-11px}
+}
+@media(max-height:690px){
+ .guard-dock .guard-bubble{
+   top:clamp(12px,4dvh,35px);right:calc(50% + 6px);
+   max-width:min(160px,43vw);min-width:122px;
+ }
+ .guard-dock .guard-bubble::after{right:-11px;top:55%}
+}
