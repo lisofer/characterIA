@@ -599,3 +599,44 @@ body:has(#login-view:not(.hidden)){
   -webkit-backface-visibility:visible!important;
   will-change:auto!important;
 }
+
+
+/* Erik: módulo de ingreso independiente del asistente CV */
+.auth-page .login-wrap{max-width:460px;width:min(100%,460px)}
+.guard-dock{margin:15px auto 0;padding:12px 14px;display:flex;align-items:center;gap:12px;border:1px solid rgba(111,167,234,.30);border-radius:19px;background:linear-gradient(125deg,rgba(28,53,88,.91),rgba(10,25,47,.97));box-shadow:0 13px 36px rgba(0,0,0,.18);color:#e9f4ff;overflow:hidden}
+.guard-visual{height:180px;min-width:132px;width:132px;position:relative;align-self:center}
+.guard-avatar{position:relative;width:100%;height:100%;display:grid;place-items:center}
+.guard-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:0;pointer-events:none}
+.guard-frame.is-visible{opacity:1}
+.guard-fallback{font-size:58px;display:grid;place-items:center;height:100%;width:100%;color:#90cafe}
+.guard-controls{min-width:0;flex:1;display:flex;flex-direction:column;gap:7px}
+.guard-title{font:800 22px 'Outfit','DM Sans',Arial,sans-serif;letter-spacing:-.02em}
+.guard-title span{font-size:10px;font-weight:800;letter-spacing:.09em;color:#8db9e8}
+#guard-status{font-size:13px;line-height:1.36;min-height:2.4em;color:#e3efff;margin:0}
+.guard-buttons{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.guard-buttons button{font-weight:700;border:1px solid rgba(132,194,255,.39);border-radius:10px;min-height:40px;padding:7px 10px;color:#fff}
+.guard-speak-btn{background:linear-gradient(120deg,#1676dc,#4ca3f5);font-size:13px}
+.guard-small-btn{background:rgba(21,44,75,.8);font-size:12px}
+.guard-buttons button:focus-visible{outline:3px solid #d5f4ff;outline-offset:2px}
+.guard-privacy{font-size:10px!important;line-height:1.3;color:#a4bdd9;margin:1px 0 0!important}
+.guard-admin-preview{max-height:290px;overflow:hidden}
+.guard-admin-preview .preview-avatar{height:240px}
+.guard-admin-preview #guard-admin-image{object-fit:contain;max-width:100%;max-height:100%;width:100%;height:100%}
+.admin-pane [data-setting="guardPrompt"]{font:500 13px/1.55 ui-monospace,Consolas,monospace;min-height:210px}
+.admin-pane [data-setting="guardGreeting"],.admin-pane [data-setting="guardSampleText"]{min-height:72px}
+@media(max-width:600px){
+ .auth-page .login-wrap{max-width:410px}
+ .guard-dock{padding:10px;gap:7px;margin-top:12px;border-radius:16px}
+ .guard-visual{width:104px;min-width:104px;height:148px}
+ .guard-title{font-size:19px}
+ #guard-status{font-size:12px;min-height:2em}
+ .guard-buttons{gap:5px}
+ .guard-buttons button{min-height:37px;padding:6px 8px;font-size:11px}
+ .guard-speak-btn{font-size:12px!important}
+ .guard-privacy{font-size:9px!important}
+}
+@media(max-height:690px){
+ .auth-page .login-wrap{max-height:100%;padding:0;overflow-y:auto}
+ .guard-visual{height:122px;width:90px;min-width:90px}
+ .guard-dock{margin-top:9px}
+}
