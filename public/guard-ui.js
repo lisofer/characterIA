@@ -268,7 +268,7 @@ function spokenIntent(heard){
   return {type:'mute'};
  if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(normalized))
   return {type:'keyboard'};
- if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave)$/.test(normalized))
+ if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave|cual es (?:la|mi) contrasena|cual es (?:la|mi) clave)$/.test(normalized))
   return {type:'help'};
  if(/^(?:erik[, ]+)?(?:iniciar llamada|empezar llamada|hablar con erik|empezar|escuchame)$/.test(normalized))
   return {type:'listening'};
@@ -287,6 +287,9 @@ function spokenIntent(heard){
   if(match) {
    // Cada clave expresada oralmente debe ser exactamente UNA palabra.
    const word=match[1];
+   // "Esa es la contraseña" o "¿Cuál es la clave?" no aportan una clave.
+   if(/^(?:esa|esta|eso|esto|cual|cuál|que|qué|mi|tu|su)$/iu.test(word))
+    return {type:'clarify'};
    return {type:'password',value:word.toLocaleLowerCase('es-AR')};
   }
  }
