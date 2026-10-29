@@ -183,33 +183,79 @@ async function say(intent,{resumeListening=true}={}){
   if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted){guardTalking=false;amplitude=0;displayFrame(0);if(resumeListening&&guardActive)listen();}
  }
 }
+// Escucha persistente: Chrome puede finalizar sesiones de reconocimiento aunque
+// continuous=true. Cada cierre natural vuelve a iniciar sin exigir tocar un botón.
 function getRecognizer(){
  if(recognizer)return recognizer;
  const API=window.SpeechRecognition||window.webkitSpeechRecognition;
  if(!API)return null;
- const r=new API();r.lang='es-AR';r.continuous=false;r.interimResults=false;r.maxAlternatives=1;
- r.onstart=()=>{if(guardMuted||!guardActive){try{r.abort();}catch{}return;}recognizing=true;statusText('Te escucho. Decí la contraseña.');};
- r.onerror=e=>{
-  recognizing=false;if(guardMuted||!guardActive)return;
-  if(e.error==='not-allowed'||e.error==='service-not-allowed'){guardNeedsGesture=true;setMuteAppearance();statusText('Tocá a Erik para habilitar el micrófono, o escribí la contraseña.');}
-  else if(e.error==='no-speech')statusText('No te escuché. Tocá Hablar para probar de nuevo.');
-  else statusText('No pude escucharte. Tocá Hablar o usá el teclado.');
+ const r=new API();
+ r.lang='es-AR';r.continuous=true;r.interimResults=false;r.maxAlternatives=1;
+ r.onstart=()=>{
+  if(!recognitionWanted||!canListen()){try{r.abort();}catch{}return;}
+  recognizing=true;recognitionErrors=0;
+  statusText('Te escucho. Decime la contraseña.');
  };
- r.onend=()=>{recognizing=false;};
+ r.onerror=e=>{
+  recognizing=false;
+  if(!guardActive||guardMuted||!recognitionWanted||e.error==='aborted')return;
+  if(e.error==='not-allowed'||e.error==='service-not-allowed'||e.error==='audio-capture'){
+   recognitionWanted=false;guardNeedsGesture=true;setMuteAppearance();
+   statusText('Micrófono sin permiso. Tocá a Erik para activarlo o ingresá por escrito.');
+   return;
+  }
+  if(e.error==='no-speech'){
+   // Normal en personas que necesitan más tiempo para responder: seguir escuchando.
+   statusText('Sigo escuchando. Podés hablar cuando quieras.');
+  }else{
+   recognitionErrors++;
+   statusText('Sigo acá. Recuperando la escucha…');
+  }
+ };
+ r.onend=()=>{
+  recognizing=false;
+  if(recognitionWanted&&canListen()){
+   queueRecognitionRestart(recognitionErrors?Math.min(5000,500*Math.pow(1.6,Math.min(recognitionErrors,5))):300);
+  }
+ };
  r.onresult=e=>{
-  if(guardMuted||!guardActive||!isLoginVisible())return;
+  if(!recognitionWanted||!canListen())return;
   const value=clean(e.results?.[e.resultIndex]?.[0]?.transcript);
-  if(value)void handleVoice(value);
+  if(!value)return;
+  // Pausar solamente para interpretar la frase o responder, sin cerrar el "modo llamada".
+  recognitionWanted=false;clearTimeout(recognitionRestartTimer);
+  try{r.abort();}catch{}
+  recognizing=false;
+  void handleVoice(value);
  };
  recognizer=r;return r;
 }
 function listen(){
- if(!guardActive||guardMuted||!isLoginVisible()||guardTalking||recognizing||document.activeElement===one('#password'))return;
+ if(!canListen()||recognizing)return;
  const r=getRecognizer();
  if(!r){statusText('Este navegador no admite dictado. Podés escribir la contraseña.');return;}
  recognitionWanted=true;
- try{r.start();}catch{statusText('Tocá Hablar para activar el micrófono.');}
+ try{r.start();}
+ catch(e){
+  if(e?.name==='InvalidStateError'){queueRecognitionRestart(650);return;}
+  recognitionErrors++;
+  if(e?.name==='NotAllowedError'||e?.name==='SecurityError'){
+   recognitionWanted=false;guardNeedsGesture=true;setMuteAppearance();
+   statusText('Para hablar con Erik, permití el micrófono en tu navegador.');
+  }else{queueRecognitionRestart(Math.min(4000,500*recognitionErrors));}
+ }
 }
+document.addEventListener('visibilitychange',()=>{
+ if(!guardActive||guardMuted)return;
+ if(document.hidden){
+  clearTimeout(recognitionRestartTimer);recognitionRestartTimer=null;
+  try{recognizer?.abort();}catch{}
+  recognizing=false;
+ }else if(!guardTalking&&document.activeElement!==one('#password')){
+  // El navegador puede suspender el micrófono en segundo plano; retomarlo al volver.
+  recognitionWanted=true;queueRecognitionRestart(500);
+ }
+});
 function noAccents(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
 async function handleVoice(heard){
  if(!guardActive||guardMuted||!isLoginVisible())return;
@@ -217,7 +263,7 @@ async function handleVoice(heard){
  if(/^(?:erik[, ]+)?(?:iniciar llamada|empezar llamada|hablar con erik|empezar|escuchame)$/.test(command)){void say('listening');return;}
  if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave)$/.test(command)){void say('help');return;}
  if(/^(?:erik[, ]+)?(?:repeti|repite|otra vez)$/.test(command)){void say('ask');return;}
- if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada)$/.test(command)){stopRecognition();stopAudio();statusText('Llamada terminada. Podés escribir la contraseña o tocar Hablar.');return;}
+ if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada|silencio|mute|silenciar)$/.test(command)){guardMuted=true;guardEpoch++;stopRecognition();stopAudio();displayFrame(0);setMuteAppearance();statusText('Silenciado. Tocame para reactivar voz y micrófono.');return;}
  if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(command)){one('#password')?.focus();statusText('Escribí tu contraseña en el campo.');return;}
  // Nunca mostrar, registrar en consola ni enviar a Gemini o Fish la clave reconocida.
  const secret=heard.replace(/^(?:erik[\s,]+)?(?:(?:mi|la)\s+)?(?:contrase(?:ñ|n)a|clave)(?:\s+(?:es|seria))?\s*[:,-]?\s*/iu,'').trim();
