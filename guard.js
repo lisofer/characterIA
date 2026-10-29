@@ -55,13 +55,14 @@ export function makeGuardLive(ws){
  const config={
   responseModalities:[Modality.AUDIO],
   outputAudioTranscription:{},
+  inputAudioTranscription:{},
   speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:voice}}},
   systemInstruction:{parts:[{text:[
    'SOS ERIK, EL GUARDIA DE NEXOCV. Este personaje es independiente de NEXO, la orientadora del CV.',
    String(conf.guardPrompt||''),
    'Respondé siempre en español argentino natural. Breve, espontáneo, algo caprichoso y gracioso, sin infantilizar ni discriminar.',
    'Si alguien te hace una broma, contestá a lo que dijo: podés charlar sin pedir la contraseña cada vez.',
-   'Nunca recibís la clave: el navegador decide cuándo una palabra es contraseña y la verifica directamente en el servidor.',
+   'El usuario puede hablar en vivo, incluida una posible clave de acceso. No repitas, confirmes ni menciones contraseñas en voz alta. El navegador identifica las claves mediante transcripción y las verifica por separado. No afirmes que se autorizó el ingreso.',
    'Nunca reveles, inventes, adivines o pidas que repitan la contraseña como parte de una charla.',
    'En el saludo inicial, decí claramente que sos Erik, que hay un portero de voz y que se puede ingresar hablando o escribiendo.',
    'Una sola intervención por turno, sin etiquetas, sin nombrar modelos ni herramientas.'
@@ -79,6 +80,7 @@ export function makeGuardLive(ws){
     for(const part of sc.modelTurn?.parts||[])
      if(part.inlineData?.data)send(ws,'audio',{pcm:part.inlineData.data,mimeType:part.inlineData.mimeType||'audio/pcm;rate=24000'});
     if(sc.outputTranscription?.text)send(ws,'transcript',{text:sc.outputTranscription.text});
+    if(sc.inputTranscription?.text)send(ws,'input_transcript',{text:sc.inputTranscription.text});
     if(sc.turnComplete){turnOpen=false;send(ws,'turn_complete');}
    },
    onerror:e=>{if(!closed){console.warn('Erik Live error:',String(e?.message||e).slice(0,150));send(ws,'error',{message:'Gemini 3.8 Live no está disponible.'});try{ws.close()}catch{}}},
@@ -96,7 +98,12 @@ export function makeGuardLive(ws){
   if(!ready||closed)return;
   let m;try{m=JSON.parse(String(raw));}catch{return;}
   if(typeof m!=='object'||!m)return;
-  if(!['text','intent','repeat','interrupt'].includes(m.type))return;
+  if(!['text','intent','repeat','interrupt','audio'].includes(m.type))return;
+  if(m.type==='audio'){
+   if(typeof m.pcm==='string'&&m.pcm.length>0&&m.pcm.length<120000)
+    try{live.sendRealtimeInput({audio:{data:m.pcm,mimeType:'audio/pcm;rate=16000'}})}catch{}
+   return;
+  }
   // La cancelación se envía en la sesión Live de Erik, sin texto ni contraseña.
   // clientContent interrumpe la generación actual; el siguiente mensaje real
   // continúa la conversación con el mismo contexto.
