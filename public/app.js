@@ -8,7 +8,7 @@ const post=(url,body)=>api(url,{method:'POST',body:JSON.stringify(body)});
 const setVisible=view=>{for(const v of ['login','student','admin'])el[v].classList.toggle('hidden',view!==v);document.body.classList.toggle('student-active',view==='student');document.body.classList.toggle('login-active',view==='login')};
 function setupAuth(){const form=$('#login-form');form.addEventListener('submit',async e=>{e.preventDefault();if(roleLoading)return;roleLoading=true;ensureAudio(true).catch(()=>{});const b=$('#login-btn');b.disabled=true;b.textContent='Ingresando…';try{const data=await post('/api/login',{password:$('#password').value});$('#password').value='';await restoreRole(data.role);if(data.role==='student')await startCall();}catch(err){toast(err.message)}finally{roleLoading=false;b.disabled=false;b.textContent='INGRESAR';}});$('#toggle-password').addEventListener('click',()=>{const t=$('#password'),b=$('#toggle-password'),visible=t.type==='password';t.type=visible?'text':'password';b.classList.toggle('showing',visible);b.setAttribute('aria-pressed',String(visible));b.setAttribute('aria-label',visible?'Ocultar contraseña':'Mostrar contraseña');b.title=visible?'Ocultar contraseña':'Mostrar contraseña';});
  $('#student-logout').addEventListener('click',logout);$('#admin-logout').addEventListener('click',logout)}
-async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setVisible('login')}
+async function logout(){stopCall();try{await post('/api/logout',{})}catch{}role=null;setDocuments([]);hideWordDownloadPrompt();setVisible('login')}
 async function restoreRole(force){let me=await api('/api/me');role=force||me.role;if(role==='student'){
   connectingUi=true;callEnded=false;
   setVisible('student');updateConversationOverlay();setStatus('Conectando…');
@@ -293,7 +293,7 @@ async function downloadCVAutomatically(id,format='pdf'){
   a.href=url;a.download=kind==='word'?'Mi_Curriculum_Editable.docx':'Mi_Curriculum.pdf';a.style.display='none';
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
-  showDownloadNotice(kind==='word'?'Se está descargando tu CV editable en Word.':'Tu CV en PDF se está descargando en este dispositivo.');
+  showDownloadNotice(kind==='word'?'Word listo. Si no se guardó, tocá «Descargar Word».':'Tu CV en PDF está listo para descargarse.');
  }catch(error){
   startedDownloads.delete(key);
   showDownloadNotice('No se pudo descargar el '+(kind==='word'?'Word.':'PDF.'));
@@ -329,7 +329,11 @@ async function connectLive(){
    case 'input_transcript':if(m.text?.trim()&&micOn)setStatus('Te escucho',true);break;
    case 'turn_complete':captionFinished=true;commitCaptionLines(true);if(micOn&&!connectingUi)setStatus('Escuchando',true);break;
    case 'profile':break;
-   case 'document':setDocuments([{id:m.id}]);void downloadCVAutomatically(m.id,m.format||'pdf');break;
+   case 'document':
+    setDocuments([{id:m.id}]);
+    if(m.format==='word'){showWordDownloadPrompt(m.id);void downloadCVAutomatically(m.id,'word');}
+    else void downloadCVAutomatically(m.id,'pdf');
+    break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;
    case 'notice':toast(m.message);break;
@@ -445,7 +449,26 @@ async function startCall({reconnect=false}={}){
  }finally{callPending=false}
 }
 let savedDocuments=[];
-function setDocuments(docs){savedDocuments=Array.isArray(docs)?docs:[];}
+function setDocuments(docs){
+ savedDocuments=Array.isArray(docs)?docs:[];
+ const latest=savedDocuments[0]?.id;
+ const word=$('#cv-word-download'),big=$('#word-ready-link');
+ if(latest){
+  const href='/api/cv/'+encodeURIComponent(latest)+'/word';
+  word.href=href;big.href=href;word.classList.remove('hidden');
+ }else{
+  word.classList.add('hidden');word.removeAttribute('href');big.removeAttribute('href');
+ }
+}
+function hideWordDownloadPrompt(){$('#word-download-prompt').classList.add('hidden')}
+function showWordDownloadPrompt(id){
+ if(!id)return;
+ setDocuments([{id}]);
+ $('#word-download-prompt').classList.remove('hidden');
+ // Foco al botón grande, que genera una descarga real por acción del usuario.
+ $('#word-ready-link').focus({preventScroll:true});
+}
+
 // El teclado móvil reduce el visualViewport sin necesariamente modificar
 // window.innerHeight. Conservamos los botones abajo y ubicamos el campo sobre el IME.
 let keyboardViewportFrame=0,lastKeyboardInset=-1;
@@ -501,6 +524,9 @@ async function dismissStudentInteraction(event){
  }
 }
 function setupStudent(){
+ $('#word-prompt-close').onclick=hideWordDownloadPrompt;
+ $('#word-ready-link').addEventListener('click',()=>{hideWordDownloadPrompt();showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.');});
+ $('#cv-word-download').addEventListener('click',()=>showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.'));
  $('#close-keyboard').addEventListener('click',()=>void closeTextKeyboard());
  $('#student-view').addEventListener('click',event=>void dismissStudentInteraction(event));
  window.visualViewport?.addEventListener('resize',syncKeyboardViewport);
@@ -546,7 +572,7 @@ function setupStudent(){
    await post('/api/reset',{confirm:true});
    $('#reset-modal').classList.add('hidden');
    mutedByUser=false;keyboardOpen=false;callEnded=false;
-   setDocuments([]);startedDownloads.clear();hideDownloadNotice();
+   setDocuments([]);startedDownloads.clear();hideDownloadNotice();hideWordDownloadPrompt();
    resetSubtitle();updateConversationOverlay();
    await startCall();
   }catch(e){toast(e.message);updateConversationOverlay()}

@@ -61,3 +61,25 @@ test('educación conserva institución y puede guardar meses confirmados',()=>{
  assert.equal(record.ok,true);
  assert.equal(cvContent({...profile,formacion:record.valor}).education[0].institucion,'Escuela de Arte');
 });
+
+test('localidad es obligatoria, los idiomas no',()=>{
+ const work=upsertExperience('',job);
+ const fields={...profile,experiencia:work.valor};
+ assert.equal(cvReadiness(fields).ok,true);
+ assert.equal(cvReadiness({...fields,localidad:''}).ok,false);
+ assert.equal(cvReadiness({...fields,idiomas:''}).ok,true);
+});
+test('cabecera breve con etiquetas explícitas y barras verticales',()=>{
+ const work=upsertExperience('',job);
+ const cv=cvContent({...profile,correo:'persona@example.com',experiencia:work.valor});
+ assert.deepEqual(cv.contactParts,['Tel: 316 212 3456','Correo: persona@example.com','Ubicación: Medellín, Colombia']);
+ assert.equal(cv.contactParts.join(' | ').includes(' | '),true);
+});
+test('el resumen de una hoja limita aptitudes, trabajos y tareas sin modificar lo guardado',()=>{
+ let record='';
+ for(let i=0;i<4;i++)record=upsertExperience(record,{...job,puesto:'Puesto '+i}).valor;
+ const cv=cvContent({...profile,habilidades:'Uno; Dos; Tres; Cuatro; Cinco; Seis',experiencia:record});
+ assert.equal(cv.experience.length,3);
+ assert.equal(cv.skills.length,4);
+ assert.equal(experienceEntries(record).length,4);
+});

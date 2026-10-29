@@ -605,3 +605,15 @@ body:has(#login-view:not(.hidden)){
   -webkit-backface-visibility:visible!important;
   will-change:auto!important;
 }
+
+/* Descarga Word con gesto real del usuario: alternativa a Chrome bloqueando
+   descargas iniciadas desde WebSocket, accesible y sin interferir con el audio. */
+.cv-word-download{display:inline-flex;align-items:center;justify-content:center;min-width:48px;min-height:34px;padding:5px 8px;background:#1d6a55;color:#fff;border:1px solid #74e3be;border-radius:9px;text-decoration:none;font:700 12px Arial,sans-serif}
+.cv-word-download.hidden{display:none!important}
+.word-download-prompt{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:110;width:min(92vw,380px);padding:22px 20px;background:#102739;border:2px solid #93d3b2;border-radius:16px;box-shadow:0 0 0 9999px rgba(2,9,15,.68);color:#fff;display:flex;flex-direction:column;gap:13px;text-align:center;align-items:center;font:17px/1.4 Arial,sans-serif}
+.word-download-prompt.hidden{display:none!important}
+.word-download-prompt strong{font-size:22px}
+.word-download-prompt p{margin:0}
+.word-download-prompt a{background:#69dda4;color:#0b211c;border-radius:11px;font-weight:800;font-size:18px;text-decoration:none;display:block;padding:14px 19px;min-height:52px;box-sizing:border-box;width:100%}
+.word-download-prompt button{background:transparent;border:1px solid #a6b9c3;border-radius:9px;color:white;font-size:15px;min-height:40px;padding:7px 22px}
+.word-download-prompt a:focus-visible,.cv-word-download:focus-visible{outline:3px solid #fff;outline-offset:3px}

@@ -45,7 +45,8 @@ export function cvReadiness(fields={}){
  const need=(cond,campo,pregunta)=>{if(!cond)missing.push({campo,pregunta});};
  need(filled(f.nombre),'nombre','¿Cómo es tu nombre?');
  need(filled(f.apellido),'apellido','¿Cuál es tu apellido? Queremos que aparezca tu nombre completo.');
- need(filled(f.telefono)||filled(f.correo),'contacto','¿Tenés un teléfono o correo para que puedan llamarte a una entrevista?');
+ need(filled(f.localidad),'localidad','¿En qué ciudad o localidad vivís? No hace falta tu dirección exacta.');
+ need(filled(f.telefono)||filled(f.correo),'contacto','¿Me decís un teléfono o correo para que puedan avisarte por una entrevista?');
  need(filled(f.perfil_profesional)||filled(f.objetivo),'perfil_profesional','¿Qué tipo de trabajo te interesa? Te ayudo a escribir una breve presentación.');
  need(filled(f.habilidades),'habilidades','¿Qué cosas sabés hacer? Podemos pensar en tareas de tu día a día.');
  const jobs=experienceEntries(f.experiencia);
@@ -53,7 +54,6 @@ export function cvReadiness(fields={}){
  need(firstJob(f.experiencia)||jobsComplete,'experiencia',
   'Vamos a ordenar dónde trabajaste, de qué te encargabas y aproximadamente en qué mes y año comenzaste y terminaste. Podemos usar acontecimientos que recuerdes como referencia.');
  need(filled(f.formacion),'formacion','¿Dónde estudiaste o qué cursos y talleres hiciste?');
- need(filled(f.idiomas),'idiomas','¿Qué idiomas utilizás para comunicarte?');
  return {ok:missing.length===0,faltantes:missing};
 }
 export function items(raw){
@@ -65,29 +65,37 @@ export function items(raw){
 export function experienceLines(raw){
  return value(raw).replace(/\r/g,'').split('\n').map(value).filter(Boolean);
 }
+// El archivo conserva el perfil íntegro. Aquí se prepara una versión breve,
+// verificable y legible para un CV ATS de una sola página.
+const concise=(text,max=180)=>{const v=value(text).replace(/\s+/g,' ');if(v.length<=max)return v;const part=v.slice(0,max+1);return part.slice(0,part.lastIndexOf(' '))+'…'};
 export function cvContent(fields={}){
  const f=fields||{};
  const name=[value(f.nombre),value(f.apellido)].filter(Boolean).join(' ');
  const briefRole=value(f.objetivo);
  const position=briefRole.length<=65&&!/[.!?;]/.test(briefRole)?briefRole:'';
- const city=value(f.localidad);
  const jobs=experienceEntries(f.experiencia).sort((a,b)=>((b.fin==='Actualidad'?'9999-12':b.fin)||'').localeCompare((a.fin==='Actualidad'?'9999-12':a.fin)||'')||b.inicio.localeCompare(a.inicio));
  const studies=educationEntries(f.formacion);
+ const contactParts=[
+  filled(f.telefono)?'Tel: '+value(f.telefono):'',
+  filled(f.correo)?'Correo: '+value(f.correo):'',
+  filled(f.localidad)?'Ubicación: '+value(f.localidad):''
+ ].filter(Boolean);
  return {
   name,
-  roleLine:[position,city].filter(Boolean).join(city&&position?' - ':''),
-  contacts:[value(f.telefono),value(f.correo)].filter(Boolean),
-  profile:value(f.perfil_profesional)||value(f.objetivo),
-  skills:items(f.habilidades),
-  experience:jobs,
+  roleLine:position,
+  contactParts,contacts:contactParts,
+  profile:concise(value(f.perfil_profesional)||value(f.objetivo),260),
+  skills:items(f.habilidades).slice(0,4).map(x=>concise(x,65)),
+  experience:jobs.slice(0,3).map(e=>({...e,actividades:e.actividades.slice(0,2).map(x=>concise(x,105))})),
   firstExperience:firstJob(f.experiencia),
-  education:studies,
-  educationLegacy:studies.length?[]:experienceLines(f.formacion),
-  languages:items(f.idiomas),
-  courses:items(f.cursos),
-  others:items(f.otros)
+  education:studies.slice(0,2).map(e=>({...e,titulo:concise(e.titulo,95),institucion:concise(e.institucion,100)})),
+  educationLegacy:studies.length?[]:experienceLines(f.formacion).slice(0,2).map(x=>concise(x,120)),
+  languages:[], // Sólo se incorpora si la persona lo necesita en un puesto concreto.
+  courses:items(f.cursos).slice(0,2).map(x=>concise(x,90)),
+  others:items(f.otros).slice(0,1).map(x=>concise(x,95))
  };
 }
+
 export function upsertExperience(existing,entry,replaceIndex=0){
  const fields={
   puesto:value(entry.puesto),lugar:value(entry.lugar),ubicacion:value(entry.ubicacion),
