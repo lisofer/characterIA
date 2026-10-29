@@ -401,18 +401,19 @@ function publicConfig(){
 // Diagnóstico puntual al iniciar: pregunta artificial, nunca información de visitantes.
 async function probeErikGemini(){
  if(!process.env.GEMINI_API_KEY)return;
- const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,httpOptions:{timeout:12000,retryOptions:{attempts:1}}});
- for(const model of ['gemini-3.1-flash-lite','gemini-3.5-flash-lite']){
+ const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,httpOptions:{retryOptions:{attempts:1}}});
+ await Promise.all(['gemini-3.1-flash-lite','gemini-3.5-flash-lite','gemini-3.8-flash'].map(async model=>{
   const t=Date.now();
   try{
    const r=await ai.models.generateContent({model,contents:'Decí solamente hola.',
-    config:{systemInstruction:'Contestá en español.',temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:12000,retryOptions:{attempts:1}}}});
-   console.info('Erik prueba Gemini:',model,'OK',Date.now()-t,'ms',Boolean(r.text));
+    config:{systemInstruction:'Contestá en español.',temperature:1,maxOutputTokens:150,
+     abortSignal:AbortSignal.timeout(22000),httpOptions:{retryOptions:{attempts:1}}}});
+   console.info('Erik prueba sin deadline:',model,'OK',Date.now()-t,'ms',Boolean(r.text));
   }catch(e){
-   const detail=String(e?.message||e).replace(/AIza[A-Za-z0-9_-]+/g,'[clave oculta]').replace(/https?:\/\/\S+/g,'[url]').slice(0,330).replace(/\n/g,' ');
-   console.warn('Erik prueba Gemini:',model,'ERROR',Number(e?.status||0),Date.now()-t,'ms',detail);
+   const detail=String(e?.message||e).replace(/AIza[A-Za-z0-9_-]+/g,'[clave oculta]').replace(/https?:\/\/\S+/g,'[url]').slice(0,300).replace(/\n/g,' ');
+   console.warn('Erik prueba sin deadline:',model,'ERROR',Number(e?.status||0),Date.now()-t,'ms',detail);
   }
- }
+ }));
 }
 export function installGuard(app,auth){
  void probeErikGemini();
