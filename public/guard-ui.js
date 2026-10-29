@@ -163,14 +163,14 @@ async function playFish(b64,mime){
   voiceSource=null;voiceAnalyser=null;
  }
 }
-async function say(intent,{resumeListening=true}={}){
+async function say(intent,{resumeListening=true,userText=null}={}){
  if(!guardActive||guardMuted||!isLoginVisible())return;
  stopRecognition();stopAudio();
  const token=guardEpoch;
  const speechTurn=guardSpeechTurn;
  guardTalking=false;statusText('Erik está preparando su respuesta…');
  try{
-  const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent,sessionId:guardVisitId})});
+  const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent,sessionId:guardVisitId,...(intent==='conversation'?{userText}: {})})});
   if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==speechTurn)return;
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
@@ -258,23 +258,66 @@ document.addEventListener('visibilitychange',()=>{
   recognitionWanted=true;queueRecognitionRestart(500);
  }
 });
-function noAccents(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function noAccents(s){return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function spokenIntent(heard){
+ const original=clean(heard).replace(/^[\s,.;:!?¡¿]+|[\s,.;:!?¡¿]+$/gu,'');
+ if(!original)return {type:'unknown'};
+ const normalized=noAccents(original).replace(/[.!?]+$/g,'').trim();
+ // Comandos deliberados y cortos para poder usarlos también sin lectura.
+ if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada|silencio|mute|silenciar)$/.test(normalized))
+  return {type:'mute'};
+ if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(normalized))
+  return {type:'keyboard'};
+ if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave)$/.test(normalized))
+  return {type:'help'};
+ if(/^(?:erik[, ]+)?(?:iniciar llamada|empezar llamada|hablar con erik|empezar|escuchame)$/.test(normalized))
+  return {type:'listening'};
+ if(/^(?:erik[, ]+)?(?:repeti|repite|otra vez)$/.test(normalized))
+  return {type:'ask'};
+ const single='([\\p{L}\\p{N}_-]+)';
+ const key='(?:contrase(?:ñ|n)a|clave)';
+ const patterns=[
+  new RegExp('^(?:erik[, ]+)?(?:(?:la|mi|tu)\\s+)?'+key+'(?:\\s+(?:es|seria|sería))?\\s*[:, -]+\\s*'+single+'$','iu'),
+  new RegExp('^(?:erik[, ]+)?(?:(?:te\\s+)?digo\\s+)?(?:(?:la|mi)\\s+)?'+key+'\\s+(?:es|seria|sería)\\s+'+single+'$','iu'),
+  new RegExp('^(?:erik[, ]+)?'+single+'\\s*[,;:-]?\\s+(?:(?:esa|esta|eso|esto)\\s+)?es\\s+(?:(?:la|mi)\\s+)?'+key+'$','iu'),
+  new RegExp('^(?:erik[, ]+)?(?:esa|esta)\\s+es\\s+mi\\s+'+key+'\\s*[:, -]+\\s*'+single+'$','iu')
+ ];
+ for(const pattern of patterns){
+  const match=original.match(pattern);
+  if(match) {
+   // Cada clave expresada oralmente debe ser exactamente UNA palabra.
+   const word=match[1];
+   return {type:'password',value:word.toLocaleLowerCase('es-AR')};
+  }
+ }
+ // Clave en solitario: NUNCA enviar una sola palabra a Gemini.
+ if(/^[\p{L}\p{N}_-]+$/u.test(original))
+  return {type:'password',value:original.toLocaleLowerCase('es-AR')};
+ // Si contiene términos de contraseña pero no fue una asignación inequívoca,
+ // pedir aclaración sin enviar el posible secreto al proveedor de IA.
+ if(/\b(contrase(?:ñ|n)a|clave|password|pin)\b/iu.test(original))
+  return {type:'clarify'};
+ return {type:'conversation',text:original.slice(0,300)};
+}
 async function handleVoice(heard){
  if(!guardActive||guardMuted||!isLoginVisible())return;
- const command=noAccents(heard).replace(/[.!?]+$/g,'').trim();
- if(/^(?:erik[, ]+)?(?:iniciar llamada|empezar llamada|hablar con erik|empezar|escuchame)$/.test(command)){void say('listening');return;}
- if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave)$/.test(command)){void say('help');return;}
- if(/^(?:erik[, ]+)?(?:repeti|repite|otra vez)$/.test(command)){void say('ask');return;}
- if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada|silencio|mute|silenciar)$/.test(command)){guardMuted=true;guardEpoch++;stopRecognition();stopAudio();displayFrame(0);setMuteAppearance();statusText('Silenciado. Tocame para reactivar voz y micrófono.');return;}
- if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(command)){one('#password')?.focus();statusText('Escribí tu contraseña en el campo.');return;}
- // Nunca mostrar, registrar en consola ni enviar a Gemini o Fish la clave reconocida.
- const secret=heard.replace(/^(?:erik[\s,]+)?(?:(?:mi|la)\s+)?(?:contrase(?:ñ|n)a|clave)(?:\s+(?:es|seria))?\s*[:,-]?\s*/iu,'').trim();
- if(!secret){void say('ask');return;}
- statusText('Verificando contraseña…');
+ const intent=spokenIntent(heard);
+ if(intent.type==='mute'){
+  guardMuted=true;guardEpoch++;stopRecognition();stopAudio();displayFrame(0);setMuteAppearance();
+  statusText('Silenciado. Tocame para reactivar la conversación.');return;
+ }
+ if(intent.type==='keyboard'){
+  one('#password')?.focus();statusText('Podés escribir tu contraseña.');return;
+ }
+ if(['help','listening','ask','clarify'].includes(intent.type)){void say(intent.type);return;}
+ if(intent.type==='conversation'){void say('conversation',{userText:intent.text});return;}
+ if(intent.type!=='password'){listen();return;}
+ // Esta palabra SOLO se envía al endpoint de autenticación, nunca a Gemini ni Fish.
+ statusText('Comprobando acceso…');
  stopRecognition();stopAudio();displayFrame(0);
  const input=one('#password');
  if(!input)return;
- input.value=secret;
+ input.value=intent.value;
  one('#login-form')?.requestSubmit();
 }
 async function startGuard(){
