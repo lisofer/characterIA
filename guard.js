@@ -98,6 +98,7 @@ export function installGuard(app,auth){
   try{
    const meta=await sharp(buf).metadata();
    if(meta.format!=='png'||!meta.hasAlpha||meta.width<100||meta.height<100||meta.width>4096||meta.height>4096)return res.status(400).json({error:'El PNG debe tener transparencia y medir entre 100 y 4096 píxeles.'});
+   for(let other=0;other<8;other++){if(other===i)continue;const reference=path.join(frameDir,other+'.png');if(!fs.existsSync(reference))continue;const m=await sharp(reference).metadata();if(m.width!==meta.width||m.height!==meta.height)return res.status(400).json({error:'Todos los PNG de Erik deben tener el mismo ancho y alto. Referencia: '+m.width+' × '+m.height+' px.'});break;}
    await fs.promises.writeFile(path.join(frameDir,i+'.png'),buf);
    res.json({ok:true,width:meta.width,height:meta.height});
   }catch(e){res.status(400).json({error:'No se pudo procesar el PNG.'});}
