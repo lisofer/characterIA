@@ -1,7 +1,7 @@
 const $=sel=>document.querySelector(sel),$$=sel=>[...document.querySelectorAll(sel)];
 const el={login:$('#login-view'),student:$('#student-view'),admin:$('#admin-view'),subtitle:$('#subtitle-text'),subBox:$('#subtitle'),avatar:$('#avatar-images'),placeholder:$('#avatar-placeholder')};
 const VOICES=['Zephyr','Puck','Charon','Kore','Fenrir','Leda','Orus','Aoede','Callirrhoe','Autonoe','Enceladus','Iapetus','Umbriel','Algieba','Despina','Erinome','Algenib','Rasalgethi','Laomedeia','Achernar','Alnilam','Schedar','Gacrux','Pulcherrima','Achird','Zubenelgenubi','Vindemiatrix','Sadachbia','Sadaltager','Sulafat'];
-let audioSegments=[];let role=null,config={},frames=Array(8).fill(false),ws=null,microphone=null,mediaStream=null,processor=null,sourceNode=null,micOn=false,micBusy=false,micRequestEpoch=0,callPending=false,audioContext=null,gain=null,analyser=null,nextAudioTime=0,animationId=0,blinkingUntil=0,nextBlink=0,currentFrame=-1,subtitleLine='',subtitleCarry='',spokenText='',smoothedEnergy=0,currentModel='',roleLoading=false;
+let audioSegments=[];let role=null,config={},frames=Array(8).fill(false),ws=null,microphone=null,mediaStream=null,processor=null,sourceNode=null,micOn=false,micBusy=false,micRequestEpoch=0,callPending=false,audioContext=null,gain=null,analyser=null,nextAudioTime=0,animationId=0,blinkingUntil=0,nextBlink=performance.now()+4000,currentFrame=-1,subtitleLine='',subtitleCarry='',spokenText='',smoothedEnergy=0,currentModel='',roleLoading=false;
 const toast=(msg)=>{const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),4500)};
 async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin',...opt,headers:{...(opt.body&&! (opt.body instanceof FormData)?{'Content-Type':'application/json'}:{}),...opt.headers}});let data;try{data=await r.json()}catch{data={error:'Respuesta inesperada'}}if(!r.ok)throw Error(data.error||`Error ${r.status}`);return data}
 const post=(url,body)=>api(url,{method:'POST',body:JSON.stringify(body)});
@@ -185,13 +185,23 @@ function scheduledEnergy(t){
  }
  return 0;
 }
-let lastAvatarPaint=0;
+// Chrome Android suspende los frames al cambiar de aplicación.
+// No interpretar el salto de tiempo al volver como una orden de parpadear.
+let lastAvatarPaint=0,avatarResumeHoldUntil=0,avatarWasBackgrounded=document.hidden;
 function animateMouth(timestamp=performance.now()){
+ if(document.hidden){animationId=0;return;}
  animationId=requestAnimationFrame(animateMouth);
- if(timestamp-lastAvatarPaint<32)return; // 30 fps: menos CPU/GPU y decodificación.
+ if(timestamp-lastAvatarPaint<32)return; // 30 fps: menos CPU/GPU.
  lastAvatarPaint=timestamp;
  renderCaptions();
- const now=performance.now();
+ const now=timestamp;
+ if(now<avatarResumeHoldUntil){
+  // Mostrar el mismo fotograma mientras Chrome reconstruye las capas.
+  blinkingUntil=0;
+  el.placeholder.classList.remove('talking');
+  showFrame(0);
+  return;
+ }
  if(now>=nextBlink){blinkingUntil=now+105;nextBlink=now+(Math.max(1,Number(config.blinkRate||4))+Math.random()*1.4)*1000;}
  const blink=now<blinkingUntil?1:0;
  const offset=(Number(config.mouthDelay)||0)/1000;
@@ -543,6 +553,35 @@ function setupStudent(){
   finally{btn.disabled=false}
  };
 }
+// Chrome puede descartar las texturas GPU cuando se cambia de app.
+// Pausamos SOLO el dibujo, sin cerrar micrófono, WebSocket ni salida de voz.
+function suspendAvatarVisuals(){
+ avatarWasBackgrounded=true;
+ if(animationId){cancelAnimationFrame(animationId);animationId=0;}
+ blinkingUntil=0;
+ nextBlink=Infinity;
+ if(role==='student')showFrame(0);
+}
+function resumeAvatarVisuals(){
+ if(document.hidden||!avatarWasBackgrounded)return;
+ avatarWasBackgrounded=false;
+ if(role!=='student')return;
+ const now=performance.now();
+ avatarResumeHoldUntil=now+1200;
+ nextBlink=avatarResumeHoldUntil+Math.max(2,Number(config.blinkRate)||4)*1000;
+ blinkingUntil=0;
+ lastAvatarPaint=0;
+ showFrame(0);
+ if(audioContext&&!animationId)animateMouth();
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden)suspendAvatarVisuals();
+ else resumeAvatarVisuals();
+});
+window.addEventListener('pagehide',suspendAvatarVisuals);
+window.addEventListener('pageshow',event=>{
+ if(event.persisted)resumeAvatarVisuals();
+});
 // Administración: lista de ocho fotogramas y vista previa responsive.
 const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?optimized=1&v=${frameVersions[i]||0}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}

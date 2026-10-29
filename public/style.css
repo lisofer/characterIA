@@ -582,3 +582,26 @@ body:has(#login-view:not(.hidden)){
  }
  .student-page .stage-glow{filter:none!important}
 }
+
+/* Corrección de recuperación de pestaña (Chrome Android).
+   Los filtros aplicados al PNG visible invalidan la textura al volver de otra app.
+   La información de conectando/llamada terminada sigue en el overlay textual. */
+.student-page .avatar-images,
+.student-page .stage.connecting .avatar-images,
+.student-page .stage.call-ended .avatar-images{
+  filter:none!important;
+  -webkit-filter:none!important;
+  transition:none!important;
+  will-change:auto!important;
+}
+.student-page .avatar-frame,
+.student-page .stage.connecting .avatar-frame.is-visible,
+.student-page .stage.call-ended .avatar-frame.is-visible{
+  filter:none!important;
+  -webkit-filter:none!important;
+  transition:none!important;
+  animation:none!important;
+  backface-visibility:visible!important;
+  -webkit-backface-visibility:visible!important;
+  will-change:auto!important;
+}
