@@ -1,6 +1,6 @@
 /* Erik: portero de NEXOCV. La verificación de contraseñas se hace SOLO en /api/login. */
 const one=(s)=>document.querySelector(s);
-let guardConfig={}, guardFrames=[], guardActive=false,guardEpoch=0,guardMuted=false;
+let guardConfig={}, guardFrames=[], guardActive=false,guardEpoch=0,guardMuted=false,guardNeedsGesture=false;
 let recognizer=null,recognizing=false,recognitionWanted=false,guardTalking=false;
 let voicePlayer=null,voiceContext=null,voiceAnalyser=null,voiceSource=null,speechWait=null,voiceFinish=null,browserVoiceFinish=null;
 let rAF=0,nextBlink=0,blinkEnd=0,painted=-1,amplitude=0,spokenAt=0,voiceGreeting=false;
@@ -22,24 +22,27 @@ function setMuteAppearance(){
  const button=one('#guard-toggle'),dock=one('#guard-dock');
  dock?.classList.toggle('is-muted',guardMuted);
  button?.setAttribute('aria-pressed',String(guardMuted));
- const label=guardMuted?'Reactivar voz y micrófono de Erik':'Silenciar a Erik y detener el micrófono';
+ const label=guardMuted?'Reactivar voz y micrófono de Erik':guardNeedsGesture?'Activar voz y micrófono de Erik':'Silenciar a Erik y detener el micrófono';
  button?.setAttribute('aria-label',label);button?.setAttribute('title',label);
  const hint=one('#guard-hint');if(hint)hint.textContent=label;
 }
 function stopGuard({hide=false}={}){
- guardEpoch++;stopRecognition();stopAudio();guardActive=false;guardMuted=false;
+ guardEpoch++;stopRecognition();stopAudio();guardActive=false;guardMuted=false;guardNeedsGesture=false;
  if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;setMuteAppearance();
  if(hide)one('#guard-dock')?.classList.add('hidden');
 }
 function toggleGuard(){
  if(!guardActive)return;
- guardMuted=!guardMuted;guardEpoch++;
+ // Si el navegador bloqueó el inicio automático, el primer toque sirve para activar.
+ if(guardNeedsGesture&&!guardMuted){
+  guardEpoch++;guardNeedsGesture=false;stopRecognition();stopAudio();setMuteAppearance();
+  void audioUnlock();void say('ask');return;
+ }
+ guardMuted=!guardMuted;guardEpoch++;guardNeedsGesture=false;
  stopRecognition();stopAudio();amplitude=0;displayFrame(0);setMuteAppearance();
  if(guardMuted){statusText('Está bien, me callo. Tocame para volver a hablar.');return;}
  statusText('Dale, sigo acá. ¿Cuál es la contraseña?');
- // El audio se desbloquea desde el toque real del usuario, cuando Chrome lo permite.
- void audioUnlock();
- void say('ask');
+ void audioUnlock();void say('ask');
 }
 function displayFrame(i){
  const frame=guardFrames[i]||guardFrames[(i%2)]||guardFrames[0];
@@ -95,13 +98,15 @@ async function audioUnlock(){
 }
 function speakBrowser(text){
  return new Promise(resolve=>{
-  if(!('speechSynthesis' in window)){resolve();return;}
+  if(!('speechSynthesis' in window)){guardNeedsGesture=true;setMuteAppearance();resolve();return;}
   let done=false;const end=()=>{if(done)return;done=true;clearTimeout(timeout);if(browserVoiceFinish===end)browserVoiceFinish=null;resolve();};
   const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=.96;u.pitch=.95;
-  browserVoiceFinish=end;
-  u.onend=end;u.onerror=end;
-  const timeout=setTimeout(end,Math.max(3000,Math.min(17000,text.length*115)));
-  try{speechSynthesis.cancel();speechSynthesis.speak(u);}catch{end();}
+  let started=false;browserVoiceFinish=end;
+  u.onstart=()=>{started=true;guardNeedsGesture=false;setMuteAppearance();};
+  u.onend=end;
+  u.onerror=()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();};
+  const timeout=setTimeout(()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();},Math.max(3000,Math.min(17000,text.length*115)));
+  try{speechSynthesis.cancel();speechSynthesis.speak(u);}catch{guardNeedsGesture=true;setMuteAppearance();end();}
  });
 }
 async function playFish(b64,mime){
@@ -116,7 +121,8 @@ async function playFish(b64,mime){
     voiceSource=voiceContext.createMediaElementSource(audio);voiceSource.connect(voiceAnalyser);voiceAnalyser.connect(voiceContext.destination);
    }catch(e){console.warn('Erik: sin analizador:',e);}
   }
-  await audio.play();
+  try{await audio.play();}catch(e){guardNeedsGesture=true;setMuteAppearance();throw e;}
+  guardNeedsGesture=false;setMuteAppearance();
   await new Promise(resolve=>{const finish=()=>{if(voiceFinish===finish)voiceFinish=null;resolve();};voiceFinish=finish;audio.onended=finish;audio.onerror=finish;});
  }finally{
   URL.revokeObjectURL(url);
@@ -137,7 +143,7 @@ async function say(intent,{resumeListening=true}={}){
   guardTalking=true;spokenAt=performance.now();amplitude=0;
   if(data.engine==='fish'&&data.audio){
    try{await playFish(data.audio,data.mime);}catch(e){
-    statusText('Para escuchar a Erik, tocá «Hablar con Erik».');
+    statusText('Tu navegador bloqueó el sonido. Tocá a Erik para activarlo.');
     console.warn('Audio bloqueado por navegador:',e);
    }
   }else await speakBrowser(data.text);
@@ -154,7 +160,7 @@ function getRecognizer(){
  r.onstart=()=>{if(guardMuted||!guardActive){try{r.abort();}catch{}return;}recognizing=true;statusText('Te escucho. Decí la contraseña.');};
  r.onerror=e=>{
   recognizing=false;if(guardMuted||!guardActive)return;
-  if(e.error==='not-allowed'||e.error==='service-not-allowed')statusText('Para usar la voz, habilitá el micrófono. También podés escribir tu contraseña.');
+  if(e.error==='not-allowed'||e.error==='service-not-allowed'){guardNeedsGesture=true;setMuteAppearance();statusText('Tocá a Erik para habilitar el micrófono, o escribí la contraseña.');}
   else if(e.error==='no-speech')statusText('No te escuché. Tocá Hablar para probar de nuevo.');
   else statusText('No pude escucharte. Tocá Hablar o usá el teclado.');
  };
@@ -194,7 +200,7 @@ async function handleVoice(heard){
 }
 async function startGuard(){
  if(guardActive||!isLoginVisible())return;
- guardActive=true;guardMuted=false;setMuteAppearance();const token=++guardEpoch;
+ guardActive=true;guardMuted=false;guardNeedsGesture=false;setMuteAppearance();const token=++guardEpoch;
  one('#guard-dock')?.classList.remove('hidden');
  nextBlink=performance.now()+3800;
  try{
