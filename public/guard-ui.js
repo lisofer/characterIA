@@ -261,8 +261,11 @@ function spokenIntent(heard){
  if(!original)return {type:'unknown'};
  const normalized=noAccents(original).replace(/[.!?]+$/g,'').trim();
  // Comandos deliberados y cortos para poder usarlos también sin lectura.
- if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada|silencio|mute|silenciar)$/.test(normalized))
+ if(/^(?:erik[, ]+)?(?:silencio|mute|silenciar|desactivar microfono|terminar llamada)$/.test(normalized))
   return {type:'mute'};
+ if(/^(?:erik[, ]+)?(?:para|parate|basta|espera|esperame|callate|deja de hablar|interrumpir)$/.test(normalized)
+   || /^(?:para|basta|espera|callate)[, ]+erik$/.test(normalized))
+  return {type:'interrupt'};
  if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(normalized))
   return {type:'keyboard'};
  if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave|cual es (?:la|mi) contrasena|cual es (?:la|mi) clave)$/.test(normalized))
@@ -337,6 +340,12 @@ async function handleVoice(heard){
  bargeInPending=false;clearTimeout(bargeInTimer);bargeInTimer=null;
  const intent=spokenIntent(heard);
  if(intent.type==='mute'){guardMuted=true;stopRecognition();stopPlayback();setMuteAppearance();statusText('Erik silenciado. Tocame para reactivar.');return;}
+ if(intent.type==='interrupt'){
+  // Interrumpe la generación de voz, pero deja el micrófono abierto.
+  stopPlayback();bargeInPending=true;
+  if(liveReady&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'interrupt'}));
+  statusText('Te escucho.');listen();return;
+ }
  if(intent.type==='keyboard'){one('#password')?.focus();statusText('Podés escribir tu contraseña.');return;}
  if(['help','listening','ask','clarify'].includes(intent.type)){sendIntent(intent.type);listen();return;}
  if(intent.type==='conversation'){sendConversation(intent.text);listen();return;}
