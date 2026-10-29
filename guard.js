@@ -92,7 +92,15 @@ export function makeGuardLive(ws){
   if(!ready||closed)return;
   let m;try{m=JSON.parse(String(raw));}catch{return;}
   if(typeof m!=='object'||!m)return;
-  if(!['text','intent','repeat'].includes(m.type))return;
+  if(!['text','intent','repeat','interrupt'].includes(m.type))return;
+  // La cancelación se envía en la sesión Live de Erik, sin texto ni contraseña.
+  // clientContent interrumpe la generación actual; el siguiente mensaje real
+  // continúa la conversación con el mismo contexto.
+  if(m.type==='interrupt'){
+   try{live.sendClientContent({turnComplete:false});}
+   catch{send(ws,'notice',{message:'Te escucho.'});}
+   return;
+  }
   const now=Date.now();
   if(now-lastInputTime<600)return;
   if(++inputCount>45){send(ws,'error',{message:'Demasiados mensajes en esta visita.'});return;}
