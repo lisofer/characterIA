@@ -696,17 +696,18 @@ body:has(#login-view:not(.hidden)){
 }
 
 
-/* Erik · burbuja consolidada: compacta, a la izquierda y sin tapar el rostro. */
+/* Erik · burbuja de lectura equilibrada: ancha hacia la izquierda, sin tapar el rostro. */
 .guard-dock .guard-bubble{
   position:absolute;
   left:auto;
   right:calc(50% + 28px);
   top:clamp(38px,6.4dvh,78px);
   bottom:auto;
-  width:fit-content;
-  min-width:110px;
-  max-width:min(205px,44vw);
-  padding:11px 12px 12px;
+  /* Ancho definido: fit-content comprimía el globo por el posicionamiento absoluto. */
+  width:min(280px,34vw);
+  min-width:0;
+  max-width:calc(100vw - 24px);
+  padding:12px 15px 13px;
   border:2px solid rgba(17,41,78,.95);
   border-radius:20px 20px 18px 20px;
   background:linear-gradient(155deg,#fff 0%,#edf6ff 100%);
@@ -737,8 +738,10 @@ body:has(#login-view:not(.hidden)){
   max-width:100%;
   color:#0b2443;
   font:750 clamp(13px,1.8vw,16px)/1.28 'Outfit','DM Sans',Arial,sans-serif;
-  overflow-wrap:anywhere;
-  text-wrap:pretty;
+  overflow-wrap:break-word;
+  word-break:normal;
+  hyphens:none;
+  text-wrap:balance;
 }
 .guard-dock.is-muted .guard-bubble{
   background:linear-gradient(160deg,#d4dbe7,#aebccc);
@@ -753,10 +756,11 @@ body:has(#login-view:not(.hidden)){
   .guard-dock .guard-bubble{
     right:calc(50% + 24px);
     top:clamp(45px,7dvh,70px);
-    width:fit-content;
-    min-width:105px;
-    max-width:min(175px,42vw);
-    padding:10px 11px 11px;
+    /* El extremo derecho permanece junto al rostro: el ancho extra crece a la izquierda. */
+    width:min(218px,55vw);
+    min-width:0;
+    max-width:calc(100vw - 24px);
+    padding:11px 13px 12px;
     border-radius:18px;
   }
   .guard-dock .guard-bubble::after{right:-10px;top:57%}
@@ -766,8 +770,9 @@ body:has(#login-view:not(.hidden)){
   .guard-dock .guard-bubble{
     right:calc(50% + 18px);
     top:clamp(12px,4dvh,35px);
-    min-width:100px;
-    max-width:min(150px,39vw);
+    width:min(210px,53vw);
+    min-width:0;
+    max-width:calc(100vw - 24px);
   }
   .guard-dock .guard-bubble::after{right:-10px;top:55%}
 }
