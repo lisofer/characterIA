@@ -601,42 +601,43 @@ body:has(#login-view:not(.hidden)){
 }
 
 
-/* Erik: módulo de ingreso independiente del asistente CV */
-.auth-page .login-wrap{max-width:460px;width:min(100%,460px)}
-.guard-dock{margin:15px auto 0;padding:12px 14px;display:flex;align-items:center;gap:12px;border:1px solid rgba(111,167,234,.30);border-radius:19px;background:linear-gradient(125deg,rgba(28,53,88,.91),rgba(10,25,47,.97));box-shadow:0 13px 36px rgba(0,0,0,.18);color:#e9f4ff;overflow:hidden}
-.guard-visual{height:180px;min-width:132px;width:132px;position:relative;align-self:center}
-.guard-avatar{position:relative;width:100%;height:100%;display:grid;place-items:center}
-.guard-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:0;pointer-events:none}
+/* Erik · portero flotante: no modifica el formulario original */
+.auth-page .login-wrap{max-width:410px;width:min(100%,410px);position:relative;z-index:2}
+.guard-dock{position:absolute;right:clamp(7px,3vw,38px);bottom:clamp(12px,3dvh,35px);width:clamp(210px,27vw,310px);height:clamp(235px,34dvh,365px);z-index:3;pointer-events:none;display:block;overflow:visible;color:#10213b}
+.guard-avatar-button{position:absolute;right:0;bottom:0;width:100%;height:100%;background:transparent;border:0;padding:0;cursor:pointer;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.guard-avatar-button:focus-visible{outline:3px solid #6de4ff;outline-offset:4px;border-radius:26px}
+.guard-avatar{position:absolute;inset:0;width:100%;height:100%;display:block;filter:drop-shadow(0 7px 18px rgba(4,12,35,.45));transition:opacity .18s ease}
+.guard-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:right bottom;opacity:0;pointer-events:none}
 .guard-frame.is-visible{opacity:1}
-.guard-fallback{font-size:58px;display:grid;place-items:center;height:100%;width:100%;color:#90cafe}
-.guard-controls{min-width:0;flex:1;display:flex;flex-direction:column;gap:7px}
-.guard-title{font:800 22px 'Outfit','DM Sans',Arial,sans-serif;letter-spacing:-.02em}
-.guard-title span{font-size:10px;font-weight:800;letter-spacing:.09em;color:#8db9e8}
-#guard-status{font-size:13px;line-height:1.36;min-height:2.4em;color:#e3efff;margin:0}
-.guard-buttons{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.guard-buttons button{font-weight:700;border:1px solid rgba(132,194,255,.39);border-radius:10px;min-height:40px;padding:7px 10px;color:#fff}
-.guard-speak-btn{background:linear-gradient(120deg,#1676dc,#4ca3f5);font-size:13px}
-.guard-small-btn{background:rgba(21,44,75,.8);font-size:12px}
-.guard-buttons button:focus-visible{outline:3px solid #d5f4ff;outline-offset:2px}
-.guard-privacy{font-size:10px!important;line-height:1.3;color:#a4bdd9;margin:1px 0 0!important}
+.guard-fallback{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;width:100%;height:100%;font-size:0}
+.guard-fallback svg{width:100%;height:100%;object-fit:contain}
+.guard-mic-indicator{position:absolute;right:-2px;bottom:19px;width:clamp(56px,7vw,80px);height:clamp(56px,7vw,80px);border:2px solid #8de9ff;border-radius:50%;display:grid;place-items:center;color:white;background:linear-gradient(145deg,#37bfff,#0069e7);box-shadow:0 0 0 5px rgba(0,157,247,.17),0 0 26px #00bbff,0 8px 14px rgba(1,8,26,.4)}
+.guard-mic-indicator svg{width:45%;height:45%;display:block}
+.guard-dock.is-muted .guard-avatar{opacity:.72;filter:grayscale(.24) drop-shadow(0 6px 12px rgba(0,0,0,.27))}
+.guard-dock.is-muted .guard-mic-indicator{background:linear-gradient(130deg,#5f6d80,#34445d);box-shadow:0 0 0 4px rgba(110,134,158,.15)}
+.guard-dock.is-muted .guard-mic-indicator::after{content:'';position:absolute;width:70%;height:3px;background:#fff;transform:rotate(-45deg);border-radius:2px}
+.guard-bubble{position:absolute;right:-4px;top:-28px;max-width:min(220px,85vw);min-width:135px;padding:12px 14px;background:#fff;border:3px solid #16213d;border-radius:26px;box-shadow:0 7px 23px rgba(0,0,0,.25);pointer-events:none;text-align:center;z-index:4}
+.guard-bubble::after{content:'';position:absolute;right:34px;bottom:-18px;width:22px;height:22px;background:#fff;border-right:3px solid #16213d;border-bottom:3px solid #16213d;transform:rotate(35deg) skew(-14deg);z-index:-1}
+.guard-bubble p{margin:0;color:#0d2146;font:800 clamp(13px,1.8vw,18px)/1.2 'Outfit','DM Sans',Arial,sans-serif;overflow-wrap:anywhere}
+.guard-accessible-hint{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .guard-admin-preview{max-height:290px;overflow:hidden}
 .guard-admin-preview .preview-avatar{height:240px}
 .guard-admin-preview #guard-admin-image{object-fit:contain;max-width:100%;max-height:100%;width:100%;height:100%}
 .admin-pane [data-setting="guardPrompt"]{font:500 13px/1.55 ui-monospace,Consolas,monospace;min-height:210px}
 .admin-pane [data-setting="guardGreeting"],.admin-pane [data-setting="guardSampleText"]{min-height:72px}
 @media(max-width:600px){
- .auth-page .login-wrap{max-width:410px}
- .guard-dock{padding:10px;gap:7px;margin-top:12px;border-radius:16px}
- .guard-visual{width:104px;min-width:104px;height:148px}
- .guard-title{font-size:19px}
- #guard-status{font-size:12px;min-height:2em}
- .guard-buttons{gap:5px}
- .guard-buttons button{min-height:37px;padding:6px 8px;font-size:11px}
- .guard-speak-btn{font-size:12px!important}
- .guard-privacy{font-size:9px!important}
+ .auth-page .login-wrap{max-width:410px;transform:translateY(-clamp(58px,10dvh,118px))}
+ .guard-dock{right:clamp(3px,1.7vw,12px);bottom:clamp(8px,2dvh,23px);width:clamp(190px,57vw,275px);height:clamp(228px,34dvh,340px)}
+ .guard-bubble{right:9px;top:-42px;max-width:185px;padding:9px 12px;border-radius:21px}
+ .guard-bubble p{font-size:clamp(12px,3.3vw,15px)}
+ .guard-mic-indicator{right:0;bottom:18px;width:64px;height:64px}
+ .auth-page:has(#password:focus) .guard-dock{opacity:0;visibility:hidden;pointer-events:none}
 }
 @media(max-height:690px){
- .auth-page .login-wrap{max-height:100%;padding:0;overflow-y:auto}
- .guard-visual{height:122px;width:90px;min-width:90px}
- .guard-dock{margin-top:9px}
+ .auth-page .login-wrap{transform:translateY(-clamp(34px,8dvh,65px))}
+ .guard-dock{height:clamp(150px,27dvh,215px);width:clamp(150px,39vw,185px);bottom:5px}
+ .guard-bubble{top:-36px;right:6px;max-width:145px;padding:7px 9px}
+ .guard-bubble p{font-size:12px}
+ .guard-mic-indicator{width:52px;height:52px}
 }
+@media(prefers-reduced-motion:reduce){.guard-avatar{transition:none}}
