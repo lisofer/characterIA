@@ -87,7 +87,8 @@ app.use(express.static(path.join(ROOT,'public'),{index:'index.html',maxAge:0}));
 app.get('*',(req,res)=>res.sendFile(path.join(ROOT,'public','index.html')));
 app.use((err,req,res,next)=>res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:err.message||'Error'}));
 const server=http.createServer(app);const wss=new WebSocketServer({noServer:true,maxPayload:150000});
-const guardWss=new WebSocketServer({noServer:true,maxPayload:4096});
+// Mantener margen para PCM 16 kHz incluso en dispositivos cuyo AudioContext ya usa 16 kHz.
+const guardWss=new WebSocketServer({noServer:true,maxPayload:24576});
 const activeGuardByIP=new Map();
 server.on('upgrade',(req,socket,head)=>{
  const origin=req.headers.origin,host=req.headers.host;
