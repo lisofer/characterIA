@@ -41,7 +41,14 @@
  <label class="range-field">Temperatura <output data-for="guardTemperature"></output><input data-setting="guardTemperature" type="range" min="0" max="1" step=".05"></label>
  <label class="range-field">Top P <output data-for="guardTopP"></output><input data-setting="guardTopP" type="range" min="0" max="1" step=".05"></label>
  <label class="range-field">Velocidad <output data-for="guardSpeed"></output><input data-setting="guardSpeed" type="range" min=".7" max="1.5" step=".05"></label></div>
- <label class="setting-label">Texto para prueba de voz<textarea data-setting="guardSampleText" rows="3" maxlength="350"></textarea></label>
+ <div class="guard-ref-upload">
+ <h4>O bien: audio de referencia</h4>
+ <p>Usá un audio WAV, MP3 o FLAC de unos 10 a 30 segundos, con voz clara y con permiso de quien habla. Si completás el ID de voz, se usará ese ID; si lo dejás vacío, se usará este audio.</p>
+ <label class="setting-label" for="guard-reference-audio">Archivo de muestra<input id="guard-reference-audio" type="file" accept=".wav,.mp3,.flac,audio/wav,audio/mpeg,audio/flac"></label>
+ <label class="setting-label" for="guard-reference-text">Transcripción exacta de la muestra<textarea id="guard-reference-text" rows="3" placeholder="Escribí lo que dice la grabación…"></textarea></label>
+ <button type="button" id="save-guard-reference" class="secondary-btn">Guardar muestra de voz</button>
+ <p id="guard-reference-status" role="status" class="muted-small"></p>
+ </div><label class="setting-label">Texto para prueba de voz<textarea data-setting="guardSampleText" rows="3" maxlength="350"></textarea></label>
  <button type="button" id="test-guard-voice" class="secondary-btn">▶ Escuchar muestra Fish</button><p id="guard-voice-status" role="status" class="muted-small"></p></div>
  <div class="panel"><h3>Sincronización de boca y parpadeo de Erik</h3>
  <div class="setting-grid">
