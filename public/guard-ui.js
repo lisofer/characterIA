@@ -207,7 +207,7 @@ async function toggleGuard(){
   }else if(turnComplete)completedTurn();
   return;
  }
- guardMuted=!guardMuted;guardEpoch++;stopRecognition();stopPlayback();
+ guardMuted=!guardMuted;stopRecognition();stopPlayback();
  setMuteAppearance();
  if(guardMuted){statusText('Erik está silenciado. Tocame para continuar.');return;}
  connectionRetries=0;
@@ -291,7 +291,7 @@ function spokenIntent(heard){
 async function handleVoice(heard){
  if(!guardActive||guardMuted||!isLoginVisible())return;
  const intent=spokenIntent(heard);
- if(intent.type==='mute'){guardMuted=true;guardEpoch++;stopRecognition();stopPlayback();setMuteAppearance();statusText('Erik silenciado. Tocame para reactivar.');return;}
+ if(intent.type==='mute'){guardMuted=true;stopRecognition();stopPlayback();setMuteAppearance();statusText('Erik silenciado. Tocame para reactivar.');return;}
  if(intent.type==='keyboard'){one('#password')?.focus();statusText('Podés escribir tu contraseña.');return;}
  if(['help','listening','ask','clarify'].includes(intent.type)){sendIntent(intent.type);return;}
  if(intent.type==='conversation'){sendConversation(intent.text);return;}
