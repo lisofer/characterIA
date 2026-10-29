@@ -302,6 +302,8 @@ function createAudioJob(text){
  while(guardAudioJobs.size>=70)guardAudioJobs.delete(guardAudioJobs.keys().next().value);
  const id=crypto.randomBytes(24).toString('base64url');
  guardAudioJobs.set(id,{text,created:now});
+ const cleanup=setTimeout(()=>guardAudioJobs.delete(id),AUDIO_JOB_LIFETIME);
+ cleanup.unref?.();
  return '/api/guard/audio/'+id;
 }
 async function fishStreamingResponse(text,s,signal){
