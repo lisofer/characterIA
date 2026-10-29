@@ -8,6 +8,8 @@ let rAF=0,nextBlink=0,blinkEnd=0,painted=-1,amplitude=0,spokenAt=0,voiceGreeting
 const guardVisual=one('#guard-avatar'),status=one('#guard-status');
 const frameDescriptions=['Abiertos · reposo','Cerrados · reposo','Abiertos · A','Cerrados · A','Abiertos · O','Cerrados · O','Abiertos · E','Cerrados · E'];
 const clean=(s)=>String(s||'').normalize('NFC').trim();
+// Identificador efímero de esta visita: sirve para evitar frases repetidas, no contiene datos personales.
+const guardVisitId=globalThis.crypto?.randomUUID?.()||('guard_'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2));
 function statusText(t){if(status)status.textContent=t;}
 function isLoginVisible(){return !one('#login-view')?.classList.contains('hidden');}
 async function readJSON(url,opt){const r=await fetch(url,{credentials:'same-origin',...opt});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Error '+r.status);return data;}
@@ -168,7 +170,7 @@ async function say(intent,{resumeListening=true}={}){
  const speechTurn=guardSpeechTurn;
  guardTalking=false;statusText('Erik está preparando su respuesta…');
  try{
-  const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent})});
+  const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent,sessionId:guardVisitId})});
   if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==speechTurn)return;
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
