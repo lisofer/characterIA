@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import multer from 'multer';
-import {GoogleGenAI,Modality} from '@google/genai';
+import {GoogleGenAI,Modality,StartSensitivity,EndSensitivity} from '@google/genai';
 import {DATA_DIR,allSettings} from './db.js';
 
 const optimizedCache=new Map();
@@ -32,7 +32,7 @@ export function makeGuardLive(ws){
  const conf=allSettings();
  const voice=availableVoice(conf.guardVoice);
  let live=null,closed=false,ready=false,turnOpen=false,lastInputTime=0,inputCount=0;
- let welcomeIssued=false;
+ let welcomeIssued=false,authPending=false;
  const stop=()=>{closed=true;try{live?.close()}catch{}};
  const noSecrets=text=>{
   const t=String(text||'').trim().replace(/\s+/g,' ');
@@ -56,6 +56,12 @@ export function makeGuardLive(ws){
   responseModalities:[Modality.AUDIO],
   outputAudioTranscription:{},
   inputAudioTranscription:{},
+  realtimeInputConfig:{automaticActivityDetection:{
+   disabled:false,
+   startOfSpeechSensitivity:StartSensitivity.START_SENSITIVITY_HIGH,
+   endOfSpeechSensitivity:EndSensitivity.END_SENSITIVITY_LOW,
+   prefixPaddingMs:120,silenceDurationMs:650
+  }},
   speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:voice}}},
   systemInstruction:{parts:[{text:[
    'SOS ERIK, EL GUARDIA DE NEXOCV. Este personaje es independiente de NEXO, la orientadora del CV.',
@@ -76,12 +82,12 @@ export function makeGuardLive(ws){
    onmessage:m=>{
     if(closed)return;
     const sc=m.serverContent||{};
-    if(sc.interrupted)send(ws,'interrupted');
+    if(sc.interrupted&&!authPending)send(ws,'interrupted');
     for(const part of sc.modelTurn?.parts||[])
-     if(part.inlineData?.data)send(ws,'audio',{pcm:part.inlineData.data,mimeType:part.inlineData.mimeType||'audio/pcm;rate=24000'});
-    if(sc.outputTranscription?.text)send(ws,'transcript',{text:sc.outputTranscription.text});
-    if(sc.inputTranscription?.text)send(ws,'input_transcript',{text:sc.inputTranscription.text});
-    if(sc.turnComplete){turnOpen=false;send(ws,'turn_complete');}
+     if(!authPending&&part.inlineData?.data)send(ws,'audio',{pcm:part.inlineData.data,mimeType:part.inlineData.mimeType||'audio/pcm;rate=24000'});
+    if(!authPending&&sc.outputTranscription?.text)send(ws,'transcript',{text:sc.outputTranscription.text});
+    if(!authPending&&sc.inputTranscription?.text)send(ws,'input_transcript',{text:sc.inputTranscription.text});
+    if(sc.turnComplete){turnOpen=false;if(!authPending)send(ws,'turn_complete');}
    },
    onerror:e=>{if(!closed){console.warn('Erik Live error:',String(e?.message||e).slice(0,150));send(ws,'error',{message:'Gemini 3.8 Live no está disponible.'});try{ws.close()}catch{}}},
    onclose:e=>{if(!closed){send(ws,'closed',{message:'Se cerró Gemini 3.8 Live. Tocá a Erik para reconectar.'});try{ws.close()}catch{}}}
@@ -95,7 +101,12 @@ export function makeGuardLive(ws){
   if(!ready||closed)return;
   let m;try{m=JSON.parse(String(raw));}catch{return;}
   if(typeof m!=='object'||!m)return;
-  if(!['ready','text','intent','repeat','interrupt','audio'].includes(m.type))return;
+  if(!['ready','text','intent','repeat','interrupt','audio','auth_pending'].includes(m.type))return;
+  if(m.type==='auth_pending'){
+   // Callar inmediatamente a Erik hasta recibir el resultado de /api/login.
+   // No se transmite ninguna contraseña en este mensaje.
+   authPending=true;return;
+  }
   if(m.type==='ready'){
    if(welcomeIssued)return;
    welcomeIssued=true;turnOpen=true;
@@ -106,6 +117,7 @@ export function makeGuardLive(ws){
    return;
   }
   if(m.type==='audio'){
+   if(authPending)return;
    if(typeof m.pcm==='string'&&m.pcm.length>0&&m.pcm.length<120000)
     try{live.sendRealtimeInput({audio:{data:m.pcm,mimeType:'audio/pcm;rate=16000'}})}catch{}
    return;
@@ -128,6 +140,10 @@ export function makeGuardLive(ws){
   else if(m.type==='repeat')input='Repetí tu presentación breve y recordá que se puede ingresar por voz o por teclado.';
   if(!input){send(ws,'notice',{message:'Decí una sola palabra para la clave, o hablá en una frase para conversar.'});return;}
   try{
+   if(authPending){
+    if(m.type!=='intent'||m.intent!=='retry')return;
+    authPending=false;
+   }
    turnOpen=true;
    live.sendClientContent({turns:[{role:'user',parts:[{text:input}]}],turnComplete:true});
   }catch{send(ws,'error',{message:'No pude enviar el mensaje a Gemini Live.'});}
