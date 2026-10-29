@@ -205,90 +205,68 @@ async function fishAudio(text,s){
  }finally{clearTimeout(timer);}
 }
 
-// Voz estable para Erik: primero Fish Audio; únicamente si falla, Gemini TTS.
-// Las contraseñas nunca se entregan a ninguno de los sintetizadores.
-function pcmToWav(pcm,rate=24000){
- const b=Buffer.alloc(44+pcm.length);
- b.write('RIFF',0);b.writeUInt32LE(36+pcm.length,4);b.write('WAVEfmt ',8);
- b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);
- b.writeUInt32LE(rate,24);b.writeUInt32LE(rate*2,28);b.writeUInt16LE(2,32);
- b.writeUInt16LE(16,34);b.write('data',36);b.writeUInt32LE(pcm.length,40);pcm.copy(b,44);
- return b;
-}
-async function geminiSpeech(text){
- if(!process.env.GEMINI_API_KEY)throw new Error('GEMINI_API_KEY no configurada');
- const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
- const models=['gemini-3.8-flash-lite-tts','gemini-3.8-flash-tts'];
- let last;
- for(const model of models){
-  try{
-   const res=await ai.models.generateContent({
-    model,
-    contents:[{role:'user',parts:[{text:'Hablá en español argentino claro, como un guardia juvenil, un poco gruñón y gracioso. Decí exactamente estas palabras, sin agregar ni omitir nada:\\n'+text}]}],
-    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},abortSignal:AbortSignal.timeout(16000),httpOptions:{retryOptions:{attempts:1}}}
-   });
-   const part=res.candidates?.[0]?.content?.parts?.find(p=>p.inlineData?.data);
-   if(!part)throw new Error('Gemini no devolvió audio');
-   const bytes=Buffer.from(part.inlineData.data,'base64');
-   if(!bytes.length||bytes.length>8_000_000)throw new Error('Audio vacío o demasiado grande');
-   if(bytes.length>12&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WAVE')
-    return {bytes,mime:'audio/wav',engine:'gemini'};
-   const mime=String(part.inlineData.mimeType||'');
-   if(!mime||/audio\/(pcm|l16)/i.test(mime))
-    return {bytes:pcmToWav(bytes),mime:'audio/wav',engine:'gemini'};
-   throw new Error('Formato TTS desconocido');
-  }catch(err){
-   console.warn('Erik Gemini TTS:',model,'HTTP',Number(err?.status||err?.code||0)||'desconocido');
-   last=err;
-   if(![404,429].includes(Number(err?.status||err?.code||0)))break;
-  }
- }
- throw last||new Error('Gemini TTS no respondió');
-}
+// Una sola voz para Erik: Fish Audio. Gemini solo escribe texto; nunca sintetiza voz.
+// Cache del saludo en el volumen persistente para no esperar a Fish en cada visita.
 let greetingCache=null,greetingPending=null;
-function greetingSignature(s){
- let stamp='';try{const f=fs.statSync(refAudioFile);stamp=String(f.mtimeMs)+':'+f.size;}catch{}
+const welcomeAudioFile=path.join(DATA_DIR,'erik-welcome-fish.mp3');
+const welcomeMetaFile=path.join(DATA_DIR,'erik-welcome-fish.json');
+function greetingSignature(settings){
+ let sample='';try{const stat=fs.statSync(refAudioFile);sample=String(stat.mtimeMs)+':'+stat.size;}catch{}
  return crypto.createHash('sha256').update(JSON.stringify([
-  s.guardVoiceId||'',s.guardFishModel||'',s.guardTemperature,s.guardTopP,s.guardSpeed,stamp,
-  process.env.FISH_API_KEY?'fish-enabled':'fish-disabled'
+  GUARD_WELCOME,settings.guardVoiceId||'',settings.guardFishModel||'',settings.guardTemperature,
+  settings.guardTopP,settings.guardSpeed,sample,process.env.FISH_API_KEY?'fish-on':'fish-off'
  ])).digest('hex');
+}
+function cachedFishWelcome(signature){
+ if(greetingCache?.signature===signature)return greetingCache.voice;
+ try{
+  const meta=JSON.parse(fs.readFileSync(welcomeMetaFile,'utf8'));
+  if(meta.signature!==signature)return null;
+  const bytes=fs.readFileSync(welcomeAudioFile);
+  if(bytes.length<100||bytes.length>4_000_000)return null;
+  const voice={engine:'fish',mime:'audio/mpeg',bytes};
+  greetingCache={signature,voice};
+  return voice;
+ }catch{return null;}
 }
 async function preferredVoice(text,{welcome=false}={}){
  const settings=allSettings();
+ if(!process.env.FISH_API_KEY||(!settings.guardVoiceId&&!hasReference()))
+  throw new Error('La voz Fish de Erik no está configurada.');
  const signature=welcome?greetingSignature(settings):null;
- if(welcome&&greetingCache?.signature===signature&&Date.now()-greetingCache.created<20*60*1000){
-  console.info('Erik TTS: Fish (saludo en caché)');return greetingCache.value;
+ if(welcome){
+  const cached=cachedFishWelcome(signature);
+  if(cached){console.info('Erik TTS Fish: saludo en caché');return cached;}
+  if(greetingPending?.signature===signature)return greetingPending.promise;
  }
- if(welcome&&greetingPending?.signature===signature)return greetingPending.promise;
  const produce=async()=>{
-  if(process.env.FISH_API_KEY&&(settings.guardVoiceId||hasReference())){
-   try{
-    const bytes=await fishAudio(text,settings);
-    const value={engine:'fish',mime:'audio/mpeg',bytes};
-    if(welcome)greetingCache={signature,created:Date.now(),value};
-    console.info('Erik TTS: Fish');return value;
-   }catch(err){
-    const match=String(err?.message||'').match(/HTTP (\d+)/);
-    console.warn('Erik: Fish falló; activando Gemini TTS:',match?.[1]||'timeout');
+  const started=Date.now();
+  try{
+   const bytes=await fishAudio(text,settings);
+   const voice={engine:'fish',mime:'audio/mpeg',bytes};
+   console.info('Erik TTS Fish OK',Date.now()-started,'ms');
+   if(welcome){
+    greetingCache={signature,voice};
+    // Es la misma voz y texto autorizado: no almacena contraseñas ni conversaciones.
+    try{
+     await fs.promises.writeFile(welcomeAudioFile,bytes);
+     await fs.promises.writeFile(welcomeMetaFile,JSON.stringify({signature}));
+    }catch{console.warn('Erik: no se pudo guardar la caché de Fish');}
    }
-  }else console.warn('Erik: Fish sin voz configurada; activando Gemini TTS');
-  try{const voice=await geminiSpeech(text);console.info('Erik TTS: Gemini (respaldo)');return voice;}
-  catch(err){
-   console.warn('Erik: Fish y Gemini TTS no disponibles:',String(err?.name||'Error').slice(0,40));
-   console.info('Erik TTS: navegador (último respaldo)');return {engine:'browser',mime:null,bytes:null};
+   return voice;
+  }catch(err){
+   console.warn('Erik TTS Fish NO DISPONIBLE',Date.now()-started,'ms',String(err?.message||'').slice(0,100));
+   throw err;
   }
  };
  const promise=produce();
  if(welcome)greetingPending={signature,promise};
- try{return await promise;}finally{
-  if(welcome&&greetingPending?.promise===promise)greetingPending=null;
- }
+ try{return await promise;}
+ finally{if(welcome&&greetingPending?.promise===promise)greetingPending=null;}
 }
 function spokenResult(text,voice){
- return voice.bytes?{text,engine:voice.engine,mime:voice.mime,audio:voice.bytes.toString('base64')}:
- {text,engine:'browser',voiceFallback:true};
+ return {text,engine:'fish',mime:'audio/mpeg',audio:voice.bytes.toString('base64')};
 }
-
 
 // Camino de baja latencia: Gemini entrega el texto y Fish transmite audio MP3
 // inmediatamente a HTML Audio; no se espera al archivo MP3 completo.
@@ -369,20 +347,11 @@ async function streamGuardAudio(text,req,res){
   if(!closed&&!res.writableEnded)res.end();
   console.info('Erik latencia fish_total_ms',Date.now()-started);
  }catch(err){
-  console.warn('Erik audio rápido: Fish falló',String(err?.message||err).slice(0,90),'ms',Date.now()-started);
+  console.warn('Erik Fish streaming NO DISPONIBLE',String(err?.message||err).slice(0,100),'ms',Date.now()-started);
   if(closed)return;
   if(wroteAudio){if(!res.writableEnded)res.end();return;}
-  // Si Fish todavía no entregó audio, probar un único respaldo Gemini con límite.
-  const remaining=Date.now();
-  try{
-   const voice=await geminiSpeech(text);
-   if(closed)return;
-   console.info('Erik latencia respaldo_gemini_ms',Date.now()-remaining);
-   res.type(voice.mime).send(voice.bytes);
-  }catch(err2){
-   console.warn('Erik audio rápido: sin TTS externo; usar voz navegador',String(err2?.name||'Error'));
-   if(!closed&&!res.headersSent)res.status(502).json({error:'Audio externo no disponible'});
-  }
+  if(!res.headersSent)res.status(502).json({error:'Fish Audio no está disponible. No se cambiará la voz de Erik.'});
+
  }finally{
   clearTimeout(firstTimer);clearTimeout(lastTimer);
   if(reader)try{await reader.cancel();}catch{}
@@ -398,7 +367,6 @@ function publicConfig(){
   mouthDelay:s.guardMouthDelay,mouthSensitivity:s.guardMouthSensitivity,mouthSmoothing:s.guardMouthSmoothing,
   mouthAmplitude:s.guardMouthAmplitude,blinkRate:s.guardBlinkRate,fishReady:!!(process.env.FISH_API_KEY&&(s.guardVoiceId||hasReference()))};
 }
-// Diagnóstico puntual al iniciar: pregunta artificial, nunca información de visitantes.
 export function installGuard(app,auth){
  // Generar el audio del saludo al iniciar el servidor para que las personas
  // que no pueden ver la página lo oigan sin esperar una conversión Fish nueva.
@@ -424,18 +392,12 @@ export function installGuard(app,auth){
  app.get('/api/guard/config',(req,res)=>res.json(publicConfig()));
  app.post('/api/guard/welcome',limited,async(req,res)=>{
   if(allSettings().guardEnabled==='false')return res.status(404).json({error:'Erik desactivado.'});
-  // Para accesibilidad, el primer saludo no puede quedar esperando 20s en silencio.
-  // Usamos Fish precargado cuando existe; si todavía está preparándose, la voz
-  // del navegador lee el mismo saludo inmediatamente y Fish sigue preparándose.
-  let timer;
-  const voice=await Promise.race([
-   preferredVoice(GUARD_WELCOME,{welcome:true}),
-   new Promise(resolve=>{timer=setTimeout(()=>resolve(null),1500);})
-  ]);
-  clearTimeout(timer);
-  res.set('Cache-Control','no-store').json(
-   voice?spokenResult(GUARD_WELCOME,voice):{text:GUARD_WELCOME,engine:'browser',voiceFallback:true}
-  );
+  try{
+   const voice=await preferredVoice(GUARD_WELCOME,{welcome:true});
+   res.set('Cache-Control','no-store').json(spokenResult(GUARD_WELCOME,voice));
+  }catch(err){
+   res.status(503).json({error:'La voz Fish de Erik no está disponible. Tocá a Erik para volver a intentar.'});
+  }
  });
  app.get('/api/guard/frames/:index',async(req,res)=>{
   const i=Number(req.params.index);
@@ -497,8 +459,8 @@ export function installGuard(app,auth){
   let text;
   try{text=await phrase(intent,req.body?.sessionId,userText);}
   catch(e){return res.status(503).json({error:String(e.message||'Gemini no disponible')});}
-  const voice=await preferredVoice(text);
-  return res.json(spokenResult(text,voice));
+  try{const voice=await preferredVoice(text);return res.json(spokenResult(text,voice));}
+  catch(err){return res.status(503).json({error:'La voz Fish de Erik no está disponible.'});}
  });
  app.post('/api/admin/guard/voice-sample',auth('admin'),rateLimit({windowMs:60_000,limit:6}),async(req,res)=>{
   const s=allSettings();
