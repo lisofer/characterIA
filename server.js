@@ -123,23 +123,5 @@ wss.on('connection',async(ws,req,s)=>{const live=makeLive(ws,s.profile_id);let c
  ws.on('message',data=>{try{const m=JSON.parse(String(data));if(m.type==='start')live.initial();else if(m.type==='text')live.sendText(m.text);else if(m.type==='audio')live.sendAudio(m.pcm);else if(m.type==='audio_end')live.stopAudio();}catch(e){if(ws.readyState===1)ws.send(JSON.stringify({type:'error',message:String(e.message||e)}));}});
  ws.on('close',()=>live.close());});
 const port=Number(process.env.PORT||3000);server.listen(port,'0.0.0.0',()=>console.log(`CV Accesible escuchando puerto ${port}`));
-
-// Verificación temporal de integración: no usa micrófono, claves ni cuentas reales.
-void (async()=>{
- const began=Date.now();let audioCount=0,captionCount=0,closed=false;
- const fake={readyState:1,send(raw){
-  const msg=JSON.parse(raw);
-  if(msg.type==='audio')audioCount++;
-  if(msg.type==='transcript')captionCount++;
-  if(msg.type==='turn_complete'&&!closed){
-   closed=true;console.info('Erik 3.8 Live prueba OK',Date.now()-began,'ms; fragmentos',audioCount,'subtitulos',captionCount);
-   session.close();clearTimeout(timeout);
-  }
- }};
- const session=makeGuardLive(fake);
- const timeout=setTimeout(()=>{if(!closed){closed=true;console.warn('Erik 3.8 Live prueba TIMEOUT',Date.now()-began,'ms; audio',audioCount);session.close();}},25000);
- timeout.unref?.();
- try{await session.connect();}
- catch(err){if(!closed){closed=true;clearTimeout(timeout);console.warn('Erik 3.8 Live prueba ERROR',String(err?.message||err).slice(0,200));session.close();}}
-})();
+;
 
