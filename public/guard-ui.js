@@ -155,7 +155,8 @@ function noAccents(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\
 async function handleVoice(heard){
  if(!guardActive||!isLoginVisible())return;
  const command=noAccents(heard).replace(/[.!?]+$/g,'').trim();
- if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer)$/.test(command)){void say('help');return;}
+ if(/^(?:erik[, ]+)?(?:iniciar llamada|empezar llamada|hablar con erik|empezar|escuchame)$/.test(command)){void say('listening');return;}
+ if(/^(?:erik[, ]+)?(?:ayuda|como entro|que hago|no se leer|que contrasena|que clave)$/.test(command)){void say('help');return;}
  if(/^(?:erik[, ]+)?(?:repeti|repite|otra vez)$/.test(command)){void say('ask');return;}
  if(/^(?:erik[, ]+)?(?:colgar|cancelar|para|terminar llamada)$/.test(command)){stopRecognition();stopAudio();statusText('Llamada terminada. Podés escribir la contraseña o tocar Hablar.');return;}
  if(/^(?:erik[, ]+)?(?:teclado|escribir|quiero escribir)$/.test(command)){one('#password')?.focus();statusText('Escribí tu contraseña en el campo.');return;}
