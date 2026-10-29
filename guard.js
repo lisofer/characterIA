@@ -32,6 +32,8 @@ const limited=rateLimit({windowMs:60_000,limit:24,standardHeaders:'draft-7',lega
 // La personalidad completa que se envía al modelo es la visible y editable en Admin.
 // Las respuestas habladas son generadas por Gemini. No hay una biblioteca de frases pregrabadas.
 // Solo las situaciones operativas provienen del servidor; la personalidad editable está en Admin.
+// El saludo inicial es fijo para accesibilidad; nunca depende de la disponibilidad de Gemini.
+const GUARD_WELCOME='Hola, soy Erik, el guardia de NEXOCV. Podés decirme tu contraseña de una sola palabra o escribirla. Estoy escuchando.';
 const intents={
  greeting:'La persona acaba de abrir la página de ingreso. Presentate con naturalidad, breve humor e invitación a decir una contraseña de una sola palabra o escribirla.',
  ask:'Se reactivó a Erik después de tocarlo. Retomá la conversación naturalmente, preguntando qué necesita o invitando a ingresar.',
@@ -102,6 +104,7 @@ async function phrase(intent,sessionId,userText){
  const ctx=dialogContext(sessionId);
  const settings=allSettings();
  const persona=String(settings.guardPrompt||'').trim();
+ if(intent==='greeting')return GUARD_WELCOME;
  if(!process.env.GEMINI_API_KEY||!persona)throw new Error('Gemini no está disponible para responder. Podés ingresar escribiendo tu contraseña.');
  if(intent==='conversation'&&!userText)throw new Error('No pude interpretar esa frase. Podés intentar de nuevo.');
  try{
@@ -123,21 +126,36 @@ async function phrase(intent,sessionId,userText){
   ].filter(Boolean).join('\n\n');
   const prompt=intent==='conversation'?'VISITANTE DICE: '+userText+'\n\n'+context:context;
   let output='';
-  for(let attempt=0;attempt<2;attempt++){
-   const result=await ai.models.generateContent({
-    model:'gemini-2.5-flash',
-    contents:prompt+(attempt?'\n\nTu primera respuesta fue demasiado parecida a una anterior. Improvisá una respuesta completamente nueva.':''),
-    config:{systemInstruction,temperature:1.12,maxOutputTokens:230}
-   });
-   output=String(result.text||'').replace(/[\r\n]+/g,' ')
-    .replace(/^[\s"'“”]+|[\s"'“”]+$/g,'').trim().slice(0,430);
-   if(output&&!tooSimilar(output,recent))break;
+  // Prioridad a modelos actuales; 2.5 Flash puede estar restringido para proyectos nuevos.
+  // Solo cambiar de modelo ante errores de disponibilidad/cuota, no reintentar errores de clave/API.
+  const modelNames=['gemini-3.5-flash-lite','gemini-3.1-flash-lite','gemini-3.8-flash'];
+  let lastModelError=null;
+  for(const model of modelNames){
+   try{
+    const result=await ai.models.generateContent({
+     model,
+     contents:prompt,
+     config:{systemInstruction,temperature:1.05,maxOutputTokens:260}
+    });
+    output=String(result.text||'').replace(/[\r\n]+/g,' ')
+     .replace(/^[\s"'“”]+|[\s"'“”]+$/g,'').trim().slice(0,430);
+    if(output)break;
+    lastModelError=new Error('Respuesta vacía');
+   }catch(modelErr){
+    const status=Number(modelErr.status||modelErr.code||0);
+    console.warn('Erik Gemini:',model,'HTTP',status||'desconocido');
+    lastModelError=modelErr;
+    if(status===400||status===401||status===403||status===402)break;
+    if(status!==404&&status!==429&&status!==503&&status!==500&&status!==0)break;
+   }
   }
-  if(!output)throw new Error('Gemini no devolvió una respuesta.');
+  if(!output)throw lastModelError||new Error('No se generó texto');
   return rememberLine(ctx,output,intent==='conversation'?userText:null);
  }catch(err){
-  console.warn('Erik: Gemini no disponible:',String(err?.name||'error').slice(0,60));
-  throw new Error('Erik no pudo conectarse con Gemini. Podés escribir la contraseña o intentar hablar nuevamente.');
+  const status=Number(err?.status||err?.code||0);
+  console.warn('Erik: fallo de generación, HTTP',status||'desconocido');
+  const msg=status===429?'Gemini alcanzó el límite de uso. Podés escribir la contraseña o volver a hablar más tarde.':status===401||status===403?'La conexión con Gemini necesita revisión. Podés escribir tu contraseña.':'No pude obtener respuesta de Gemini. Podés seguir intentando o ingresar con el teclado.';
+  const e=new Error(msg);e.status=status;throw e;
  }
 }
 async function fishAudio(text,s){
@@ -186,7 +204,7 @@ async function fishAudio(text,s){
 }
 function publicConfig(){
  const s=allSettings();
- return {enabled:s.guardEnabled!=='false',
+ return {welcome:GUARD_WELCOME,enabled:s.guardEnabled!=='false',
   frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(frameDir,i+'.png'))),
   versions:Array.from({length:8},(_,i)=>{try{return Math.round(fs.statSync(path.join(frameDir,i+'.png')).mtimeMs);}catch{return 0;}}),
   mouthDelay:s.guardMouthDelay,mouthSensitivity:s.guardMouthSensitivity,mouthSmoothing:s.guardMouthSmoothing,
