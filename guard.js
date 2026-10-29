@@ -37,7 +37,11 @@ export function makeGuardLive(ws){
  const noSecrets=text=>{
   const t=String(text||'').trim().replace(/\s+/g,' ');
   if(!t||t.length>300)return null;
-  if(/^[\p{L}\p{N}_-]+[.!?]?$/u.test(t))return null;
+  // Las palabras solas siguen bloqueadas como posibles claves, salvo saludos
+  // habituales que el navegador identificó explícitamente como conversación.
+  if(/^[\p{L}\p{N}_-]+[.!?]?$/u.test(t)
+    && !/^(?:hola+|buenas|che|ey|epa|eh|gracias|jaja+|jeje+|bueno|dale|ok|okay|si|no|que|quien|como|cuando|donde|mira|quiero|tengo|puedo|podes|sos|estoy|decime|contame|erik)[.!?]?$/iu.test(t.normalize('NFD').replace(/[\u0300-\u036f]/g,'')))
+   return null;
   if(/\b(contrase(?:ñ|n)a|clave|password|pin|c[oó]digo\s+de\s+acceso)\b/iu.test(t))return null;
   return t;
  };
