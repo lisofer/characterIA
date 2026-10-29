@@ -69,6 +69,7 @@ async function unlockAudio(){
  try{
   const ctx=makeOutput();
   if(ctx.state==='suspended')await ctx.resume();
+  if(micContext?.state==='suspended')await micContext.resume();
   if(ctx.state==='running'&&desired)setState(micMuted?'Micrófono silenciado':'Carmen está escuchando');
  }catch{setState('Podés ingresar la contraseña con el teclado.');}
 }
@@ -194,6 +195,7 @@ async function startMic(){
 }
 function stop({manual=true}={}){
  desired=false;manuallyStopped=manual;clearTimeout(retryTimer);retryTimer=null;
+ if(renderId){cancelAnimationFrame(renderId);renderId=0;}
  if(socket){socket.onclose=null;socket.close();socket=null;}
  haltMic();resetAudio();
  if(output){output.close().catch(()=>{});output=null;volume=null;}
@@ -232,9 +234,9 @@ function openSocket(){
   let msg;try{msg=JSON.parse(event.data);}catch{return;}
   switch(msg.type){
    case 'connected':retries=0;setState('Conectada · Gemini Live');ws.send(JSON.stringify({type:'start'}));break;
-   case 'transcript':if(!pendingTicket){transcript+=String(msg.text||'');turnEnded=false;}break;
+   case 'transcript':transcript+=String(msg.text||'');turnEnded=false;break;
    case 'audio':playPCM(msg.pcm);break;
-   case 'turn_complete':turnEnded=true;if(pendingTicket)maybeFinish();else setTimeout(()=>{if(turnEnded&&!pendingTicket){transcript='';caption.textContent=' ';}},900);break;
+   case 'turn_complete':turnEnded=true;if(pendingTicket)maybeFinish();else setTimeout(()=>{if(turnEnded&&!pendingTicket){transcript='';caption.textContent=' ';}},Math.max(900,((speechEnd-(output?.currentTime||0))*1000)+650));break;
    case 'access_granted':pendingTicket=msg.ticket;pauseMic(true);setState('Contraseña correcta');setTimeout(maybeFinish,750);setTimeout(()=>{if(pendingTicket)void redeemTicket();},5200);break;
    case 'interrupted':segments=[];playHead=output?.currentTime||0;speechEnd=playHead;transcript='';break;
    case 'notice':setState(msg.message||'Conectada');break;
