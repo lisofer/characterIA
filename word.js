@@ -39,7 +39,7 @@ export async function createWordDocument(file,profile){
  else for(const job of cv.experience.slice(0,2)){
   parts.push(dated(job.puesto,range(job.inicio,job.fin)));
   parts.push(p([job.lugar,job.ubicacion].filter(Boolean).join(', '),{size:19,after:45}));
-  for(const task of job.actividades.slice(0,2))parts.push(bullet(task));
+  for(const task of job.actividades.slice(0,cv.experience.length===1?3:2))parts.push(bullet(task));
  }
  parts.push(heading('EDUCACIÓN'));
  if(cv.education.length)for(const school of cv.education.slice(0,2)){

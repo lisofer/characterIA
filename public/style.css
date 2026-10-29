@@ -617,3 +617,14 @@ body:has(#login-view:not(.hidden)){
 .word-download-prompt a{background:#69dda4;color:#0b211c;border-radius:11px;font-weight:800;font-size:18px;text-decoration:none;display:block;padding:14px 19px;min-height:52px;box-sizing:border-box;width:100%}
 .word-download-prompt button{background:transparent;border:1px solid #a6b9c3;border-radius:9px;color:white;font-size:15px;min-height:40px;padding:7px 22px}
 .word-download-prompt a:focus-visible,.cv-word-download:focus-visible{outline:3px solid #fff;outline-offset:3px}
+
+/* Siempre visible tras generar un CV: descargas mediante enlace HTML nativo.
+   Evita depender de gestos sintéticos desde respuestas WebSocket en Android. */
+.cv-files-banner{position:fixed;z-index:61;bottom:94px;left:50%;transform:translateX(-50%);width:min(94vw,415px);box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 10px;background:#102b37f5;border:1px solid #7cabc0;border-radius:14px;box-shadow:0 8px 27px #0008}
+.cv-files-banner.hidden{display:none!important}
+.cv-files-label{color:#c7d9e5;font:700 10px/1.15 Arial,sans-serif;letter-spacing:.45px;max-width:80px}
+.cv-files-banner a{min-height:42px;min-width:91px;display:flex;align-items:center;justify-content:center;padding:4px 10px;box-sizing:border-box;border-radius:10px;background:#2a576d;color:white;text-decoration:none;font:700 14px/1.2 Arial,sans-serif}
+.cv-files-banner #cv-word-link{background:#1f7956;color:#fff}
+.cv-files-banner a:focus-visible{outline:3px solid white;outline-offset:2px}
+.student-page.keyboard-open .cv-files-banner{display:none!important}
+@media(max-width:430px){.cv-files-banner{bottom:87px;gap:5px;padding:6px 8px}.cv-files-label{font-size:9px;max-width:70px}.cv-files-banner a{min-width:73px;font-size:13px;min-height:40px}}

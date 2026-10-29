@@ -453,11 +453,15 @@ function setDocuments(docs){
  savedDocuments=Array.isArray(docs)?docs:[];
  const latest=savedDocuments[0]?.id;
  const word=$('#cv-word-download'),big=$('#word-ready-link');
+ const files=$('#cv-files-banner'),pdf=$('#cv-pdf-link'),docx=$('#cv-word-link');
  if(latest){
-  const href='/api/cv/'+encodeURIComponent(latest)+'/word';
+  const id=encodeURIComponent(latest),href='/api/cv/'+id+'/word';
   word.href=href;big.href=href;word.classList.remove('hidden');
+  pdf.href='/api/cv/'+id;docx.href=href;
+  files.classList.remove('hidden');
  }else{
   word.classList.add('hidden');word.removeAttribute('href');big.removeAttribute('href');
+  files.classList.add('hidden');pdf.removeAttribute('href');docx.removeAttribute('href');
  }
 }
 function hideWordDownloadPrompt(){$('#word-download-prompt').classList.add('hidden')}
@@ -527,6 +531,8 @@ function setupStudent(){
  $('#word-prompt-close').onclick=hideWordDownloadPrompt;
  $('#word-ready-link').addEventListener('click',()=>{hideWordDownloadPrompt();showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.');});
  $('#cv-word-download').addEventListener('click',()=>showDownloadNotice('Si Chrome pide permiso, aceptá para guardar Word.'));
+ $('#cv-word-link').addEventListener('click',()=>{hideWordDownloadPrompt();showDownloadNotice('Chrome abrirá la descarga de Word. Revisá Descargas.');});
+ $('#cv-pdf-link').addEventListener('click',()=>showDownloadNotice('Chrome abrirá la descarga de PDF. Revisá Descargas.'));
  $('#close-keyboard').addEventListener('click',()=>void closeTextKeyboard());
  $('#student-view').addEventListener('click',event=>void dismissStudentInteraction(event));
  window.visualViewport?.addEventListener('resize',syncKeyboardViewport);

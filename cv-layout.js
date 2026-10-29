@@ -86,7 +86,7 @@ export function cvContent(fields={}){
   contactParts,contacts:contactParts,
   profile:concise(value(f.perfil_profesional)||value(f.objetivo),260),
   skills:items(f.habilidades).slice(0,4).map(x=>concise(x,65)),
-  experience:jobs.slice(0,3).map(e=>({...e,actividades:e.actividades.slice(0,2).map(x=>concise(x,105))})),
+  experience:jobs.slice(0,3).map(e=>({...e,actividades:e.actividades.slice(0,jobs.length===1?3:2).map(x=>concise(x,125))})),
   firstExperience:firstJob(f.experiencia),
   education:studies.slice(0,2).map(e=>({...e,titulo:concise(e.titulo,95),institucion:concise(e.institucion,100)})),
   educationLegacy:studies.length?[]:experienceLines(f.formacion).slice(0,2).map(x=>concise(x,120)),
@@ -96,6 +96,22 @@ export function cvContent(fields={}){
  };
 }
 
+// Detecta algunas formulaciones informales muy frecuentes. No se guardan
+// transformadas sin que la persona acepte la propuesta del avatar.
+export function suggestedRole(title){
+ const raw=value(title);
+ if(/\bayudant[ea] de (?:un |una |el |la )?panader[oa]\b/i.test(raw))return 'Auxiliar de panadería';
+ if(/\bfui (?:un |una |el |la )?(?:ayudant[ea] de )?panader[oa]\b/i.test(raw))return 'Auxiliar de panadería';
+ if(/\b(?:cortaba|cortar|corte) (?:el )?pasto\b/i.test(raw))return 'Mantenimiento de espacios verdes';
+ if(/\b(?:llevaba|llevar|repart[ií]a) comida\b/i.test(raw))return 'Reparto de pedidos a domicilio';
+ return '';
+}
+export function suggestedTask(text){
+ const raw=value(text);
+ if(/^(?:llevar|llevaba|repart[ií]a|repartir) (?:la )?comida\.?$/i.test(raw))return 'Entrega de pedidos de comida a domicilio';
+ if(/^(?:amasar|amasaba|hacer|hac[ií]a) (?:el )?pan\.?$/i.test(raw))return 'Colaboración en la elaboración de productos de panadería';
+ return '';
+}
 export function upsertExperience(existing,entry,replaceIndex=0){
  const fields={
   puesto:value(entry.puesto),lugar:value(entry.lugar),ubicacion:value(entry.ubicacion),
@@ -103,6 +119,13 @@ export function upsertExperience(existing,entry,replaceIndex=0){
   fin:entry.actual===true?'Actualidad':isoMonth(entry.fin_anio,entry.fin_mes),
   aproximada:entry.aproximada===true,actividades:words(entry.actividades)
  };
+ // Si el modelo copió el habla coloquial, pedir revisión antes de registrarlo.
+ const roleProposal=suggestedRole(fields.puesto);
+ const taskProposal=fields.actividades.map(suggestedTask).filter(Boolean);
+ if(roleProposal||taskProposal.length)
+  return {ok:false,requiere_redaccion:true,sugerencia_puesto:roleProposal,
+   sugerencias_tareas:taskProposal,
+   faltantes:['Reformular título y/o actividades en lenguaje laboral claro, ofrecerlo en voz alta y confirmar con la persona ANTES de guardar.']};
  const faltantes=[];
  if(!filled(fields.puesto))faltantes.push('puesto o actividad');
  if(!filled(fields.lugar))faltantes.push('empresa, organización o contexto real de trabajo');

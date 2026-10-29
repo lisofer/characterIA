@@ -12,6 +12,7 @@ const tidy=x=>String(x||'').replace(/\s+/g,' ').trim();
 const truncate=(text,max)=>{const s=tidy(text);if(s.length<=max)return s;const z=s.slice(0,max);return z.slice(0,z.lastIndexOf(' '))+'…'};
 function buildPdf(file,profile){
  const cv=cvContent(profile.fields);
+ const roomy=cv.experience.length<=1&&cv.education.length<=1&&cv.skills.length<=4;
  return new Promise((resolve,reject)=>{
   const doc=new PDFDocument({size:'A4',margin:0,info:{Title:'Currículum vitae - '+cv.name,Author:'NEXO CV'}});
   const out=fs.createWriteStream(file);
@@ -33,9 +34,12 @@ function buildPdf(file,profile){
    return true;
   };
   const heading=title=>{
-   if(!fits(37))return false;
-   y+=11;doc.moveTo(LEFT,y).lineTo(RIGHT,y).lineWidth(.8).strokeColor(INK).stroke();
-   y+=9;font(true,12).text(title,LEFT,y,{width:WIDTH});y+=21;
+   if(!fits(roomy?54:37))return false;
+   y+=roomy?18:11;
+   doc.moveTo(LEFT,y).lineTo(RIGHT,y).lineWidth(.8).strokeColor(INK).stroke();
+   y+=roomy?13:9;
+   font(true,roomy?13:12).text(title,LEFT,y,{width:WIDTH});
+   y+=roomy?30:21;
    return true;
   };
   const range=(a,b)=>[monthLabel(a),monthLabel(b)].filter(Boolean).join(' - ');
@@ -49,13 +53,14 @@ function buildPdf(file,profile){
    y+=18;return true;
   };
   const bullet=txt=>{
-   if(!fits(15))return false;
+   if(!fits(roomy?20:15))return false;
    const x=LEFT+14,w=WIDTH-14;
    let t=truncate(txt,102);if(!t)return false;
-   const height=h('•  '+t,w,9.6);
+   const size=roomy?10.7:9.6;
+   const height=h('•  '+t,w,size);
    if(!fits(height+3))return false;
-   font(false,9.6).text('•  '+t,x,y,{width:w,lineGap:1.6});
-   y+=height+2.5;return true;
+   font(false,size).text('•  '+t,x,y,{width:w,lineGap:1.6});
+   y+=height+(roomy?5:2.5);return true;
   };
   // Cabecera: contexto de cada dato, separado por barra vertical.
   let titleSize=23;font(true,titleSize);
@@ -73,14 +78,14 @@ function buildPdf(file,profile){
    y+=lineHeight+7;
   }
   y+=10;
-  if(heading('PERFIL PROFESIONAL'))put(cv.profile,{size:10,maxLines:4,gap:4});
+  if(heading('PERFIL PROFESIONAL'))put(cv.profile,{size:roomy?11.1:10,maxLines:5,gap:roomy?8:4});
   if(heading('EXPERIENCIA LABORAL')){
    if(cv.firstExperience)put('En búsqueda de primera experiencia laboral.',{size:10,gap:4});
    else for(const job of cv.experience.slice(0,2)){
     if(!dated(job.puesto,range(job.inicio,job.fin)))break;
     put([job.lugar,job.ubicacion].filter(Boolean).join(', '),{size:9.6,gap:3,maxLines:1});
-    for(const task of job.actividades.slice(0,2))if(!bullet(task))break;
-    y+=fits(5)?5:0;
+    for(const task of job.actividades.slice(0,cv.experience.length===1?3:2))if(!bullet(task))break;
+    y+=fits(roomy?13:5)?(roomy?13:5):0;
    }
   }
   if(heading('EDUCACIÓN')){
@@ -89,7 +94,7 @@ function buildPdf(file,profile){
      if(!dated(school.titulo,range(school.inicio,school.fin)))break;
      put(school.institucion,{size:9.6,maxLines:1,gap:2});
      if(school.estado)put(school.estado,{size:9.1,maxLines:1,gap:2});
-     y+=fits(5)?5:0;
+     y+=fits(roomy?13:5)?(roomy?13:5):0;
     }
    }else for(const line of cv.educationLegacy.slice(0,2))put(line,{size:9.8,maxLines:2,gap:4});
   }

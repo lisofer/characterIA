@@ -83,3 +83,19 @@ test('el resumen de una hoja limita aptitudes, trabajos y tareas sin modificar l
  assert.equal(cv.skills.length,4);
  assert.equal(experienceEntries(record).length,4);
 });
+
+test('el asistente sugiere títulos profesionales antes de guardar frases coloquiales',()=>{
+ const original={...job,puesto:'fui ayudante de un panadero',actividades:'llevar comida'};
+ const pending=upsertExperience('',original);
+ assert.equal(pending.ok,false);
+ assert.equal(pending.requiere_redaccion,true);
+ assert.equal(pending.sugerencia_puesto,'Auxiliar de panadería');
+ assert.deepEqual(pending.sugerencias_tareas,['Entrega de pedidos de comida a domicilio']);
+ const approved=upsertExperience('',{...original,puesto:'Auxiliar de panadería',actividades:'Colaboración en la elaboración de productos de panadería',redaccion_profesional_aprobada:true});
+ assert.equal(approved.ok,true);
+});
+test('una única experiencia puede incluir hasta tres tareas confirmadas',()=>{
+ const entry=upsertExperience('',{...job,actividades:'Tarea 1; Tarea 2; Tarea 3; Tarea 4'});
+ assert.equal(entry.ok,true);
+ assert.equal(cvContent({...profile,experiencia:entry.valor}).experience[0].actividades.length,3);
+});

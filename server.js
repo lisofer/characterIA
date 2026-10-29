@@ -11,6 +11,7 @@ import {WebSocketServer} from 'ws';
 import {fileURLToPath} from 'node:url';
 import {DATA_DIR,db,allSettings,setSettings,createProfile,getProfile,eraseProfile,createSession,resolveSession,removeSession,replaceSessionProfile,listDocs,lookupDoc} from './db.js';
 import {makeLive,voiceSample,wav,VOICE_NAMES} from './live.js';
+import {createWordDocument} from './word.js';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const app=express();app.disable('x-powered-by');app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false,crossOriginEmbedderPolicy:false}));
@@ -65,14 +66,24 @@ app.get('/api/frames/:index',auth(),async(req,res)=>{
 });
 app.post('/api/reset',auth('student'),(req,res)=>{if(req.body?.confirm!==true)return res.status(400).json({error:'Confirmá el reinicio para borrar todo el CV.'});const old=req.profileId;for(const f of eraseProfile(old)){for(const filename of [f,f.replace(/\.pdf$/i,'.docx')])try{fs.unlinkSync(path.join(DATA_DIR,'cvs',filename))}catch{}}const fresh=createProfile();replaceSessionProfile(parseCookie(req),fresh);res.json({ok:true,profile:{},documents:[]});});
 app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,'Mi_Curriculum.pdf');});
-app.get('/api/cv/:doc/word',auth('student'),(req,res)=>{
+app.get('/api/cv/:doc/word',auth('student'),async(req,res)=>{
  const d=lookupDoc(req.params.doc,req.profileId);
  if(!d)return res.sendStatus(404);
  const filename=d.filename.replace(/\.pdf$/i,'.docx');
  const file=path.join(DATA_DIR,'cvs',filename);
- if(!fs.existsSync(file))return res.sendStatus(404);
- res.type('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
- res.download(file,'Mi_Curriculum_Editable.docx');
+ try{
+  // Los documentos históricos pueden no tener Word todavía.
+  // El enlace del navegador funciona incluso si Gemini nunca llamó generar_word.
+  if(!fs.existsSync(file)){
+   const profile=getProfile(req.profileId);
+   if(!profile)return res.sendStatus(404);
+   await createWordDocument(file,profile);
+  }
+  res.download(file,'Mi_Curriculum_Editable.docx');
+ }catch(error){
+  console.error('No se pudo preparar el Word',String(error?.message||error));
+  if(!res.headersSent)res.status(500).json({error:'No se pudo preparar el Word. Volvé a intentarlo.'});
+ }
 });
 app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY}));
 app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();const next={};for(const [k,v]of Object.entries(req.body?.config||{})){if(!Object.hasOwn(old,k))continue;if(typeof old[k]==='number'){const n=Number(v);if(!Number.isFinite(n))continue;next[k]=k==='subtitleDelay'?Math.max(-1200,Math.min(1200,n)):Math.max(-500,Math.min(2000,n));}else if(typeof old[k]==='string'){if(!['prompt','personality'].includes(k)&&String(v).length>200)continue;if(k==='prompt'&&String(v).length>32000)return res.status(400).json({error:'El prompt supera el máximo de 32.000 caracteres; no se guardó incompleto.'});next[k]=String(v).slice(0,k==='prompt'?32000:4000);}}
