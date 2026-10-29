@@ -35,7 +35,7 @@ const fnDefinitions=[
  {name:'generar_cv',description:'Genera un PDF en estilo ATS blanco y negro, con experiencias completas, empresas, tareas y meses/años confirmados. La descarga PDF se inicia automáticamente. Ofrece Word aparte.',parameters:{type:'OBJECT',properties:{confirmacion:{type:'BOOLEAN'},observaciones:{type:'STRING'}},required:['confirmacion']}},
  {name:'generar_word',description:'Descarga el archivo Word editable del último CV cuando la persona lo pide o lo acepta tras el PDF.',parameters:{type:'OBJECT',properties:{confirmacion:{type:'BOOLEAN'}},required:['confirmacion']}}
 ];
-const shortProfile=(p)=>p?JSON.stringify({campos:p.fields,ultimasConversaciones:p.recentEvents.filter(e=>e.type!=='field').slice(-10).map(e=>({tipo:e.type,texto:e.content.slice(0,850)}))}):'{}';
+const shortProfile=(p)=>p?JSON.stringify({campos:p.fields,ultimasConversaciones:p.recentEvents.filter(e=>e.type==='usuario'||e.type==='usuario_texto').slice(-8).map(e=>({tipo:e.type,texto:e.content.slice(0,650)}))}):'{}';
 const getAI=()=>{if(!process.env.GEMINI_API_KEY)throw new Error('Falta configurar GEMINI_API_KEY en Railway.');return new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});};
 const fallbackable=e=>/429|RESOURCE_EXHAUSTED|quota|credit|billing|404|NOT_FOUND|model.*unavailable|model.*not found/i.test([e?.message,e?.reason,e?.code,String(e)].join(' '));
 export function makeLive(client,profileId,{voiceOverride,preview=false}={}){
