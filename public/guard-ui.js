@@ -34,7 +34,7 @@ function setMuteAppearance(){
  const button=one('#guard-toggle'),dock=one('#guard-dock');
  dock?.classList.toggle('is-muted',guardMuted);
  button?.setAttribute('aria-pressed',String(guardMuted));
- const label=guardMuted?'Reactivar voz y micrófono de Erik':guardNeedsGesture?'Activar voz y micrófono de Erik':'Silenciar a Erik y detener el micrófono';
+ const label=guardMuted?'Reactivar voz y micrófono de Erik':guardNeedsGesture&&!recognizing&&!recognitionWanted?'Activar voz y micrófono de Erik':'Silenciar a Erik y detener el micrófono';
  button?.setAttribute('aria-label',label);button?.setAttribute('title',label);
  const hint=one('#guard-hint');if(hint)hint.textContent=label;
 }
@@ -46,7 +46,7 @@ function stopGuard({hide=false}={}){
 function toggleGuard(){
  if(!guardActive)return;
  // Si el navegador bloqueó el inicio automático, el primer toque sirve para activar.
- if(guardNeedsGesture&&!guardMuted){
+ if(guardNeedsGesture&&!guardMuted&&!recognizing&&!recognitionWanted){
   guardEpoch++;guardNeedsGesture=false;stopRecognition();stopAudio();setMuteAppearance();
   void audioUnlock();void say('ask');return;
  }
@@ -193,7 +193,7 @@ function getRecognizer(){
  r.lang='es-AR';r.continuous=true;r.interimResults=false;r.maxAlternatives=1;
  r.onstart=()=>{
   if(!recognitionWanted||!canListen()){try{r.abort();}catch{}return;}
-  recognizing=true;recognitionErrors=0;
+  recognizing=true;recognitionErrors=0;guardNeedsGesture=false;setMuteAppearance();
   statusText('Te escucho. Decime la contraseña.');
  };
  r.onerror=e=>{
