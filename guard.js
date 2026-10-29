@@ -130,6 +130,16 @@ export function makeGuardLive(ws){
    catch{send(ws,'notice',{message:'Te escucho.'});}
    return;
   }
+  // Rechazo recibido del login: no debe quedar bloqueado por el antispam
+  // de 600 ms ni generar respuesta alguna antes de este punto.
+  if(authPending){
+   if(m.type!=='intent'||m.intent!=='retry')return;
+   authPending=false;
+   try{
+    live.sendClientContent({turns:[{role:'user',parts:[{text:intentText.retry}]}],turnComplete:true});
+   }catch{send(ws,'error',{message:'No se pudo reanudar la conversación.'});}
+   return;
+  }
   const now=Date.now();
   if(now-lastInputTime<600)return;
   if(++inputCount>45){send(ws,'error',{message:'Demasiados mensajes en esta visita.'});return;}
@@ -140,10 +150,6 @@ export function makeGuardLive(ws){
   else if(m.type==='repeat')input='Repetí tu presentación breve y recordá que se puede ingresar por voz o por teclado.';
   if(!input){send(ws,'notice',{message:'Decí una sola palabra para la clave, o hablá en una frase para conversar.'});return;}
   try{
-   if(authPending){
-    if(m.type!=='intent'||m.intent!=='retry')return;
-    authPending=false;
-   }
    turnOpen=true;
    live.sendClientContent({turns:[{role:'user',parts:[{text:input}]}],turnComplete:true});
   }catch{send(ws,'error',{message:'No pude enviar el mensaje a Gemini Live.'});}
