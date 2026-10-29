@@ -16,7 +16,7 @@ function stopRecognition(){
  clearTimeout(recognitionRestartTimer);recognitionRestartTimer=null;
  if(recognizer){try{recognizer.abort();}catch{}}
 }
-function canListen(){return guardActive&&!guardMuted&&!guardNeedsGesture&&isLoginVisible()&&!guardTalking&&!document.hidden&&document.activeElement!==one('#password');}
+function canListen(){return guardActive&&!guardMuted&&isLoginVisible()&&!guardTalking&&!document.hidden&&document.activeElement!==one('#password');}
 function queueRecognitionRestart(delay=400){
  clearTimeout(recognitionRestartTimer);
  if(!recognitionWanted||!canListen())return;
