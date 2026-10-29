@@ -667,7 +667,7 @@ body:has(#login-view:not(.hidden)){
 }
 @media(min-width:1001px){.auth-page .login-wrap{transform:translateX(-125px)}}
 @media(max-width:790px){
- .auth-page .login-wrap{transform:translateY(clamp(96px,15dvh,135px));width:min(100%,410px)}
+ .auth-page .login-wrap{transform:translateY(clamp(104px,20dvh,140px));width:min(100%,410px)}
  .carmen-dock{top:clamp(6px,2dvh,18px);left:50%;width:min(84vw,240px);transform:translateX(-50%)}
  .carmen-face{height:clamp(120px,25dvh,205px)}
  .carmen-caption{height:30px}
