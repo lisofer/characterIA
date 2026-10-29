@@ -167,7 +167,7 @@ function getRecognizer(){
  recognizer=r;return r;
 }
 function listen(){
- if(!guardActive||guardMuted||!isLoginVisible()||guardTalking||recognizing)return;
+ if(!guardActive||guardMuted||!isLoginVisible()||guardTalking||recognizing||document.activeElement===one('#password'))return;
  const r=getRecognizer();
  if(!r){statusText('Este navegador no admite dictado. Podés escribir la contraseña.');return;}
  recognitionWanted=true;
@@ -216,6 +216,13 @@ function watchLogin(){
 }
 function setupGuardControls(){
  one('#guard-toggle')?.addEventListener('click',toggleGuard);
+ // Cuando alguien elige escribir, no escuchar accidentalmente lo que pasa alrededor.
+ one('#password')?.addEventListener('focus',()=>{
+  if(guardActive&&!guardMuted){guardEpoch++;stopRecognition();stopAudio();displayFrame(0);statusText('Perfecto, escribí tu contraseña.');}
+ });
+ one('#password')?.addEventListener('blur',()=>{
+  if(guardActive&&!guardMuted&&isLoginVisible())listen();
+ });
  // El formulario original siempre funciona, independientemente de Erik.
  one('#login-form')?.addEventListener('submit',()=>{stopRecognition();stopAudio();},{capture:true});
  window.addEventListener('nexo-login-error',()=>{if(guardActive&&!guardMuted)void say('retry');});
