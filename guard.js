@@ -164,7 +164,7 @@ async function fishAudio(text,s){
  const savedReference=!voice?getReference():null;
  if(!voice&&!savedReference)throw new Error('Configurá un ID de voz Fish o subí un audio de referencia con su transcripción en Admin > Erik.');
  const model=['s2.1-pro-free','s2.1-pro','s2-pro'].includes(s.guardFishModel)?s.guardFishModel:'s2.1-pro-free';
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),18000);
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),23000);
  const payload={text,format:'mp3',temperature:finite(s.guardTemperature,.7,0,1),top_p:finite(s.guardTopP,.7,0,1),prosody:{speed:finite(s.guardSpeed,1,.7,1.5)}};
  if(voice)payload.reference_id=voice;
  else payload.references=[{audio:new Uint8Array(savedReference.audio),text:savedReference.text}];
@@ -202,6 +202,84 @@ async function fishAudio(text,s){
   return bytes;
  }finally{clearTimeout(timer);}
 }
+
+// Voz estable para Erik: primero Fish Audio; únicamente si falla, Gemini TTS.
+// Las contraseñas nunca se entregan a ninguno de los sintetizadores.
+function pcmToWav(pcm,rate=24000){
+ const b=Buffer.alloc(44+pcm.length);
+ b.write('RIFF',0);b.writeUInt32LE(36+pcm.length,4);b.write('WAVEfmt ',8);
+ b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);
+ b.writeUInt32LE(rate,24);b.writeUInt32LE(rate*2,28);b.writeUInt16LE(2,32);
+ b.writeUInt16LE(16,34);b.write('data',36);b.writeUInt32LE(pcm.length,40);pcm.copy(b,44);
+ return b;
+}
+async function geminiSpeech(text){
+ if(!process.env.GEMINI_API_KEY)throw new Error('GEMINI_API_KEY no configurada');
+ const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY});
+ const models=['gemini-3.8-flash-tts','gemini-3.1-flash-tts-preview'];
+ let last;
+ for(const model of models){
+  try{
+   const res=await ai.models.generateContent({
+    model,
+    contents:[{role:'user',parts:[{text:'Hablá en español argentino claro, como un guardia juvenil, un poco gruñón y gracioso. Decí exactamente estas palabras, sin agregar ni omitir nada:\\n'+text}]}],
+    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}}}
+   });
+   const part=res.candidates?.[0]?.content?.parts?.find(p=>p.inlineData?.data);
+   if(!part)throw new Error('Gemini no devolvió audio');
+   const bytes=Buffer.from(part.inlineData.data,'base64');
+   if(!bytes.length||bytes.length>8_000_000)throw new Error('Audio vacío o demasiado grande');
+   if(bytes.length>12&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WAVE')
+    return {bytes,mime:'audio/wav',engine:'gemini'};
+   const mime=String(part.inlineData.mimeType||'');
+   if(!mime||/audio\/(pcm|l16)/i.test(mime))
+    return {bytes:pcmToWav(bytes),mime:'audio/wav',engine:'gemini'};
+   throw new Error('Formato TTS desconocido');
+  }catch(err){
+   console.warn('Erik Gemini TTS:',model,'HTTP',Number(err?.status||err?.code||0)||'desconocido');
+   last=err;
+   if([400,401,403].includes(Number(err?.status||err?.code||0)))break;
+  }
+ }
+ throw last||new Error('Gemini TTS no respondió');
+}
+let greetingCache=null;
+function greetingSignature(s){
+ let stamp='';try{const f=fs.statSync(refAudioFile);stamp=String(f.mtimeMs)+':'+f.size;}catch{}
+ return crypto.createHash('sha256').update(JSON.stringify([
+  s.guardVoiceId||'',s.guardFishModel||'',s.guardTemperature,s.guardTopP,s.guardSpeed,stamp,
+  process.env.FISH_API_KEY?'fish-enabled':'fish-disabled'
+ ])).digest('hex');
+}
+async function preferredVoice(text,{welcome=false}={}){
+ const settings=allSettings();
+ const signature=welcome?greetingSignature(settings):null;
+ if(welcome&&greetingCache?.signature===signature&&Date.now()-greetingCache.created<20*60*1000)
+  return greetingCache.value;
+ if(process.env.FISH_API_KEY&&(settings.guardVoiceId||hasReference())){
+  try{
+   const bytes=await fishAudio(text,settings);
+   const voice={engine:'fish',mime:'audio/mpeg',bytes};
+   if(welcome)greetingCache={signature,created:Date.now(),value:voice};
+   return voice;
+  }catch(err){
+   const match=String(err?.message||'').match(/HTTP (\d+)/);
+   console.warn('Erik: Fish falló; activando Gemini TTS:',match?.[1]||'timeout');
+  }
+ }else{
+  console.warn('Erik: Fish sin voz configurada; activando Gemini TTS');
+ }
+ try{return await geminiSpeech(text);}
+ catch(err){
+  console.warn('Erik: Fish y Gemini TTS no disponibles:',String(err?.name||'Error').slice(0,40));
+  return {engine:'browser',mime:null,bytes:null};
+ }
+}
+function spokenResult(text,voice){
+ return voice.bytes?{text,engine:voice.engine,mime:voice.mime,audio:voice.bytes.toString('base64')}:
+ {text,engine:'browser',voiceFallback:true};
+}
+
 function publicConfig(){
  const s=allSettings();
  return {welcome:GUARD_WELCOME,enabled:s.guardEnabled!=='false',
@@ -228,6 +306,11 @@ export function installGuard(app,auth){
   }catch{return res.status(500).json({error:'No se pudo guardar el audio en el volumen persistente.'});}
  });
  app.get('/api/guard/config',(req,res)=>res.json(publicConfig()));
+ app.post('/api/guard/welcome',limited,async(req,res)=>{
+  if(allSettings().guardEnabled==='false')return res.status(404).json({error:'Erik desactivado.'});
+  const voice=await preferredVoice(GUARD_WELCOME,{welcome:true});
+  res.set('Cache-Control','no-store').json(spokenResult(GUARD_WELCOME,voice));
+ });
  app.get('/api/guard/frames/:index',async(req,res)=>{
   const i=Number(req.params.index);
   if(!Number.isInteger(i)||i<0||i>7)return res.sendStatus(404);
@@ -262,10 +345,8 @@ export function installGuard(app,auth){
   let text;
   try{text=await phrase(intent,req.body?.sessionId,userText);}
   catch(e){return res.status(503).json({error:String(e.message||'Gemini no disponible')});}
-  const s=allSettings();
-  if(!process.env.FISH_API_KEY||(!s.guardVoiceId&&!hasReference()))return res.json({text,engine:'browser'});
-  try{const audio=await fishAudio(text,s);return res.json({text,engine:'fish',mime:'audio/mpeg',audio:audio.toString('base64')});}
-  catch(e){console.warn('Erik TTS:',String(e.message||e));return res.json({text,engine:'browser'});}
+  const voice=await preferredVoice(text);
+  return res.json(spokenResult(text,voice));
  });
  app.post('/api/admin/guard/voice-sample',auth('admin'),rateLimit({windowMs:60_000,limit:6}),async(req,res)=>{
   const s=allSettings();
