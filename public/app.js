@@ -233,6 +233,7 @@ function updateConversationOverlay(){
  const loading=connectingUi,ended=callEnded&&!loading,muted=mutedByUser&&!ended&&!loading;
  stage.classList.toggle('connecting',loading);
  stage.classList.toggle('call-ended',ended);
+  stage.classList.toggle('is-muted',muted);
  overlay.classList.toggle('is-connecting',loading);
  if(loading){
   msg.innerHTML='<span class="connecting-title">Conectando<span class="connecting-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>';
