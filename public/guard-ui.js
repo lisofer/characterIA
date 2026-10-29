@@ -15,6 +15,9 @@ let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCa
 let scheduledSources=new Set(),audioGeneration=0,tailTimer=null;
 // Micrófono en escucha continua. La clasificación de claves sigue siendo local.
 let bargeInPending=false,bargeInTimer=null,lastSpokenCaption='',lastFinalRecognitionIndex=-1;
+// Chrome entrega frases de a pedazos. Acumular segmentos finales y esperar silencio
+// antes de interpretar una clave: nunca enviar al login la primera palabra de una oración.
+let pendingSpokenSegments=[],speechFlushTimer=null,lastInterimSpeech='';
 const statusText=text=>{if(status)status.textContent=String(text||'');};
 const isLoginVisible=()=>!one('#login-view')?.classList.contains('hidden');
 async function readJSON(url,opt={}){
@@ -31,10 +34,32 @@ function setMuteAppearance(){
  button?.setAttribute('aria-label',label);button?.setAttribute('title',label);
  const hint=one('#guard-hint');if(hint)hint.textContent=label;
 }
+function resetUtterance(){
+ clearTimeout(speechFlushTimer);speechFlushTimer=null;
+ pendingSpokenSegments=[];lastInterimSpeech='';
+}
 function stopRecognition(){
  recognitionWanted=false;recognizing=false;
  clearTimeout(recognitionRestartTimer);recognitionRestartTimer=null;
+ resetUtterance();
  try{recognizer?.abort();}catch{}
+}
+function queueUtteranceFlush(ms=1450){
+ clearTimeout(speechFlushTimer);
+ if(!pendingSpokenSegments.length)return;
+ speechFlushTimer=setTimeout(()=>{
+  speechFlushTimer=null;
+  // Si sigue llegando una frase parcial, dar un poco más de tiempo a Chrome.
+  if(lastInterimSpeech){
+   lastInterimSpeech='';
+   queueUtteranceFlush(850);
+   return;
+  }
+  const entireSpeech=clean(pendingSpokenSegments.join(' ').replace(/\s+/g,' '));
+  resetUtterance();
+  if(entireSpeech&&guardActive&&!guardMuted&&isLoginVisible())
+   void handleVoice(entireSpeech);
+ },ms);
 }
 function canListen(){
  // La escucha continúa también mientras Erik habla: así lo pueden interrumpir.
@@ -293,13 +318,16 @@ function spokenIntent(heard){
    return {type:'password',value:word.toLocaleLowerCase('es-AR')};
   }
  }
- // Clave en solitario: NUNCA enviar una sola palabra a Gemini.
- if(/^[\p{L}\p{N}_-]+$/u.test(original))
-  return {type:'password',value:original.toLocaleLowerCase('es-AR')};
- // Si contiene términos de contraseña pero no fue una asignación inequívoca,
- // pedir aclaración sin enviar el posible secreto al proveedor de IA.
+ // Las menciones incompletas de claves NO son contraseñas.
  if(/\b(contrase(?:ñ|n)a|clave|password|pin)\b/iu.test(original))
   return {type:'clarify'};
+ // Saludos e interjecciones de una palabra son charla, nunca una clave implícita.
+ // Si la contraseña fuera una de ellas, se puede decir "mi contraseña es hola".
+ if(/^(?:hola+|buenas|che|ey|epa|eh|gracias|jaja+|jeje+|bueno|dale|ok|okay|si|no|que|quien|como|cuando|donde|mira|quiero|tengo|puedo|podes|sos|estoy|decime|contame|erik)$/i.test(normalized))
+  return {type:'conversation',text:original};
+ // Solo una palabra COMPLETA, recibida tras la pausa, puede ser una clave.
+ if(/^[\p{L}\p{N}_-]+$/u.test(original))
+  return {type:'password',value:original.toLocaleLowerCase('es-AR')};
  return {type:'conversation',text:original.slice(0,300)};
 }
 
@@ -374,26 +402,40 @@ function getRecognizer(){
    recognitionErrors++;queueRecognitionRestart(500);
   }
  };
- r.onend=()=>{recognizing=false;if(recognitionWanted&&canListen())queueRecognitionRestart(180);};
+ r.onend=()=>{
+  recognizing=false;
+  // No forzar el procesamiento de un fragmento al reiniciar el micrófono.
+  if(pendingSpokenSegments.length)queueUtteranceFlush(1450);
+  if(recognitionWanted&&canListen())queueRecognitionRestart(180);
+ };
  r.onresult=e=>{
   if(!recognitionWanted||!canListen())return;
-  // Chrome puede entregar resultados parciales y definitivos en el mismo evento.
+  let hasInterim=false,hasFinal=false;
+  // El resultado final de Chrome puede ser solo el PRIMER tramo de una frase.
+  // Unir todos los tramos, sin exponerlos en los subtítulos del visitante.
   for(let i=e.resultIndex;i<e.results.length;i++){
-   const result=e.results[i];
-   const phrase=clean(result?.[0]?.transcript);
+   const result=e.results[i],phrase=clean(result?.[0]?.transcript);
    if(!phrase||isLikelyEcho(phrase))continue;
    if(!result.isFinal){
-    // Si el usuario habla mientras Erik está respondiendo, cortarlo enseguida.
-    // No tratar una palabra parcial como contraseña hasta que sea definitiva.
+    hasInterim=true;
+    lastInterimSpeech=phrase;
     if(guardTalking&&(phrase.split(/\s+/u).length>=2||/^(?:erik[, ]+|para|callate|espera|basta)/i.test(phrase)))
      beginBargeIn();
     continue;
    }
    if(i<=lastFinalRecognitionIndex)continue;
    lastFinalRecognitionIndex=i;
-   void handleVoice(phrase);
-   break;
+   hasFinal=true;
+   lastInterimSpeech='';
+   const previous=pendingSpokenSegments.at(-1)||'';
+   // Algunos navegadores repiten segmentos finales al emitir nuevos resultados.
+   if(noAccents(previous)!==noAccents(phrase)){
+    pendingSpokenSegments.push(phrase);
+    if(pendingSpokenSegments.join(' ').length>300)
+     pendingSpokenSegments=pendingSpokenSegments.slice(-5);
+   }
   }
+  if(hasFinal||hasInterim)queueUtteranceFlush(hasInterim?1750:1450);
  };
  recognizer=r;return r;
 }
