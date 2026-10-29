@@ -241,6 +241,17 @@ function setupAdminGuard(){
   const fishReady=data.fishReady;
   if(!fishReady)one('#guard-voice-status').textContent='Falta FISH_API_KEY en Railway. Hasta configurarla, Erik usa la voz del navegador.';
   void readJSON('/api/guard/config').then(c=>{makeGuardFrames(c.frames);previewGuard(c.frames)}).catch(()=>{});
+  void readJSON('/api/admin/guard/voice-reference').then(info=>{const st=one('#guard-reference-status'),tx=one('#guard-reference-text');if(info.exists){st.textContent='Muestra guardada: '+info.name;if(tx)tx.value=info.text||'';}else st.textContent='Todavía no cargaste ninguna muestra de audio.';}).catch(()=>{});
+ });
+ one('#save-guard-reference')?.addEventListener('click',async()=>{
+  const btn=one('#save-guard-reference'),result=one('#guard-reference-status');
+  const file=one('#guard-reference-audio')?.files?.[0],transcript=one('#guard-reference-text')?.value?.trim();
+  if(!file||!transcript){result.textContent='Seleccioná el audio y escribí exactamente lo que dice.';return;}
+  btn.disabled=true;result.textContent='Guardando audio en Railway…';
+  const fd=new FormData();fd.append('audio',file);fd.append('text',transcript);
+  try{const data=await readJSON('/api/admin/guard/voice-reference',{method:'POST',body:fd});result.textContent='Muestra guardada: '+data.name+'. Dejá el ID de voz vacío para usar esta grabación.';}
+  catch(e){result.textContent='No se pudo guardar: '+e.message;}
+  finally{btn.disabled=false;}
  });
  one('#test-guard-voice')?.addEventListener('click',async()=>{
   const btn=one('#test-guard-voice'),out=one('#guard-voice-status');
