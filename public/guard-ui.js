@@ -144,43 +144,60 @@ function speakBrowser(text){
   try{speechSynthesis.cancel();speechSynthesis.speak(u);}catch{guardNeedsGesture=true;setMuteAppearance();end();}
  });
 }
-// Este saludo es deliberadamente fijo. Es una orientación auditiva inmediata
-// para quien no puede ver el portero y funciona sin conectarse a Gemini ni a Fish.
+// El saludo está fijado por accesibilidad, pero se pronuncia con Fish primero.
 async function welcomeGuest(){
  if(!guardActive||guardMuted||!isLoginVisible())return;
  stopRecognition();stopAudio();
  const token=guardEpoch,turn=guardSpeechTurn;
- statusText(guardWelcome);
- guardTalking=true;spokenAt=performance.now();amplitude=0;
+ statusText(guardWelcome);guardTalking=false;amplitude=0;
  try{
-  const spoken=await speakBrowser(guardWelcome);
-  if(guardEpoch!==token||guardSpeechTurn!==turn||guardMuted)return;
-  if(!spoken){
-   guardNeedsGesture=true;setMuteAppearance();
-   statusText('Hola, soy Erik. Tocame para activar el sonido y hablar, o escribí tu contraseña.');
+  const result=await readJSON('/api/guard/welcome',{
+   method:'POST',headers:{'Content-Type':'application/json'},body:'{}'
+  });
+  if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==turn)return;
+  statusText(result.text||guardWelcome);
+  guardTalking=true;spokenAt=performance.now();
+  if(result.audio&&(result.engine==='fish'||result.engine==='gemini')){
+   try{await playVoice(result.audio,result.mime);}
+   catch(err){
+    if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted)
+     await speakBrowser(guardWelcome);
+   }
+  }else await speakBrowser(guardWelcome);
+ }catch(err){
+  if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted){
+   statusText(guardWelcome);guardTalking=true;spokenAt=performance.now();
+   await speakBrowser(guardWelcome);
   }
  }finally{
   if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted){
-   guardTalking=false;amplitude=0;displayFrame(0);
-   listen();
+   guardTalking=false;amplitude=0;displayFrame(0);listen();
   }
  }
 }
-async function playFish(b64,mime){
+async function playVoice(b64,mime){
  const binary=atob(b64),bytes=new Uint8Array(binary.length);
  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
  const url=URL.createObjectURL(new Blob([bytes],{type:mime||'audio/mpeg'}));
  const audio=new Audio(url),token=guardEpoch;voicePlayer=audio;
  try{
-  if(voiceContext){
+  // En Android, un AudioContext suspendido puede silenciar Fish.
+  // Solo usar el analizador si está activo; en caso contrario, HTML Audio reproduce
+  // directamente con el altavoz, sin pasar por ese contexto.
+  if(voiceContext?.state==='running'){
    try{
     voiceAnalyser=voiceContext.createAnalyser();voiceAnalyser.fftSize=1024;
-    voiceSource=voiceContext.createMediaElementSource(audio);voiceSource.connect(voiceAnalyser);voiceAnalyser.connect(voiceContext.destination);
-   }catch(e){console.warn('Erik: sin analizador:',e);}
+    voiceSource=voiceContext.createMediaElementSource(audio);
+    voiceSource.connect(voiceAnalyser);voiceAnalyser.connect(voiceContext.destination);
+   }catch(e){console.warn('Erik: analizador no disponible:',String(e?.name||''));}
   }
+  const ended=new Promise(resolve=>{
+   const finish=()=>{if(voiceFinish===finish)voiceFinish=null;resolve();};
+   voiceFinish=finish;audio.onended=finish;audio.onerror=finish;
+  });
   try{await audio.play();}catch(e){guardNeedsGesture=true;setMuteAppearance();throw e;}
   guardNeedsGesture=false;setMuteAppearance();
-  await new Promise(resolve=>{const finish=()=>{if(voiceFinish===finish)voiceFinish=null;resolve();};voiceFinish=finish;audio.onended=finish;audio.onerror=finish;});
+  await ended;
  }finally{
   URL.revokeObjectURL(url);
   if(token===guardEpoch)voicePlayer=null;
@@ -199,10 +216,12 @@ async function say(intent,{resumeListening=true,userText=null}={}){
   if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==speechTurn)return;
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
-  if(data.engine==='fish'&&data.audio){
-   try{await playFish(data.audio,data.mime);}catch(e){
-    statusText('Tu navegador bloqueó el sonido. Tocá a Erik para activarlo.');
-    console.warn('Audio bloqueado por navegador:',e);
+  if((data.engine==='fish'||data.engine==='gemini')&&data.audio){
+   try{await playVoice(data.audio,data.mime);}
+   catch(e){
+    console.warn('Erik: no se pudo reproducir audio:',String(e?.name||'Error'));
+    if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted)
+     await speakBrowser(data.text);
    }
   }else await speakBrowser(data.text);
  }catch(e){
