@@ -641,3 +641,53 @@ body:has(#login-view:not(.hidden)){
  .guard-mic-indicator{width:52px;height:52px}
 }
 @media(prefers-reduced-motion:reduce){.guard-avatar{transition:none}}
+
+
+/* Erik 2.0: los PNG nunca muestran un personaje provisional ni destellos de cambio. */
+.guard-avatar{filter:drop-shadow(0 8px 18px rgba(4,12,35,.40));transition:none!important}
+.guard-frame{visibility:hidden;opacity:0;transition:none!important;animation:none!important;backface-visibility:visible!important;will-change:auto!important}
+.guard-frame.is-visible{visibility:visible;opacity:1}
+.guard-dock:not(.frames-ready) .guard-avatar-button{pointer-events:auto}
+.guard-dock:not(.frames-ready) .guard-avatar{visibility:hidden}
+.guard-dock:not(.frames-ready) .guard-mic-indicator{opacity:.8}
+.guard-dock.is-muted .guard-avatar{opacity:.79;filter:grayscale(1) brightness(.68) drop-shadow(0 8px 16px rgba(2,10,30,.3))!important}
+.guard-dock.is-muted .guard-bubble{background:linear-gradient(160deg,#d4dbe7,#aebccc);border-color:#53677e}
+.guard-dock.is-muted .guard-bubble::after{background:#c3cedc;border-color:#53677e}
+.guard-dock.is-muted .guard-mic-indicator{background:#536177;box-shadow:0 0 0 4px rgba(110,134,158,.15)}
+.guard-dock .guard-bubble{
+ top:-7px;right:5px;max-width:205px;min-width:150px;padding:11px 13px 13px;
+ border:2px solid rgba(17,41,78,.95);border-radius:20px 22px 20px 18px;
+ background:linear-gradient(155deg,#fff 0%,#edf6ff 100%);
+ box-shadow:0 12px 28px rgba(1,9,30,.3),inset 0 1px 0 rgba(255,255,255,.95);
+ text-align:left;z-index:5;
+}
+.guard-dock .guard-bubble::after{
+ content:'';position:absolute;bottom:-11px;right:40px;top:auto;
+ width:18px;height:18px;transform:rotate(45deg);
+ background:#edf6ff;border:0;border-right:2px solid #11294e;border-bottom:2px solid #11294e;
+ z-index:0;
+}
+.guard-bubble-heading{display:flex;align-items:center;gap:6px;margin-bottom:5px;font:800 9px/1.1 'DM Sans',Arial,sans-serif;letter-spacing:.09em;color:#4f6687}
+.guard-bubble-dot{width:7px;height:7px;display:inline-block;border-radius:100%;background:#1bc58a;box-shadow:0 0 0 2px #1bc58a2b}
+.guard-dock .guard-bubble p{font:750 clamp(13px,1.8vw,16px)/1.35 'Outfit','DM Sans',Arial,sans-serif;text-wrap:pretty;color:#0b2443}
+.guard-dock.is-muted .guard-bubble-dot{background:#76879d;box-shadow:none}
+@media(max-width:600px){
+ .auth-page .login-wrap{transform:translateY(-clamp(145px,21dvh,240px))!important}
+ .guard-dock .guard-bubble{top:6px;right:4px;max-width:185px;min-width:132px;padding:10px 12px 11px;border-radius:17px}
+ .guard-dock .guard-bubble p{font-size:clamp(12px,3.3vw,15px);line-height:1.28}
+ .guard-bubble-heading{font-size:9px}
+}
+@media(max-height:690px){
+ .auth-page .login-wrap{transform:translateY(-clamp(50px,9dvh,90px))!important}
+ .guard-dock .guard-bubble{right:5px;top:2px;max-width:145px}
+}
+/* Recuperar gris en NEXO al mutear o colgar. Revertir !important antiguo de recuperación de Android
+   exclusivamente en estado inactivo, sin filtros permanentes sobre ocho texturas. */
+.student-page .stage.is-muted .avatar-frame.is-visible,
+.student-page .stage.call-ended .avatar-frame.is-visible,
+.student-page .stage.connecting .avatar-frame.is-visible{
+ filter:grayscale(1) brightness(.56)!important;
+ -webkit-filter:grayscale(1) brightness(.56)!important;
+}
+.student-page .stage.is-muted .avatar-placeholder,
+.student-page .stage.call-ended .avatar-placeholder{filter:grayscale(1) brightness(.56)!important}
