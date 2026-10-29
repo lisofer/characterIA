@@ -611,3 +611,79 @@ body:has(#login-view:not(.hidden)){
 }
 .student-page .stage.is-muted .avatar-placeholder,
 .student-page .stage.call-ended .avatar-placeholder{filter:grayscale(1) brightness(.56)!important}
+
+
+/* Carmen: avatar independiente en la pantalla original de contraseña. */
+.carmen-dock{
+ position:absolute;z-index:5;width:225px;left:calc(50% + 170px);top:50%;
+ transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;
+ --carmen-scale:.9;--carmen-x:0px;--carmen-y:0px;
+}
+.carmen-face{
+ position:relative;width:100%;height:clamp(180px,31dvh,310px);border:0;border-radius:20px;
+ background:radial-gradient(ellipse at 50% 55%,#2e528a66,#13243b22 62%,transparent 78%);
+ display:grid;place-items:center;padding:0;overflow:hidden;color:#b0d6ff;
+}
+.carmen-face:focus-visible,.carmen-controls button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.carmen-fallback{font-size:72px;color:#81aee1;opacity:.7}
+.carmen-images{position:absolute;inset:0;transform:translate(var(--carmen-x),var(--carmen-y)) scale(var(--carmen-scale));transform-origin:center center;pointer-events:none}
+.carmen-frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center center;visibility:hidden;opacity:0}
+.carmen-frame.is-visible{visibility:visible;opacity:1}
+.carmen-caption{
+ width:100%;height:35px;border:1px solid #57719455;background:#050e1cf0;border-radius:10px;
+ display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap;
+ font-weight:700;color:#fff;padding:2px 9px;text-align:center;line-height:1.1;
+}
+.carmen-state{min-height:18px;font-size:11px;line-height:1.35;color:#b9d1ed;text-align:center;max-width:100%}
+.carmen-controls{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:3px}
+.carmen-controls .control,.carmen-controls .control-amber{
+ width:42px;height:42px;min-width:42px;border-radius:12px;font-size:24px;box-shadow:0 5px 16px #0006;
+}
+.carmen-disconnected .carmen-images{filter:grayscale(1) brightness(.7)}
+.carmen-admin-panel .panel-head{align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.carmen-admin-layout{display:grid;grid-template-columns:170px minmax(0,1fr);gap:20px;align-items:start}
+.carmen-admin-preview{position:sticky;top:15px;display:flex;flex-direction:column;align-items:center}
+.carmen-preview-stage{
+ display:grid;place-items:center;width:160px;height:240px;overflow:hidden;border:1px solid #395a7c;
+ border-radius:15px;background:radial-gradient(ellipse,#31557a,#0c1d33 70%);
+}
+.carmen-preview-stage img{width:100%;height:100%;object-fit:contain}
+.carmen-preview-stage span{font-size:55px;color:#8db7dc}
+.carmen-frames-admin{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:20px}
+.carmen-frame-card{display:flex;flex-direction:column;gap:7px;min-width:0;padding:7px;background:#0b1a2f;border-radius:11px;border:1px solid #2c496b}
+.carmen-admin-thumb{height:98px;display:grid;place-items:center;border-radius:8px;overflow:hidden;background:#1a314c;color:#7da8d5;font-size:30px}
+.carmen-admin-thumb img{width:100%;height:100%;object-fit:contain}
+.carmen-frame-card span{font-size:10px;line-height:1.25;min-height:25px}
+.carmen-frame-upload{cursor:pointer;text-align:center;background:#1d456f;border-radius:7px;padding:8px 3px;font-size:10px;font-weight:700}
+.carmen-frame-upload input{display:none}
+.carmen-admin-settings{gap:14px}
+.carmen-admin-settings .range-field{gap:5px}
+.carmen-prompt-label{margin-top:18px}
+.carmen-prompt-label textarea{min-height:175px}
+@media(max-width:1000px){
+ .carmen-dock{left:calc(50% + 155px);width:185px}
+ .carmen-face{height:clamp(150px,27dvh,265px)}
+ .auth-page .login-wrap{transform:translateX(-110px)}
+}
+@media(min-width:1001px){.auth-page .login-wrap{transform:translateX(-125px)}}
+@media(max-width:790px){
+ .auth-page .login-wrap{transform:translateY(clamp(96px,15dvh,135px));width:min(100%,410px)}
+ .carmen-dock{top:clamp(6px,2dvh,18px);left:50%;width:min(84vw,240px);transform:translateX(-50%)}
+ .carmen-face{height:clamp(120px,25dvh,205px)}
+ .carmen-caption{height:30px}
+ .carmen-controls .control,.carmen-controls .control-amber{height:39px;width:39px;min-width:39px;border-radius:11px;font-size:21px}
+ .carmen-admin-layout{grid-template-columns:1fr}
+ .carmen-admin-preview{position:static}
+ .carmen-preview-stage{height:150px;width:120px}
+ .carmen-frames-admin{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-height:570px) and (max-width:790px){
+ .auth-page .login-wrap{transform:translateY(76px)}
+ .carmen-dock{top:3px;gap:2px}
+ .carmen-face{height:clamp(77px,17dvh,105px)}
+ .carmen-fallback{font-size:41px}
+ .carmen-caption{height:24px;font-size:14px!important}
+ .carmen-state{min-height:13px;font-size:9px}
+ .carmen-controls{gap:7px;margin-top:0}
+ .carmen-controls .control,.carmen-controls .control-amber{height:33px;width:33px;min-width:33px;border-radius:9px;font-size:18px}
+}
