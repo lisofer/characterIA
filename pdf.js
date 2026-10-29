@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {DATA_DIR,getProfile,uid} from './db.js';
 import {cvReadiness,cvContent,monthLabel} from './cv-layout.js';
-import {createWordDocument} from './word.js';
 
 // CV ATS de UNA sola página. El perfil completo se conserva en SQLite;
 // en el archivo se imprime una selección resumida, sin inventar antecedentes.
@@ -113,13 +112,8 @@ export async function createDocument(profileId){
  const p=getProfile(profileId);if(!p)throw new Error('Perfil no encontrado.');
  const ready=cvReadiness(p.fields);
  if(!ready.ok)throw new Error('Faltan datos del CV: '+ready.faltantes.map(f=>f.campo).join(', '));
- const stem=uid(),pdfFile=path.join(DATA_DIR,'cvs',stem+'.pdf'),wordFile=path.join(DATA_DIR,'cvs',stem+'.docx');
- try{
-  await buildPdf(pdfFile,p);
-  await createWordDocument(wordFile,p);
- }catch(error){
-  for(const file of [pdfFile,wordFile])try{fs.unlinkSync(file)}catch{}
-  throw error;
- }
- return {pdfFile,wordFile,filename:stem+'.pdf'};
+ const stem=uid(),pdfFile=path.join(DATA_DIR,'cvs',stem+'.pdf');
+ try{await buildPdf(pdfFile,p);}
+ catch(error){try{fs.unlinkSync(pdfFile)}catch{};throw error;}
+ return {pdfFile,filename:stem+'.pdf'};
 }

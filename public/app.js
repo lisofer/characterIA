@@ -272,34 +272,38 @@ function scheduleReconnect(){
 }
 // No controles adicionales: al confirmar CV se solicitan ambos archivos.
 // Chrome puede solicitar autorización para varias descargas automáticas.
+// El CV se descarga únicamente en PDF, con el nombre del perfil.
 function cleanCVName(raw){
- const n=String(raw||'Curriculum CV').normalize('NFC')
-  .replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim().slice(0,110);
- return n||'Curriculum CV';
+ const text=String(raw||'').normalize('NFC').replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim();
+ return text&&text!=='CV' ? text.slice(0,110) : 'Curriculum CV';
 }
-async function downloadCVAutomatically(id,kind,base){
- if(!id||!['pdf','word'].includes(kind))return;
- const key=kind+':'+id;if(startedDownloads.has(key))return;
- startedDownloads.add(key);
+async function downloadCVAutomatically(id,filenameBase){
+ if(!id||startedDownloads.has(id))return;
+ startedDownloads.add(id);
  try{
-  const endpoint='/api/cv/'+encodeURIComponent(id)+(kind==='word'?'/word':'');
-  const response=await fetch(endpoint,{credentials:'same-origin'});
-  if(!response.ok)throw Error('No se pudo preparar '+kind.toUpperCase()+' (HTTP '+response.status+')');
-  const data=await response.blob();
-  if(!data.size)throw Error('El archivo está vacío');
-  const url=URL.createObjectURL(data),a=document.createElement('a');
-  a.href=url;a.download=cleanCVName(base)+(kind==='word'?'.docx':'.pdf');
-  a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+  const response=await fetch('/api/cv/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const blob=await response.blob();
+  if(!blob.size)throw Error('El PDF está vacío');
+  // El servidor decide el nombre a partir del perfil real. Este atributo
+  // se usa porque descargamos un blob URL en lugar de navegar a la ruta.
+  const disposition=response.headers.get('Content-Disposition')||'';
+  const rfc5987=disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const quoted=disposition.match(/filename="([^"]+)"/i);
+  let serverName='';
+  try{if(rfc5987)serverName=decodeURIComponent(rfc5987[1]);}catch{}
+  if(!serverName&&quoted)serverName=quoted[1];
+  let filename=serverName||cleanCVName(filenameBase)+'.pdf';
+  filename=filename.replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim();
+  if(!/\.pdf$/i.test(filename))filename=cleanCVName(filenameBase)+'.pdf';
+  const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+  anchor.href=url;anchor.download=filename;anchor.style.display='none';
+  document.body.appendChild(anchor);anchor.click();anchor.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
  }catch(error){
-  startedDownloads.delete(key);
-  toast('No se pudo solicitar la descarga '+kind.toUpperCase()+': '+(error?.message||error));
+  startedDownloads.delete(id);
+  toast('No se pudo descargar el PDF: '+(error?.message||error));
  }
-}
-function downloadBothDocuments(id,name){
- void downloadCVAutomatically(id,'pdf',name);
- // Pequeña separación para que Android detecte dos archivos distintos.
- setTimeout(()=>void downloadCVAutomatically(id,'word',name),550);
 }
 
 async function connectLive(){
@@ -333,8 +337,7 @@ async function connectLive(){
    case 'profile':break;
    case 'document':
     setDocuments([{id:m.id}]);
-    if(m.format==='both')downloadBothDocuments(m.id,m.filenameBase);
-    else downloadCVAutomatically(m.id,m.format==='word'?'word':'pdf',m.filenameBase);
+    void downloadCVAutomatically(m.id,m.filenameBase);
     break;
    case 'interrupted':stopPlayback(true);break;
    case 'error':toast(m.message||'Error en Gemini Live');setStatus('Error');stopMicrophone();break;

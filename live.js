@@ -29,7 +29,7 @@ const fnDefinitions=[
  fin_mes:{type:'INTEGER'},fin_anio:{type:'INTEGER'},en_curso:{type:'BOOLEAN'},estado:{type:'STRING'},
  aproximada:{type:'BOOLEAN'},reemplazar_indice:{type:'INTEGER'},migracion_confirmada:{type:'BOOLEAN'},confirmado:{type:'BOOLEAN'}
  },required:['titulo','institucion','confirmado']}},
- {name:'generar_cv',description:'Cuando la persona confirma la versión completa, genera PDF y Word en el mismo paso. Ambos comienzan su descarga automática. No pedir elegir formato ni llamar a una segunda función.',parameters:{type:'OBJECT',properties:{confirmacion:{type:'BOOLEAN'}},required:['confirmacion']}}
+ {name:'generar_cv',description:'Cuando la persona confirma el CV, genera únicamente un archivo PDF. Su descarga se solicita automáticamente.',parameters:{type:'OBJECT',properties:{confirmacion:{type:'BOOLEAN'}},required:['confirmacion']}}
 
 ];
 const shortProfile=p=>p?JSON.stringify({
@@ -109,8 +109,8 @@ export function makeLive(client,profileId,{voiceOverride,preview=false}={}){
           const file=await createDocument(profileId);
           const id=saveDoc(profileId,file.filename);
           const nombre=[profile.fields.nombre,profile.fields.apellido].filter(Boolean).join(' ').trim();
-          write('document',{id,format:'both',filenameBase:(nombre||'Curriculum')+' CV'});
-          result={ok:true,mensaje:'El PDF y el Word ya están preparados. Se solicitaron las dos descargas al navegador. No preguntes qué formato prefiere ni menciones botones extras.'};
+          write('document',{id,format:'pdf',filenameBase:(nombre||'Curriculum')+' CV'});
+          result={ok:true,mensaje:'El archivo PDF está preparado y se solicitó su descarga al navegador. No afirmes que se descargó hasta poder comprobarlo.'};
         }
       }
     }
