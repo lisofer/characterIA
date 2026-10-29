@@ -696,6 +696,8 @@ body:has(#login-view:not(.hidden)){
 }
 
 
+/* Erik muestra únicamente subtítulos realmente generados, nunca guiones de espera. */
+.guard-dock .guard-bubble:not(.has-message){display:none}
 /* Erik · burbuja de lectura equilibrada: ancha hacia la izquierda, sin tapar el rostro. */
 .guard-dock .guard-bubble{
   position:absolute;
