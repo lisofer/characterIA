@@ -110,7 +110,7 @@ async function phrase(intent,sessionId,userText){
  if(intent==='conversation'&&!userText)throw new Error('No pude interpretar esa frase. Podés intentar de nuevo.');
  try{
   const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,
-   httpOptions:{timeout:6500,retryOptions:{attempts:1}}});
+   httpOptions:{timeout:12000,retryOptions:{attempts:1}}});
   const recent=ctx.recent.slice(-6);
   const turns=(ctx.turns||[]).slice(-4).map(x=>'VISITANTE: '+x.user+'\nERIK: '+x.erik).join('\n');
   const systemInstruction=[
@@ -129,7 +129,7 @@ async function phrase(intent,sessionId,userText){
   const prompt=intent==='conversation'?'VISITANTE DICE: '+userText+'\n\n'+context:context;
   let output='';
   // Prioridad a modelos actuales; 2.5 Flash puede estar restringido para proyectos nuevos.
-  // Solo cambiar de modelo ante errores de disponibilidad/cuota, no reintentar errores de clave/API.
+  // Gemini exige un plazo mínimo de 10 s. Usar 12 s sin reintentos ocultos del SDK.
   const modelNames=['gemini-3.5-flash-lite','gemini-3.1-flash-lite'];
   let lastModelError=null;
   for(const model of modelNames){
@@ -137,7 +137,7 @@ async function phrase(intent,sessionId,userText){
     const result=await ai.models.generateContent({
      model,
      contents:prompt,
-     config:{systemInstruction,temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:6500,retryOptions:{attempts:1}}}
+     config:{systemInstruction,temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:12000,retryOptions:{attempts:1}}}
     });
     output=String(result.text||'').replace(/[\r\n]+/g,' ')
      .replace(/^[\s"'“”]+|[\s"'“”]+$/g,'').trim().slice(0,430);
@@ -225,7 +225,7 @@ async function geminiSpeech(text){
    const res=await ai.models.generateContent({
     model,
     contents:[{role:'user',parts:[{text:'Hablá en español argentino claro, como un guardia juvenil, un poco gruñón y gracioso. Decí exactamente estas palabras, sin agregar ni omitir nada:\\n'+text}]}],
-    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},httpOptions:{timeout:5000,retryOptions:{attempts:1}}}
+    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},httpOptions:{timeout:12000,retryOptions:{attempts:1}}}
    });
    const part=res.candidates?.[0]?.content?.parts?.find(p=>p.inlineData?.data);
    if(!part)throw new Error('Gemini no devolvió audio');
@@ -401,12 +401,12 @@ function publicConfig(){
 // Diagnóstico puntual al iniciar: pregunta artificial, nunca información de visitantes.
 async function probeErikGemini(){
  if(!process.env.GEMINI_API_KEY)return;
- const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,httpOptions:{timeout:6500,retryOptions:{attempts:1}}});
+ const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,httpOptions:{timeout:12000,retryOptions:{attempts:1}}});
  for(const model of ['gemini-3.1-flash-lite','gemini-3.5-flash-lite']){
   const t=Date.now();
   try{
    const r=await ai.models.generateContent({model,contents:'Decí solamente hola.',
-    config:{systemInstruction:'Contestá en español.',temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:6500,retryOptions:{attempts:1}}}});
+    config:{systemInstruction:'Contestá en español.',temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:12000,retryOptions:{attempts:1}}}});
    console.info('Erik prueba Gemini:',model,'OK',Date.now()-t,'ms',Boolean(r.text));
   }catch(e){
    const detail=String(e?.message||e).replace(/AIza[A-Za-z0-9_-]+/g,'[clave oculta]').replace(/https?:\/\/\S+/g,'[url]').slice(0,330).replace(/\n/g,' ');
