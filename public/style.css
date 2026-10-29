@@ -628,3 +628,6 @@ body:has(#login-view:not(.hidden)){
 .cv-files-banner a:focus-visible{outline:3px solid white;outline-offset:2px}
 .student-page.keyboard-open .cv-files-banner{display:none!important}
 @media(max-width:430px){.cv-files-banner{bottom:87px;gap:5px;padding:6px 8px}.cv-files-label{font-size:9px;max-width:70px}.cv-files-banner a{min-width:73px;font-size:13px;min-height:40px}}
+
+/* Información de uso de datos en el ingreso, no recitada por el avatar. */
+.login-data-note{color:#a9bbcf;font:400 14px/1.45 Arial,sans-serif;text-align:center;margin:15px 0 0;padding:0 6px}
