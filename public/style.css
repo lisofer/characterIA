@@ -742,6 +742,9 @@ body:has(#login-view:not(.hidden)){
   word-break:normal;
   hyphens:none;
   text-wrap:balance;
+  /* No crecer indefinidamente con diálogos largos. */
+  max-height:6.7em;
+  overflow:hidden;
 }
 .guard-dock.is-muted .guard-bubble{
   background:linear-gradient(160deg,#d4dbe7,#aebccc);
