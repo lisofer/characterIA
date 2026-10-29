@@ -1,16 +1,44 @@
-<!doctype html><html lang="es-AR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091323"><meta name="description" content="Asistente accesible para construir y actualizar tu currículum vitae por voz."><title>NEXO CV</title><link rel="stylesheet" href="/style.css?v=20261029-guard-1"></head><body>
+<!doctype html><html lang="es-AR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091323"><meta name="description" content="Asistente accesible para construir y actualizar tu currículum vitae por voz."><title>NEXO CV</title><link rel="stylesheet" href="/style.css?v=20261029-float-1"></head><body>
 <div id="toast" role="status" aria-live="polite"></div>
 <section id="login-view" class="page auth-page">
  <div class="ambient orb-one"></div><div class="ambient orb-two"></div>
  <main class="login-wrap"><div class="wordmark"><span class="brand-mark">✦</span><span>NEXO<span class="wordmark-soft">CV</span></span></div>
  <div class="auth-card"><h1 class="simple-login-title">Ingresar</h1>
  <form id="login-form"><label for="password">Contraseña de acceso</label><div class="field-wrap"><input id="password" type="password" autocomplete="current-password" placeholder="Ingresá tu contraseña" required><button type="button" id="toggle-password" class="show-pass" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña"><svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.8-6 10-6 10 6 10 6-3.8 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 6.1A12.6 12.6 0 0 1 12 6c6.2 0 10 6 10 6a17.4 17.4 0 0 1-4.2 4.4M6.3 6.4C3.6 8.2 2 12 2 12s3.8 6 10 6c1 0 1.9-.1 2.7-.4"/><path d="M10 10a3 3 0 0 0 4 4"/></svg></button></div><button type="submit" id="login-btn" class="primary-btn">INGRESAR</button></form>
- </div><section id="guard-dock" class="guard-dock" aria-label="Erik, guardia de acceso">
- <div id="guard-visual" class="guard-visual"><div id="guard-avatar" class="guard-avatar" role="img" aria-label="Erik, guardia de seguridad"><span id="guard-fallback" class="guard-fallback">🛡️</span></div></div>
- <div class="guard-controls"><div class="guard-title">Erik <span>· SECURITY</span></div><p id="guard-status" role="status" aria-live="polite">Preparando portería…</p>
- <div class="guard-buttons"><button type="button" id="guard-call" aria-label="Hablar con Erik" class="guard-speak-btn">🎙 Hablar con Erik</button><button type="button" id="guard-repeat" class="guard-small-btn" aria-label="Repetir lo que dijo Erik">↻ Repetir</button><button type="button" id="guard-stop" class="guard-small-btn" aria-label="Colgar conversación">✕ Colgar</button></div>
- <p class="guard-privacy">Si estás en un lugar público, usá el campo de contraseña. La voz puede ser escuchada por otras personas.</p></div>
- </section></main>
+ </main>
+ <section id="guard-dock" class="guard-dock hidden" aria-label="Erik, portero de NEXOCV">
+  <div class="guard-bubble" role="status" aria-live="polite" aria-atomic="true"><p id="guard-status">¿Tenés la contraseña?</p></div>
+  <button id="guard-toggle" type="button" class="guard-avatar-button" aria-label="Silenciar a Erik y detener el micrófono" aria-pressed="false" title="Tocá a Erik para silenciarlo">
+   <span id="guard-avatar" class="guard-avatar" aria-hidden="true">
+    <span id="guard-fallback" class="guard-fallback" aria-hidden="true">
+     <svg viewBox="0 0 250 340" role="img" aria-label="Erik, guardia de seguridad" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="122" cy="330" rx="104" ry="8" fill="#020d25" opacity=".36"/>
+      <path d="M53 255 L43 303 L90 318 L118 282 L152 282 L174 317 L215 302 L194 249Z" fill="#292e3d" stroke="#141826" stroke-width="5"/>
+      <ellipse cx="64" cy="314" rx="42" ry="16" fill="#151722" stroke="#060a13" stroke-width="5"/><ellipse cx="192" cy="314" rx="42" ry="16" fill="#151722" stroke="#060a13" stroke-width="5"/>
+      <path d="M52 184 Q21 190 23 246 L40 276 Q76 287 103 273 L143 273 Q191 290 215 270 L229 238 Q229 190 197 181Z" fill="#394253" stroke="#0b1020" stroke-width="6"/>
+      <path d="M89 179 L114 215 L135 215 L161 177Z" fill="#fff" stroke="#111827" stroke-width="4"/>
+      <path d="M119 207 L132 207 L139 259 L125 279 L111 259Z" fill="#e62b39" stroke="#14121d" stroke-width="3"/>
+      <path d="M45 209 Q29 243 60 255 L86 250 L91 227 Q62 228 61 209Z" fill="#394253" stroke="#121522" stroke-width="6"/>
+      <path d="M190 211 Q228 210 225 244 L207 255 L176 240Z" fill="#394253" stroke="#141826" stroke-width="6"/>
+      <path d="M99 259 Q113 256 124 260 Q135 256 148 259 L150 277 Q126 291 103 277Z" fill="#f9c29e" stroke="#121522" stroke-width="4"/>
+      <path d="M161 199h52v22h-52z" fill="#101824" stroke="#a1b1c9" stroke-width="1.5"/><text x="187" y="213" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#fff">SECURITY</text>
+      <ellipse cx="123" cy="124" rx="103" ry="96" fill="#f9c49d" stroke="#12121d" stroke-width="6"/>
+      <path d="M28 90 Q30 28 116 17 Q209 14 219 91 Q184 71 125 81 Q64 72 28 102Z" fill="#02a2b9" stroke="#10131a" stroke-width="5"/>
+      <path d="M30 91 Q124 47 216 86" fill="none" stroke="#ffd634" stroke-width="8" stroke-linecap="round"/>
+      <path d="M96 17q13 -15 28 -3q14 -16 24 3q-8 16 -22 12q-22 14 -30 -12Z" fill="#ffd631" stroke="#161923" stroke-width="2"/>
+      <ellipse cx="84" cy="121" rx="31" ry="30" fill="#f9f9fe"/><ellipse cx="149" cy="121" rx="31" ry="30" fill="#f9f9fe"/>
+      <circle cx="91" cy="124" r="5" fill="#090e20"/><circle cx="143" cy="124" r="5" fill="#090e20"/>
+      <path d="M63 88l45 7M136 95l42 -7" fill="none" stroke="#25232d" stroke-width="5" stroke-linecap="round"/>
+      <path d="M93 162q31 20 65 -3" fill="none" stroke="#2c161a" stroke-width="4" stroke-linecap="round"/>
+      <path d="M29 128 Q0 144 19 172" fill="none" stroke="#0c1423" stroke-width="9" stroke-linecap="round"/>
+      <rect x="19" y="117" width="15" height="37" rx="8" fill="#1f2937" stroke="#020617" stroke-width="4"/>
+     </svg>
+    </span>
+   </span>
+   <span class="guard-mic-indicator" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="2.5"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></span>
+  </button>
+  <span class="guard-accessible-hint" id="guard-hint">Tocá a Erik para silenciar voz y micrófono</span>
+ </section>
 </section>
 <section id="student-view" class="page student-page hidden"><header class="topbar"><div class="wordmark"><span class="brand-mark">✦</span><span>NEXO<span class="wordmark-soft">CV</span></span></div><div class="topbar-right"><span class="live-pill"><span class="status-dot"></span><span id="connection-label">Sin conectar</span></span><button class="ghost-btn" id="student-logout">Salir</button></div></header>
  <main class="conversation-shell"><div class="stage" id="stage"><div class="stage-glow"></div><div class="stage-halo"></div><div class="avatar-stage"><div id="avatar-placeholder" class="avatar-placeholder" aria-hidden="true" style="font-size:4rem;color:#7895b8;display:grid;place-items:center">✦</div><div id="avatar-images" class="avatar-images" aria-label="Asistente virtual" role="img"></div></div>
@@ -62,4 +90,4 @@
  </section><section class="admin-pane hidden" data-pane="accessibility"><div class="panel"><h3>Subtítulos en una sola línea</h3><p>Las palabras se distribuyen según el ancho real del texto. Nunca se dividen al medio ni crean una segunda línea.</p><div class="setting-grid"><label class="range-field">Tamaño de texto <output data-for="subtitleFont"></output><input data-setting="subtitleFont" type="range" min="14" max="32"></label><label class="range-field">Ancho máximo <output data-for="subtitleWidth"></output><input data-setting="subtitleWidth" type="range" min="300" max="1000"></label><label class="range-field subtitle-delay-field">Sincronización del subtítulo <output data-for="subtitleDelay"></output><input data-setting="subtitleDelay" type="range" min="-1200" max="1200" step="25" value="0" aria-label="Adelanto o retraso del subtítulo en milisegundos"><span class="range-help">← Adelantar · Retrasar →</span></label></div></div><div class="panel"><h3>Movimiento y sincronización</h3><p>La apertura de la boca se calcula con el sonido que se está reproduciendo. Las ocho imágenes permiten combinar ojos y posiciones de boca.</p><div class="setting-grid"><label class="range-field">Desfase de boca (ms) <output data-for="mouthDelay"></output><input data-setting="mouthDelay" type="range" min="-250" max="250"></label><label class="range-field">Sensibilidad <output data-for="mouthSensitivity"></output><input data-setting="mouthSensitivity" type="range" min="0" max="100"></label><label class="range-field">Suavizado <output data-for="mouthSmoothing"></output><input data-setting="mouthSmoothing" type="range" min="0" max="100"></label><label class="range-field">Apertura máxima <output data-for="mouthAmplitude"></output><input data-setting="mouthAmplitude" type="range" min="0" max="100"></label><label class="range-field">Intervalo de parpadeo (seg) <output data-for="blinkRate"></output><input data-setting="blinkRate" type="range" min="2" max="9" step=".1"></label></div></div></section>
  </div></div></section>
 <div id="reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div class="modal-card"><div class="modal-icon">↻</div><h3 id="reset-title">¿Empezar un currículum nuevo?</h3><p>Se borrarán definitivamente los datos, la conversación y los PDF del currículum actual. Esta acción no se puede deshacer.</p><div class="modal-actions"><button class="secondary-btn" id="cancel-reset">Cancelar</button><button class="danger-btn" id="confirm-reset">Sí, borrar y reiniciar</button></div></div></div>
-<script type="module" src="/app.js?v=20261029-guard-2"></script><script type="module" src="/guard-ui.js?v=20261029-guard-1"></script></body></html>
+<script type="module" src="/app.js?v=20261029-float-1"></script><script type="module" src="/guard-ui.js?v=20261029-float-1"></script></body></html>
