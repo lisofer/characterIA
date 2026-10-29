@@ -28,6 +28,7 @@ const getReference=()=>{if(!hasReference())return null;try{const j=JSON.parse(fs
 fs.mkdirSync(frameDir,{recursive:true});
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1}});
 const limited=rateLimit({windowMs:60_000,limit:24,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'Demasiadas solicitudes de voz. Intentá de nuevo en un minuto.'}});
+const audioLimited=rateLimit({windowMs:60_000,limit:60,standardHeaders:'draft-7',legacyHeaders:false});
 // Estas situaciones son funcionales, no un segundo prompt de personalidad.
 // La personalidad completa que se envía al modelo es la visible y editable en Admin.
 // Las respuestas habladas son generadas por Gemini. No hay una biblioteca de frases pregrabadas.
@@ -328,6 +329,11 @@ async function fishStreamingResponse(text,s,signal){
   if(response.body)await response.body.cancel().catch(()=>{});
   throw new Error('Fish HTTP '+response.status);
  }
+ const contentType=response.headers.get('content-type')||'';
+ if(contentType&&!/audio|octet-stream/i.test(contentType)){
+  await response.body.cancel().catch(()=>{});
+  throw new Error('Fish no devolvió audio');
+ }
  return response;
 }
 async function streamGuardAudio(text,req,res){
@@ -471,7 +477,7 @@ export function installGuard(app,auth){
    res.status(503).json({error:String(err?.message||'Gemini no disponible')});
   }
  });
- app.get('/api/guard/audio/:id',limited,async(req,res)=>{
+ app.get('/api/guard/audio/:id',audioLimited,async(req,res)=>{
   const id=String(req.params.id||'');
   if(!/^[A-Za-z0-9_-]{32}$/.test(id))return res.sendStatus(404);
   const job=guardAudioJobs.get(id);
