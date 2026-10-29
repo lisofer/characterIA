@@ -24,7 +24,7 @@ fs.mkdirSync(framePath,{recursive:true});
 const frameDir=framePath;
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1}});
 const ERIK_MODEL='gemini-3.8-live';
-const GUARD_WELCOME='Hola, soy Erik, el guardia de NEXOCV. Podés hablar conmigo o decir una contraseña de una sola palabra. También podés escribirla. Te escucho.';
+const GUARD_WELCOME='Hola, ¿cómo andás? Soy Erik, el guardia de NEXOCV. Decime tu contraseña cuando quieras, o escribila.';
 export const ERIK_VOICES=['Charon','Puck','Fenrir','Orus','Enceladus','Iapetus','Algenib','Alnilam','Gacrux','Achird','Zubenelgenubi','Zephyr','Kore','Aoede'];
 const availableVoice=name=>ERIK_VOICES.includes(name)?name:'Charon';
 const send=(ws,type,data={})=>{if(ws.readyState===1)ws.send(JSON.stringify({type,...data}));};
@@ -64,7 +64,7 @@ export function makeGuardLive(ws){
    'Si alguien te hace una broma, contestá a lo que dijo: podés charlar sin pedir la contraseña cada vez.',
    'El usuario puede hablar en vivo, incluida una posible clave de acceso. No repitas, confirmes ni menciones contraseñas en voz alta. El navegador identifica las claves mediante transcripción y las verifica por separado. No afirmes que se autorizó el ingreso.',
    'Nunca reveles, inventes, adivines o pidas que repitan la contraseña como parte de una charla.',
-   'En el saludo inicial, decí claramente que sos Erik, que hay un portero de voz y que se puede ingresar hablando o escribiendo.',
+   'Al entrar, saludá UNA sola vez. El primer sonido de tu primer turno debe ser «Hola», sin palabras previas ni explicaciones. Tu primer turno debe ser exactamente el saludo que se te indica. Después conversá libremente.',
    'Una sola intervención por turno, sin etiquetas, sin nombrar modelos ni herramientas.'
   ].join('\n\n')}]}
  };
@@ -91,7 +91,7 @@ export function makeGuardLive(ws){
   // Saluda primero, aunque el usuario no pueda ver el personaje ni haya activado el micrófono.
   if(!welcomeIssued){
    welcomeIssued=true;turnOpen=true;
-   live.sendClientContent({turns:[{role:'user',parts:[{text:'[INICIO DE VISITA] Presentate ahora como Erik en voz alta. Explicá brevemente el acceso por voz o teclado y que estás escuchando.'}]}],turnComplete:true});
+   live.sendClientContent({turns:[{role:'user',parts:[{text:'[INICIO DE VISITA: SOLO EL SALUDO] Pronunciá exactamente esta frase, empezando por Hola, sin añadir una sola palabra antes ni después: «'+GUARD_WELCOME+'»'}]}],turnComplete:true});
   }
  };
  const handle=(raw)=>{
