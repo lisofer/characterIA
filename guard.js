@@ -415,8 +415,18 @@ export function installGuard(app,auth){
  app.get('/api/guard/config',(req,res)=>res.json(publicConfig()));
  app.post('/api/guard/welcome',limited,async(req,res)=>{
   if(allSettings().guardEnabled==='false')return res.status(404).json({error:'Erik desactivado.'});
-  const voice=await preferredVoice(GUARD_WELCOME,{welcome:true});
-  res.set('Cache-Control','no-store').json(spokenResult(GUARD_WELCOME,voice));
+  // Para accesibilidad, el primer saludo no puede quedar esperando 20s en silencio.
+  // Usamos Fish precargado cuando existe; si todavía está preparándose, la voz
+  // del navegador lee el mismo saludo inmediatamente y Fish sigue preparándose.
+  let timer;
+  const voice=await Promise.race([
+   preferredVoice(GUARD_WELCOME,{welcome:true}),
+   new Promise(resolve=>{timer=setTimeout(()=>resolve(null),1500);})
+  ]);
+  clearTimeout(timer);
+  res.set('Cache-Control','no-store').json(
+   voice?spokenResult(GUARD_WELCOME,voice):{text:GUARD_WELCOME,engine:'browser',voiceFallback:true}
+  );
  });
  app.get('/api/guard/frames/:index',async(req,res)=>{
   const i=Number(req.params.index);
