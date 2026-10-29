@@ -110,7 +110,7 @@ async function phrase(intent,sessionId,userText){
  if(intent==='conversation'&&!userText)throw new Error('No pude interpretar esa frase. Podés intentar de nuevo.');
  try{
   const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,
-   httpOptions:{timeout:12000,retryOptions:{attempts:1}}});
+   httpOptions:{retryOptions:{attempts:1}}});
   const recent=ctx.recent.slice(-6);
   const turns=(ctx.turns||[]).slice(-4).map(x=>'VISITANTE: '+x.user+'\nERIK: '+x.erik).join('\n');
   const systemInstruction=[
@@ -129,15 +129,15 @@ async function phrase(intent,sessionId,userText){
   const prompt=intent==='conversation'?'VISITANTE DICE: '+userText+'\n\n'+context:context;
   let output='';
   // Prioridad a modelos actuales; 2.5 Flash puede estar restringido para proyectos nuevos.
-  // Gemini exige un plazo mínimo de 10 s. Usar 12 s sin reintentos ocultos del SDK.
-  const modelNames=['gemini-3.5-flash-lite','gemini-3.1-flash-lite'];
+  // Google rechaza plazos menores de 10s y expiró con 12s. Usar AbortSignal del cliente sin deadline en cabecera; 3.1 es el modelo de texto probado.
+  const modelNames=['gemini-3.1-flash-lite'];
   let lastModelError=null;
   for(const model of modelNames){
    try{
     const result=await ai.models.generateContent({
      model,
      contents:prompt,
-     config:{systemInstruction,temperature:1.03,maxOutputTokens:150,httpOptions:{timeout:12000,retryOptions:{attempts:1}}}
+     config:{systemInstruction,temperature:1.03,maxOutputTokens:200,abortSignal:AbortSignal.timeout(17000),httpOptions:{retryOptions:{attempts:1}}}
     });
     output=String(result.text||'').replace(/[\r\n]+/g,' ')
      .replace(/^[\s"'“”]+|[\s"'“”]+$/g,'').trim().slice(0,430);
@@ -225,7 +225,7 @@ async function geminiSpeech(text){
    const res=await ai.models.generateContent({
     model,
     contents:[{role:'user',parts:[{text:'Hablá en español argentino claro, como un guardia juvenil, un poco gruñón y gracioso. Decí exactamente estas palabras, sin agregar ni omitir nada:\\n'+text}]}],
-    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},httpOptions:{timeout:12000,retryOptions:{attempts:1}}}
+    config:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:'Puck'}},abortSignal:AbortSignal.timeout(16000),httpOptions:{retryOptions:{attempts:1}}}
    });
    const part=res.candidates?.[0]?.content?.parts?.find(p=>p.inlineData?.data);
    if(!part)throw new Error('Gemini no devolvió audio');
@@ -399,24 +399,10 @@ function publicConfig(){
   mouthAmplitude:s.guardMouthAmplitude,blinkRate:s.guardBlinkRate,fishReady:!!(process.env.FISH_API_KEY&&(s.guardVoiceId||hasReference()))};
 }
 // Diagnóstico puntual al iniciar: pregunta artificial, nunca información de visitantes.
-async function probeErikGemini(){
- if(!process.env.GEMINI_API_KEY)return;
- const ai=new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY,httpOptions:{retryOptions:{attempts:1}}});
- await Promise.all(['gemini-3.1-flash-lite','gemini-3.5-flash-lite','gemini-3.8-flash'].map(async model=>{
-  const t=Date.now();
-  try{
-   const r=await ai.models.generateContent({model,contents:'Decí solamente hola.',
-    config:{systemInstruction:'Contestá en español.',temperature:1,maxOutputTokens:150,
-     abortSignal:AbortSignal.timeout(22000),httpOptions:{retryOptions:{attempts:1}}}});
-   console.info('Erik prueba sin deadline:',model,'OK',Date.now()-t,'ms',Boolean(r.text));
-  }catch(e){
-   const detail=String(e?.message||e).replace(/AIza[A-Za-z0-9_-]+/g,'[clave oculta]').replace(/https?:\/\/\S+/g,'[url]').slice(0,300).replace(/\n/g,' ');
-   console.warn('Erik prueba sin deadline:',model,'ERROR',Number(e?.status||0),Date.now()-t,'ms',detail);
-  }
- }));
-}
 export function installGuard(app,auth){
- void probeErikGemini();
+ // Prueba de integración de la ruta real, con mensaje sintético y sin secretos.
+ void (async()=>{const t=Date.now();try{await phrase('help',crypto.randomUUID());console.info('Erik integración Gemini OK',Date.now()-t,'ms');}
+ catch(e){console.warn('Erik integración Gemini ERROR',String(e.message||'').slice(0,120),Date.now()-t,'ms');}})();
  // Generar el audio del saludo al iniciar el servidor para que las personas
  // que no pueden ver la página lo oigan sin esperar una conversión Fish nueva.
  if(allSettings().guardEnabled!=='false'&&process.env.FISH_API_KEY)
