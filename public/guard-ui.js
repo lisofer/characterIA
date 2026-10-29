@@ -205,6 +205,36 @@ async function playVoice(b64,mime){
   voiceSource=null;voiceAnalyser=null;
  }
 }
+async function playVoiceUrl(url){
+ // Reproducción MP3 progresiva: comienza al recibir los primeros fragmentos
+ // de Fish en lugar de esperar el audio completo en base64.
+ if(typeof url!=='string'||!/^\/api\/guard\/audio\/[A-Za-z0-9_-]{32}$/.test(url))
+  throw new Error('Dirección de audio inválida');
+ const audio=new Audio(url),token=guardEpoch;
+ audio.preload='auto';voicePlayer=audio;
+ try{
+  if(voiceContext?.state==='running'){
+   try{
+    voiceAnalyser=voiceContext.createAnalyser();voiceAnalyser.fftSize=1024;
+    voiceSource=voiceContext.createMediaElementSource(audio);
+    voiceSource.connect(voiceAnalyser);voiceAnalyser.connect(voiceContext.destination);
+   }catch(e){console.warn('Erik sin analizador:',String(e?.name||''));}
+  }
+  const ended=new Promise((resolve,reject)=>{
+   const finish=()=>{if(voiceFinish===finish)voiceFinish=null;resolve();};
+   voiceFinish=finish;audio.onended=finish;
+   audio.onerror=()=>{if(voiceFinish===finish)voiceFinish=null;reject(new Error('No se pudo reproducir audio externo'));};
+  });
+  await audio.play();
+  guardNeedsGesture=false;setMuteAppearance();
+  await ended;
+ }finally{
+  if(token===guardEpoch)voicePlayer=null;
+  audio.pause();audio.removeAttribute('src');audio.load();
+  try{voiceSource?.disconnect();voiceAnalyser?.disconnect();}catch{}
+  voiceSource=null;voiceAnalyser=null;
+ }
+}
 async function say(intent,{resumeListening=true,userText=null}={}){
  if(!guardActive||guardMuted||!isLoginVisible())return;
  stopRecognition();stopAudio();
@@ -212,14 +242,20 @@ async function say(intent,{resumeListening=true,userText=null}={}){
  const speechTurn=guardSpeechTurn;
  guardTalking=false;statusText('Erik está preparando su respuesta…');
  try{
-  const data=await readJSON('/api/guard/line',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent,sessionId:guardVisitId,...(intent==='conversation'?{userText}: {})})});
+  const data=await readJSON('/api/guard/line-fast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent,sessionId:guardVisitId,...(intent==='conversation'?{userText}: {})})});
   if(!guardActive||guardMuted||guardEpoch!==token||guardSpeechTurn!==speechTurn)return;
   statusText(data.text||'');
   guardTalking=true;spokenAt=performance.now();amplitude=0;
-  if((data.engine==='fish'||data.engine==='gemini')&&data.audio){
+  if(data.engine==='stream'&&data.audioUrl){
+   try{await playVoiceUrl(data.audioUrl);}
+   catch(e){
+    console.warn('Erik: audio progresivo no disponible:',String(e?.name||'Error'));
+    if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted)
+     await speakBrowser(data.text);
+   }
+  }else if((data.engine==='fish'||data.engine==='gemini')&&data.audio){
    try{await playVoice(data.audio,data.mime);}
    catch(e){
-    console.warn('Erik: no se pudo reproducir audio:',String(e?.name||'Error'));
     if(guardEpoch===token&&guardSpeechTurn===speechTurn&&!guardMuted)
      await speakBrowser(data.text);
    }
