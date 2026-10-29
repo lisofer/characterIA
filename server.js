@@ -11,7 +11,7 @@ import {WebSocketServer} from 'ws';
 import {fileURLToPath} from 'node:url';
 import {DATA_DIR,db,allSettings,setSettings,createProfile,getProfile,eraseProfile,createSession,resolveSession,removeSession,replaceSessionProfile,listDocs,lookupDoc} from './db.js';
 import {makeLive,voiceSample,wav,VOICE_NAMES} from './live.js';
-import {installGuard} from './guard.js';
+import {installGuard,makeGuardLive,ERIK_VOICES} from './guard.js';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const app=express();app.disable('x-powered-by');app.set('trust proxy',1);
 app.use(helmet({contentSecurityPolicy:false,crossOriginEmbedderPolicy:false}));
@@ -72,8 +72,9 @@ function safeCvDownloadName(profile){
  return (full||'Curriculum')+' CV.pdf';
 }
 app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,safeCvDownloadName(getProfile(req.profileId)));});
-app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY,fishReady:!!process.env.FISH_API_KEY}));
+app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY,guardVoices:ERIK_VOICES}));
 app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();const next={};for(const [k,v]of Object.entries(req.body?.config||{})){if(!Object.hasOwn(old,k))continue;if(typeof old[k]==='number'){const n=Number(v);if(!Number.isFinite(n))continue;next[k]=k==='subtitleDelay'?Math.max(-1200,Math.min(1200,n)):Math.max(-500,Math.min(2000,n));}else if(typeof old[k]==='string'){if(!['prompt','personality','guardPrompt','guardGreeting','guardSampleText'].includes(k)&&String(v).length>200)continue;if(['prompt','guardPrompt'].includes(k)&&String(v).length>32000)return res.status(400).json({error:'El prompt supera el máximo de 32.000 caracteres; no se guardó incompleto.'});next[k]=String(v).slice(0,['prompt','guardPrompt'].includes(k)?32000:4000);}}
+ if(next.guardVoice&&!ERIK_VOICES.includes(next.guardVoice))return res.status(400).json({error:'Voz de Erik no reconocida'});
  if(next.voice&&!VOICE_NAMES.includes(next.voice))return res.status(400).json({error:'Voz no reconocida'});
  if(next.model&&!['gemini-3.8-live','gemini-3.1-flash-live-preview'].includes(next.model))return res.status(400).json({error:'Modelo no permitido'});
  if(next.fallback&&!['gemini-3.8-live','gemini-3.1-flash-live-preview'].includes(next.fallback))return res.status(400).json({error:'Modelo de respaldo no permitido'});
@@ -86,7 +87,38 @@ app.use(express.static(path.join(ROOT,'public'),{index:'index.html',maxAge:0}));
 app.get('*',(req,res)=>res.sendFile(path.join(ROOT,'public','index.html')));
 app.use((err,req,res,next)=>res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:err.message||'Error'}));
 const server=http.createServer(app);const wss=new WebSocketServer({noServer:true,maxPayload:150000});
-server.on('upgrade',(req,socket,head)=>{const origin=req.headers.origin;const host=req.headers.host;if(origin){try{if(new URL(origin).host!==host){socket.destroy();return;}}catch{socket.destroy();return;}}const s=session(req);if(!s||s.role!=='student'){socket.destroy();return;}if(new URL(req.url,'http://localhost').pathname!=='/api/live'){socket.destroy();return;}wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req,s));});
+const guardWss=new WebSocketServer({noServer:true,maxPayload:4096});
+const activeGuardByIP=new Map();
+server.on('upgrade',(req,socket,head)=>{
+ const origin=req.headers.origin,host=req.headers.host;
+ if(origin){try{if(new URL(origin).host!==host){socket.destroy();return;}}catch{socket.destroy();return;}}
+ const pathname=new URL(req.url,'http://localhost').pathname;
+ if(pathname==='/api/guard/live'){
+  if(allSettings().guardEnabled==='false'||!process.env.GEMINI_API_KEY){socket.destroy();return;}
+  const ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim().slice(0,100);
+  if((activeGuardByIP.get(ip)||0)>=2){socket.destroy();return;}
+  activeGuardByIP.set(ip,(activeGuardByIP.get(ip)||0)+1);
+  try{guardWss.handleUpgrade(req,socket,head,ws=>{ws.guardIp=ip;guardWss.emit('connection',ws,req);});}
+  catch{activeGuardByIP.set(ip,Math.max(0,(activeGuardByIP.get(ip)||1)-1));socket.destroy();}
+  return;
+ }
+ const sess=session(req);
+ if(!sess||sess.role!=='student'||pathname!=='/api/live'){socket.destroy();return;}
+ wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req,sess));
+});
+guardWss.on('connection',async ws=>{
+ const live=makeGuardLive(ws);
+ let terminated=false;
+ const close=()=>{
+  if(terminated)return;terminated=true;live.close();
+  const ip=ws.guardIp;const n=Math.max(0,(activeGuardByIP.get(ip)||1)-1);
+  if(n)activeGuardByIP.set(ip,n);else activeGuardByIP.delete(ip);
+ };
+ ws.on('message',raw=>live.handle(raw));ws.on('close',close);ws.on('error',close);
+ try{await live.connect();}
+ catch(err){if(ws.readyState===1)ws.send(JSON.stringify({type:'error',message:'No se pudo abrir Gemini 3.8 Live. Tocá a Erik para reintentar.'}));try{ws.close()}catch{};close();console.warn('Erik Live connect:',String(err?.message||err).slice(0,160));}
+});
+
 wss.on('connection',async(ws,req,s)=>{const live=makeLive(ws,s.profile_id);let connected=false;try{await live.connect();connected=true;}catch(e){ws.send(JSON.stringify({type:'error',message:String(e.message||e)}));ws.close();return;}
  ws.on('message',data=>{try{const m=JSON.parse(String(data));if(m.type==='start')live.initial();else if(m.type==='text')live.sendText(m.text);else if(m.type==='audio')live.sendAudio(m.pcm);else if(m.type==='audio_end')live.stopAudio();}catch(e){if(ws.readyState===1)ws.send(JSON.stringify({type:'error',message:String(e.message||e)}));}});
  ws.on('close',()=>live.close());});
