@@ -9,6 +9,7 @@ let guardActive=false,guardMuted=false,guardNeedsGesture=false,guardEpoch=0,guar
 let painted=-1,rAF=0,nextBlink=0,blinkEnd=0,amplitude=0,spokenAt=0;
 let ws=null,liveReady=false,pendingIntent=null,connectionRetries=0;
 let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCaption='';
+let nextCaptionIsNewTurn=true,openingGreeting=true,openingPlaybackPending=false,lastTurnCompleted=false;
 let scheduledSources=new Set(),tailTimer=null;
 let micStream=null,micContext=null,micSource=null,micProcessor=null,micSilent=null;
 let micOn=false,micBusy=false,micRequestEpoch=0,micPromptAttempted=false;
@@ -58,7 +59,7 @@ async function startMic(gesture=false){
   micStream=stream;micContext=ctx;micSource=src;micProcessor=proc;micSilent=silent;
   proc.onaudioprocess=e=>{
    if(!micOn||guardMuted||!guardActive||!liveReady||!ws||
-     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>180000||document.hidden||
+     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>180000||openingGreeting||document.hidden||
      document.activeElement===one('#password'))return;
    const input=e.inputBuffer.getChannelData(0),ratio=ctx.sampleRate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
    for(let j=0;j<n;j++){
@@ -86,11 +87,11 @@ function clearInput(){clearTimeout(inputTimer);inputTimer=null;pendingInput='';}
 function stopPlayback(){
  clearTimeout(tailTimer);tailTimer=null;
  for(const src of scheduledSources){try{src.stop();src.disconnect()}catch{}}
- scheduledSources.clear();nextAudioTime=0;guardTalking=false;amplitude=0;outputCaption='';displayFrame(0);
+ scheduledSources.clear();nextAudioTime=0;guardTalking=false;amplitude=0;outputCaption='';nextCaptionIsNewTurn=true;lastTurnCompleted=false;displayFrame(0);
 }
 function stopGuard({hide=false}={}){
  guardEpoch++;releaseMic();clearInput();stopPlayback();
- guardActive=false;guardMuted=false;liveReady=false;pendingIntent=null;guardNeedsGesture=false;
+ guardActive=false;guardMuted=false;liveReady=false;pendingIntent=null;guardNeedsGesture=false;openingGreeting=true;openingPlaybackPending=false;
  if(ws){const previous=ws;ws=null;try{previous.close()}catch{}}
  if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;
  if(hide)one('#guard-dock')?.classList.add('hidden');setMuteAppearance();
@@ -140,25 +141,72 @@ function playLiveAudio(pcm){
  if(!pcm||!guardActive||guardMuted)return;
  let bytes;try{bytes=atob(pcm)}catch{return}
  if(bytes.length<2||bytes.length>1400000)return;
- if(!audioContext){void initAudio();return;}
+ if(!audioContext){void initAudio();if(!audioContext)return;}
  const samples=new Float32Array(Math.floor(bytes.length/2));
  for(let i=0;i<samples.length;i++){let n=bytes.charCodeAt(2*i)|(bytes.charCodeAt(2*i+1)<<8);if(n&0x8000)n-=0x10000;samples[i]=n/32768;}
  const buffer=audioContext.createBuffer(1,samples.length,24000);buffer.copyToChannel(samples,0);
  const src=audioContext.createBufferSource();src.buffer=buffer;src.connect(audioGain);
- const when=Math.max(nextAudioTime,audioContext.currentTime+.045);
+ // Igual que NEXO: un pequeño colchón inicial impide que se pierdan
+ // las primeras sílabas cuando Android prepara la reproducción del audio.
+ const firstChunk=nextAudioTime<=audioContext.currentTime+.01;
+ const when=Math.max(nextAudioTime,audioContext.currentTime+(firstChunk?.42:.035));
  nextAudioTime=when+buffer.duration;src.start(when);scheduledSources.add(src);
  src.onended=()=>{scheduledSources.delete(src);try{src.disconnect()}catch{}};
  guardTalking=true;spokenAt=performance.now();
- if(audioContext.state==='suspended')statusText('Soy Erik. Tocame para escucharme.');
+ if(audioContext.state==='suspended'){
+  openingPlaybackPending=openingGreeting;
+  guardNeedsGesture=true;setMuteAppearance();
+  statusText('Soy Erik. Tocame para escuchar mi saludo.');
+ }
 }
 function completedTurn(){
+ lastTurnCompleted=true;
+ nextCaptionIsNewTurn=true;
  clearTimeout(tailTimer);const epoch=guardEpoch;
- const remaining=audioContext?Math.max(0,(nextAudioTime-audioContext.currentTime)*1000+120):100;
+ // Si Chrome bloqueó el audio, conservar TODOS los fragmentos del saludo.
+ // No habilitar todavía el envío de micrófono: escucharía su propia presentación
+ // al tocar para reanudar el audio y podría interrumpirse a sí mismo.
+ if(audioContext&&audioContext.state!=='running'){
+  openingPlaybackPending=openingGreeting;
+  guardNeedsGesture=true;setMuteAppearance();
+  statusText('Soy Erik. Tocame para escuchar mi saludo.');
+  return;
+ }
+ const remaining=audioContext?Math.max(0,(nextAudioTime-audioContext.currentTime)*1000+170):100;
  tailTimer=setTimeout(()=>{
   if(epoch!==guardEpoch||guardMuted)return;
   guardTalking=false;amplitude=0;displayFrame(0);
+  if(openingGreeting){
+   openingGreeting=false;openingPlaybackPending=false;
+  }
   if(!outputCaption)statusText('Te escucho.');
  },Math.min(25000,remaining));
+}
+function appendErikCaption(fragment){
+ const incoming=clean(fragment).replace(/\s+/g,' ');
+ if(!incoming)return;
+ // Se reinicia en cada turno, NO se concatenan respuestas anteriores.
+ if(nextCaptionIsNewTurn){
+  outputCaption='';nextCaptionIsNewTurn=false;
+ }
+ if(incoming.startsWith(outputCaption)&&outputCaption)outputCaption=incoming;
+ else if(!outputCaption.endsWith(incoming)){
+  let overlap=0;
+  for(let k=Math.min(outputCaption.length,incoming.length);k>0;k--){
+   if(outputCaption.endsWith(incoming.slice(0,k))){overlap=k;break;}
+  }
+  const tail=incoming.slice(overlap);
+  const space=!overlap&&/[\p{L}\p{N}]$/u.test(outputCaption)&&/^[\p{L}\p{N}]/u.test(tail);
+  outputCaption+=(space?' ':'')+tail;
+ }
+ outputCaption=outputCaption.slice(-400);
+ // Mostrar únicamente un tramo legible de la intervención actual.
+ const words=outputCaption.trim().split(/\s+/u);
+ let visible=words.slice(-18).join(' ');
+ if(visible.length>135)visible=visible.slice(-135).replace(/^\S*\s/,'');
+ // La transcripción puede adelantarse al audio: no mostrarla antes de que suene.
+ if(audioContext?.state==='running'&&nextAudioTime>audioContext.currentTime)
+  statusText(visible);
 }
 async function frameImages(list,versions=[]){
  const epoch=++guardFrameLoadEpoch,dock=one('#guard-dock');
@@ -272,21 +320,16 @@ function handleLiveMessage(e){
  if(!guardActive)return;
  if(m.type==='connected'){
   if(m.model!=='gemini-3.8-live'){try{ws?.close()}catch{};return;}
-  liveReady=true;connectionRetries=0;statusText('Soy Erik. Te escucho.');
+  liveReady=true;connectionRetries=0;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;outputCaption='';statusText('Soy Erik.');
   if(pendingIntent){sendIntent(pendingIntent);pendingIntent=null;}
   if(!guardMuted)void startMic();
  }else if(m.type==='audio'){if(!guardMuted)playLiveAudio(m.pcm);}
  else if(m.type==='transcript'){
   if(guardMuted)return;
-  const t=String(m.text||'').replace(/\s+/g,' ').trim();
-  if(t){
-   if(t.startsWith(outputCaption)&&outputCaption)outputCaption=t;
-   else if(!outputCaption.endsWith(t))outputCaption+=(outputCaption?' ':'')+t;
-   statusText(outputCaption.slice(-550));
-  }
+  appendErikCaption(m.text);
  }else if(m.type==='input_transcript')appendInput(m.text);
  else if(m.type==='turn_complete')completedTurn();
- else if(m.type==='interrupted'){stopPlayback();statusText('Te escucho.');}
+ else if(m.type==='interrupted'){stopPlayback();openingGreeting=false;openingPlaybackPending=false;statusText('Te escucho.');}
  else if(m.type==='notice'){if(!guardTalking)statusText(m.message||'Te escucho.');}
  else if(m.type==='error'||m.type==='closed')statusText('Soy Erik. Tocame para volver a hablar.');
 }
@@ -300,7 +343,7 @@ function connectLive(){
  socket.onerror=()=>{};
  socket.onclose=()=>{
   if(ws!==socket||guardEpoch!==epoch)return;
-  ws=null;liveReady=false;stopPlayback();
+  ws=null;liveReady=false;stopPlayback();openingGreeting=true;openingPlaybackPending=false;
   // No cerrar ni volver a abrir el micrófono: reutilizar el stream continuo.
   if(guardActive&&!guardMuted&&isLoginVisible()&&connectionRetries<2){
    connectionRetries++;setTimeout(()=>{if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive()},1300);
@@ -315,16 +358,19 @@ async function toggleGuard(){
  if(!guardActive)return;
  if(guardMuted){
   guardMuted=false;setMuteAppearance();await initAudio();
+  if(openingPlaybackPending&&lastTurnCompleted)completedTurn();
   const ok=await startMic(true);
   if(!ok){guardNeedsGesture=true;setMuteAppearance();return;}
   if(!liveReady)connectLive();else sendIntent('ask');
   return;
  }
  if(guardNeedsGesture||!micOn||audioContext?.state!=='running'||micContext?.state!=='running'){
-  await initAudio();const ok=await startMic(true);
+  await initAudio();
+  if(openingPlaybackPending&&lastTurnCompleted)completedTurn();
+  const ok=await startMic(true);
   if(!ok){statusText('Tocame para habilitar el micrófono.');return;}
   guardNeedsGesture=false;setMuteAppearance();
-  if(!liveReady)connectLive();else if(!guardTalking)sendIntent('ask');
+  if(!liveReady)connectLive();else if(!guardTalking&&!openingGreeting)sendIntent('ask');
   return;
  }
  guardMuted=true;pauseMic();stopPlayback();setMuteAppearance();
@@ -332,7 +378,7 @@ async function toggleGuard(){
 }
 async function startGuard(){
  if(guardActive||!isLoginVisible())return;
- guardActive=true;guardMuted=false;guardNeedsGesture=false;connectionRetries=0;
+ guardActive=true;guardMuted=false;guardNeedsGesture=false;connectionRetries=0;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;lastTurnCompleted=false;
  const epoch=++guardEpoch;one('#guard-dock')?.classList.remove('hidden');
  nextBlink=performance.now()+3600;
  try{
