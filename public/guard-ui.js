@@ -3,6 +3,7 @@ const one=(s)=>document.querySelector(s);
 let guardConfig={}, guardFrames=[], guardActive=false,guardEpoch=0,guardMuted=false,guardNeedsGesture=false;
 let recognizer=null,recognizing=false,recognitionWanted=false,guardTalking=false,recognitionRestartTimer=null,recognitionErrors=0;
 let guardFramesFullyReady=false,guardFrameLoadEpoch=0,guardSpeechTurn=0;
+let guardWelcome='Hola, soy Erik, guardia de NEXOCV. Podés decirme la contraseña de una sola palabra o escribirla. Estoy escuchando.';
 let voicePlayer=null,voiceContext=null,voiceAnalyser=null,voiceSource=null,speechWait=null,voiceFinish=null,browserVoiceFinish=null;
 let rAF=0,nextBlink=0,blinkEnd=0,painted=-1,amplitude=0,spokenAt=0,voiceGreeting=false;
 const guardVisual=one('#guard-avatar'),status=one('#guard-status');
@@ -50,7 +51,7 @@ function toggleGuard(){
  // Si el navegador bloqueó el inicio automático, el primer toque sirve para activar.
  if(guardNeedsGesture&&!guardMuted&&!recognizing&&!recognitionWanted){
   guardEpoch++;guardNeedsGesture=false;stopRecognition();stopAudio();setMuteAppearance();
-  void audioUnlock();void say('ask');return;
+  void audioUnlock();void welcomeGuest();return;
  }
  guardMuted=!guardMuted;guardEpoch++;guardNeedsGesture=false;
  stopRecognition();stopAudio();amplitude=0;displayFrame(0);setMuteAppearance();
@@ -130,16 +131,40 @@ async function audioUnlock(){
 }
 function speakBrowser(text){
  return new Promise(resolve=>{
-  if(!('speechSynthesis' in window)){guardNeedsGesture=true;setMuteAppearance();resolve();return;}
-  let done=false;const end=()=>{if(done)return;done=true;clearTimeout(timeout);if(browserVoiceFinish===end)browserVoiceFinish=null;resolve();};
-  const u=new SpeechSynthesisUtterance(text);u.lang='es-AR';u.rate=.96;u.pitch=.95;
-  let started=false;browserVoiceFinish=end;
+  if(!('speechSynthesis' in window)){guardNeedsGesture=true;setMuteAppearance();resolve(false);return;}
+  let done=false,started=false;
+  const end=()=>{if(done)return;done=true;clearTimeout(timeout);if(browserVoiceFinish===end)browserVoiceFinish=null;resolve(started);};
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang='es-AR';u.rate=.96;u.pitch=.95;
+  browserVoiceFinish=end;
   u.onstart=()=>{started=true;guardNeedsGesture=false;setMuteAppearance();};
   u.onend=end;
   u.onerror=()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();};
-  const timeout=setTimeout(()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();},Math.max(3000,Math.min(17000,text.length*115)));
+  const timeout=setTimeout(()=>{if(!started){guardNeedsGesture=true;setMuteAppearance();}end();},Math.max(3500,Math.min(16000,text.length*115)));
   try{speechSynthesis.cancel();speechSynthesis.speak(u);}catch{guardNeedsGesture=true;setMuteAppearance();end();}
  });
+}
+// Este saludo es deliberadamente fijo. Es una orientación auditiva inmediata
+// para quien no puede ver el portero y funciona sin conectarse a Gemini ni a Fish.
+async function welcomeGuest(){
+ if(!guardActive||guardMuted||!isLoginVisible())return;
+ stopRecognition();stopAudio();
+ const token=guardEpoch,turn=guardSpeechTurn;
+ statusText(guardWelcome);
+ guardTalking=true;spokenAt=performance.now();amplitude=0;
+ try{
+  const spoken=await speakBrowser(guardWelcome);
+  if(guardEpoch!==token||guardSpeechTurn!==turn||guardMuted)return;
+  if(!spoken){
+   guardNeedsGesture=true;setMuteAppearance();
+   statusText('Hola, soy Erik. Tocame para activar el sonido y hablar, o escribí tu contraseña.');
+  }
+ }finally{
+  if(guardEpoch===token&&guardSpeechTurn===turn&&!guardMuted){
+   guardTalking=false;amplitude=0;displayFrame(0);
+   listen();
+  }
+ }
 }
 async function playFish(b64,mime){
  const binary=atob(b64),bytes=new Uint8Array(binary.length);
@@ -332,9 +357,10 @@ async function startGuard(){
   const c=await readJSON('/api/guard/config');if(!guardActive||guardEpoch!==token)return;
   if(!c.enabled){stopGuard({hide:true});return;}
   guardConfig={mouthDelay:c.mouthDelay,mouthSensitivity:c.mouthSensitivity,mouthSmoothing:c.mouthSmoothing,mouthAmplitude:c.mouthAmplitude,blinkRate:c.blinkRate};
+   guardWelcome=String(c.welcome||guardWelcome);
   void frameImages(c.frames,c.versions);
   renderGuard();
-  await say('greeting');
+  await welcomeGuest();
  }catch(e){statusText('Erik no se pudo conectar. El ingreso por contraseña sigue disponible.');}
 }
 function watchLogin(){
