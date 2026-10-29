@@ -87,18 +87,24 @@ export function makeGuardLive(ws){
    onclose:e=>{if(!closed){send(ws,'closed',{message:'Se cerró Gemini 3.8 Live. Tocá a Erik para reconectar.'});try{ws.close()}catch{}}}
   }});
   if(closed){try{live.close()}catch{};return;}
+  // No pedirle a Gemini que empiece a hablar antes de que el celular termine
+  // de preparar la salida de audio y resolver los permisos del micrófono.
   ready=true;send(ws,'connected',{model:ERIK_MODEL,voice});
-  // Saluda primero, aunque el usuario no pueda ver el personaje ni haya activado el micrófono.
-  if(!welcomeIssued){
-   welcomeIssued=true;turnOpen=true;
-   live.sendClientContent({turns:[{role:'user',parts:[{text:'[INICIO DE VISITA: SOLO EL SALUDO] Pronunciá exactamente esta frase, empezando por Hola, sin añadir una sola palabra antes ni después: «'+GUARD_WELCOME+'»'}]}],turnComplete:true});
-  }
  };
  const handle=(raw)=>{
   if(!ready||closed)return;
   let m;try{m=JSON.parse(String(raw));}catch{return;}
   if(typeof m!=='object'||!m)return;
-  if(!['text','intent','repeat','interrupt','audio'].includes(m.type))return;
+  if(!['ready','text','intent','repeat','interrupt','audio'].includes(m.type))return;
+  if(m.type==='ready'){
+   if(welcomeIssued)return;
+   welcomeIssued=true;turnOpen=true;
+   try{live.sendClientContent({turns:[{role:'user',parts:[{
+    text:'[INICIO DE VISITA: SOLO EL SALUDO] Pronunciá exactamente esta frase, empezando por Hola, sin añadir una palabra antes ni después: «'+GUARD_WELCOME+'»'
+   }]}],turnComplete:true});}
+   catch{send(ws,'error',{message:'Erik no pudo iniciar el saludo.'});}
+   return;
+  }
   if(m.type==='audio'){
    if(typeof m.pcm==='string'&&m.pcm.length>0&&m.pcm.length<120000)
     try{live.sendRealtimeInput({audio:{data:m.pcm,mimeType:'audio/pcm;rate=16000'}})}catch{}
