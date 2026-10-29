@@ -6,14 +6,14 @@ const guardVisual=one('#guard-avatar'),status=one('#guard-status');
 const frameDescriptions=['Abiertos · reposo','Cerrados · reposo','Abiertos · A','Cerrados · A','Abiertos · O','Cerrados · O','Abiertos · E','Cerrados · E'];
 let guardConfig={},guardFrames=[],guardFramesFullyReady=false,guardFrameLoadEpoch=0;
 let guardActive=false,guardMuted=false,guardNeedsGesture=false,guardEpoch=0,guardTalking=false;
-let painted=-1,rAF=0,nextBlink=0,blinkEnd=0,amplitude=0,spokenAt=0;
+let painted=-1,rAF=0,nextBlink=0,blinkEnd=0,amplitude=0,spokenAt=0,lastGuardPaint=0;
 let ws=null,liveReady=false,connectionRetries=0,greetingReadySent=false;
 let audioContext=null,audioGain=null,voiceAnalyser=null,nextAudioTime=0,outputCaption='';
 let nextCaptionIsNewTurn=true,openingGreeting=true,openingPlaybackPending=false,lastTurnCompleted=false;
 let scheduledSources=new Set(),tailTimer=null;
 let micStream=null,micContext=null,micSource=null,micProcessor=null,micSilent=null;
 let micOn=false,micBusy=false,micRequestEpoch=0,micPromptAttempted=false;
-let pendingInput='',inputTimer=null;
+let pendingInput='',inputTimer=null,authPending=false;
 // Audio real de Erik es la única voz del saludo. El globo solo presenta sus
 // subtítulos; los avisos de error se anuncian en una región accesible separada.
 const statusText=(message,announce=false)=>{
@@ -70,9 +70,8 @@ async function startMic(gesture=false){
   silent.gain.value=0;src.connect(proc);proc.connect(silent);silent.connect(ctx.destination);
   micStream=stream;micContext=ctx;micSource=src;micProcessor=proc;micSilent=silent;
   proc.onaudioprocess=e=>{
-   if(!micOn||guardMuted||!guardActive||!liveReady||!ws||
-     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>180000||openingGreeting||document.hidden||
-     document.activeElement===one('#password'))return;
+   if(!micOn||guardMuted||authPending||!guardActive||!liveReady||!ws||
+     ws.readyState!==WebSocket.OPEN||ws.bufferedAmount>200000||document.hidden)return;
    const input=e.inputBuffer.getChannelData(0),ratio=ctx.sampleRate/16000,n=Math.floor(input.length/ratio),out=new Int16Array(n);
    for(let j=0;j<n;j++){
     const a=Math.floor(j*ratio),b=Math.min(input.length,Math.floor((j+1)*ratio));
@@ -103,9 +102,9 @@ function stopPlayback(){
 }
 function stopGuard({hide=false}={}){
  guardEpoch++;releaseMic();clearInput();stopPlayback();
- guardActive=false;guardMuted=false;liveReady=false;guardNeedsGesture=false;openingGreeting=true;openingPlaybackPending=false;greetingReadySent=false;
+ guardActive=false;guardMuted=false;liveReady=false;guardNeedsGesture=false;openingGreeting=true;openingPlaybackPending=false;greetingReadySent=false;authPending=false;
  if(ws){const previous=ws;ws=null;try{previous.close()}catch{}}
- if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;
+ if(rAF)cancelAnimationFrame(rAF);rAF=0;painted=-1;lastGuardPaint=0;
  if(hide)one('#guard-dock')?.classList.add('hidden');setMuteAppearance();
 }
 function displayFrame(index){
@@ -118,6 +117,7 @@ function displayFrame(index){
 function renderGuard(){
  if(!guardActive||!isLoginVisible()){rAF=0;return;}
  rAF=requestAnimationFrame(renderGuard);const now=performance.now();
+ if(now-lastGuardPaint<32)return;lastGuardPaint=now;
  if(now>nextBlink){blinkEnd=now+130;nextBlink=now+(Number(guardConfig.blinkRate)||4)*1000+Math.random()*900;}
  const blink=now<blinkEnd?1:0;let shape=0;
  if(!guardMuted&&guardTalking&&audioContext?.state==='running'&&audioContext.currentTime<nextAudioTime+.04){
@@ -316,16 +316,26 @@ function appendInput(text){
 }
 function processInput(){
  inputTimer=null;const spoken=clean(pendingInput);clearInput();
- if(!spoken||!guardActive||guardMuted||!isLoginVisible())return;
+ if(!spoken||!guardActive||guardMuted||authPending||!isLoginVisible())return;
  const intent=spokenIntent(spoken);
  if(intent.type==='password'){
-  stopPlayback();const input=one('#password');
+  beginAuth();
+  const input=one('#password');
   if(input){input.value=intent.value;one('#login-form')?.requestSubmit();}
  }else if(intent.type==='mute'){
   guardMuted=true;pauseMic();stopPlayback();setMuteAppearance();
   statusText('Erik está silenciado. Tocame para continuar.',true);
  }else if(intent.type==='keyboard')one('#password')?.focus();
  // Conversaciones, bromas e interrupciones ya viajan por audio continuo a Live.
+}
+// El ingreso se verifica antes de dar paso a cualquier nueva respuesta.
+// La sesión Live no se desconecta: se suspende el intercambio hasta tener
+// resultado, y solo ante error se le autoriza a Erik reaccionar.
+function beginAuth(){
+ if(!guardActive||authPending)return;
+ authPending=true;clearInput();stopPlayback();statusText('');
+ if(liveReady&&ws?.readyState===WebSocket.OPEN)
+  ws.send(JSON.stringify({type:'auth_pending'}));
 }
 function sendGreetingReady(){
  if(greetingReadySent||!liveReady||guardMuted||!ws||ws.readyState!==WebSocket.OPEN)return;
@@ -335,6 +345,7 @@ function sendGreetingReady(){
 function handleLiveMessage(e){
  let m;try{m=JSON.parse(String(e.data))}catch{return}
  if(!guardActive)return;
+ if(authPending&&['audio','transcript','input_transcript','turn_complete','interrupted'].includes(m.type))return;
  if(m.type==='connected'){
   if(m.model!=='gemini-3.8-live'){try{ws?.close()}catch{};return;}
   liveReady=true;connectionRetries=0;greetingReadySent=false;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;outputCaption='';statusText('');
@@ -343,9 +354,13 @@ function handleLiveMessage(e){
   // después de terminar la presentación, evitando que Erik se escuche a sí mismo.
   const token=guardEpoch,currentSocket=ws;
   void (async()=>{
-   if(!guardMuted)await startMic();
+   if(!guardMuted&&!micStream)await startMic();
    if(!guardActive||guardMuted||guardEpoch!==token||ws!==currentSocket||!liveReady)return;
-   sendGreetingReady();
+   if(audioContext?.state==='running')sendGreetingReady();
+   else{
+    guardNeedsGesture=true;setMuteAppearance();
+    statusText('Tocá a Erik para activar el sonido.',true);
+   }
   })();
  }else if(m.type==='audio'){if(!guardMuted)playLiveAudio(m.pcm);}
  else if(m.type==='transcript'){
@@ -358,7 +373,7 @@ function handleLiveMessage(e){
  else if(m.type==='error'||m.type==='closed')statusText('No se pudo continuar la conversación. Tocá a Erik para reconectar.',true);
 }
 function connectLive(){
- if(!guardActive||guardMuted||!isLoginVisible())return;
+ if(!guardActive||guardMuted||authPending||!isLoginVisible())return;
  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  liveReady=false;
  const epoch=guardEpoch,protocol=location.protocol==='https:'?'wss:':'ws:';
@@ -375,7 +390,7 @@ function connectLive(){
  };
 }
 function sendIntent(intent){
- if(!liveReady||!ws||ws.readyState!==WebSocket.OPEN){connectLive();return;}
+ if(!liveReady||!ws||ws.readyState!==WebSocket.OPEN){if(!authPending)connectLive();return;}
  stopPlayback();ws.send(JSON.stringify({type:'intent',intent}));
 }
 async function toggleGuard(){
@@ -402,7 +417,7 @@ async function toggleGuard(){
 }
 async function startGuard(){
  if(guardActive||!isLoginVisible())return;
- guardActive=true;guardMuted=false;guardNeedsGesture=false;connectionRetries=0;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;lastTurnCompleted=false;
+ guardActive=true;guardMuted=false;guardNeedsGesture=false;connectionRetries=0;openingGreeting=true;openingPlaybackPending=false;nextCaptionIsNewTurn=true;lastTurnCompleted=false;authPending=false;
  const epoch=++guardEpoch;one('#guard-dock')?.classList.remove('hidden');
  nextBlink=performance.now()+3600;
  try{
@@ -411,7 +426,14 @@ async function startGuard(){
   if(!c.enabled){stopGuard({hide:true});return;}
   guardConfig={mouthDelay:c.mouthDelay,mouthSensitivity:c.mouthSensitivity,
    mouthSmoothing:c.mouthSmoothing,mouthAmplitude:c.mouthAmplitude,blinkRate:c.blinkRate};
-  void frameImages(c.frames,c.versions);renderGuard();void initAudio();connectLive();
+  void frameImages(c.frames,c.versions);renderGuard();
+  // Mismo orden que NEXO: preparar primero la captura y el altavoz.
+  // Una sola solicitud de micrófono, una sola conexión Live.
+  void (async()=>{
+   void initAudio().catch(()=>{});
+   await startMic();
+   if(guardActive&&guardEpoch===epoch&&!guardMuted)connectLive();
+  })();
  }catch{statusText('No se pudo iniciar el portero. Podés ingresar por escrito.',true);}
 }
 function watchLogin(){
@@ -425,9 +447,16 @@ function watchLogin(){
 function setupGuardControls(){
  one('#guard-toggle')?.addEventListener('click',()=>void toggleGuard());
  // Escribir contraseña desactiva el envío de audio, sin cerrar el micrófono.
- one('#login-form')?.addEventListener('submit',()=>clearInput(),{capture:true});
+ one('#login-form')?.addEventListener('submit',()=>beginAuth(),{capture:true});
  window.addEventListener('nexo-login-error',()=>{
-  if(guardActive&&!guardMuted){one('#password')?.blur();sendIntent('retry');}
+  if(guardActive&&!guardMuted){
+   // Ya sabemos que la clave fue rechazada. RECIÉN AHORA puede responder.
+   const hadPending=authPending;authPending=false;
+   clearInput();stopPlayback();
+   one('#password')?.blur();
+   if(hadPending&&liveReady)sendIntent('retry');
+   else if(hadPending&&ws?.readyState!==WebSocket.OPEN)connectLive();
+  }
  });
  window.addEventListener('nexo-login-ok',()=>stopGuard());
  document.addEventListener('visibilitychange',()=>{
