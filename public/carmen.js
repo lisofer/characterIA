@@ -8,6 +8,7 @@ const fallbackVoices=['Aoede','Zephyr','Kore','Leda','Puck','Charon'];
 let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
 let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micProcessor=null,micSource=null,micSilent=null,micEpoch=0,micStarting=false;
 let greetingSent=false,greetingTimer=null,firstAudioChunk=true;
+const soundSources=new Set();
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
 let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
@@ -107,10 +108,13 @@ function playPCM(base64){
  const source=ctx.createBufferSource();source.buffer=audio;source.connect(volume);
  const start=Math.max(ctx.currentTime+(firstAudioChunk?.28:.025),playHead);
  firstAudioChunk=false;
- source.start(start);
+ source.start(start);soundSources.add(source);
  const end=start+audio.duration;playHead=end;speechEnd=end;
  segments.push({start,end,samples});
- source.onended=()=>{segments=segments.filter(x=>x.end>ctx.currentTime-.15);};
+ source.onended=()=>{
+  soundSources.delete(source);segments=segments.filter(x=>x.end>ctx.currentTime-.15);
+  try{source.disconnect()}catch{}
+ };
  if(ctx.state==='suspended')setState('Tocá al guardia para escucharlo');
 }
 function levelAt(t){
@@ -193,6 +197,10 @@ function render(now){
  segments=segments.filter(seg=>seg.end>t-.3);
  // Los subtítulos cambian por frase completa, no por fotograma.
 }
+function stopAudioOutput(){
+ for(const source of soundSources){try{source.stop();source.disconnect()}catch{}}
+ soundSources.clear();segments=[];playHead=0;speechEnd=0;firstAudioChunk=true;
+}
 function resetAudio(){
  clearSubtitleTimers();
  segments=[];playHead=0;speechEnd=0;firstAudioChunk=true;transcript='';captionCommitted=0;turnEnded=false;
@@ -248,7 +256,7 @@ function stop({manual=true}={}){
  clearTimeout(greetingTimer);greetingTimer=null;greetingSent=false;
  if(renderId){cancelAnimationFrame(renderId);renderId=0;}
  if(socket){socket.onclose=null;socket.close();socket=null;}
- haltMic();resetAudio();
+ haltMic();stopAudioOutput();resetAudio();
  if(output){output.close().catch(()=>{});output=null;volume=null;}
  setState(manual?'Llamada terminada':'');
  if(manual)caption.textContent='Llamada terminada. Tocá al guardia para volver a llamar.';
@@ -302,13 +310,15 @@ function openSocket(){
     break;
    case 'access_granted':pendingTicket=msg.ticket;pauseMic(true);setState('Contraseña correcta');setTimeout(maybeFinish,750);setTimeout(()=>{if(pendingTicket)void redeemTicket();},5200);break;
    case 'interrupted':
-    clearSubtitleTimers();segments=[];firstAudioChunk=true;playHead=output?.currentTime||0;speechEnd=playHead;
+    clearSubtitleTimers();stopAudioOutput();
     transcript='';captionCommitted=0;turnEnded=false;caption.textContent=' ';break;
    case 'notice':setState(msg.message||'Conectada');break;
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
   }
  };
- ws.onclose=()=>{if(socket!==ws)return;socket=null;serverConnected=false;greetingSent=false;clearTimeout(greetingTimer);greetingTimer=null;updateView();if(desired)reconnectSoon();};
+ ws.onclose=()=>{if(socket!==ws)return;socket=null;serverConnected=false;greetingSent=false;
+  clearTimeout(greetingTimer);greetingTimer=null;stopAudioOutput();resetAudio();
+  updateView();if(desired)reconnectSoon();};
  ws.onerror=()=>{if(socket===ws){serverConnected=false;updateView();setState('Problema de conexión. Podés escribir la contraseña.');}};
 }
 async function start(){
