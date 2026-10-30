@@ -77,7 +77,7 @@ function showFrame(index){
  el.placeholder.classList.toggle('hidden',real>=0);
 }
 let frameVersions=Array(8).fill(0);
-let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0;
+let captionRaw='',captionLines=[],captionCommitted=0,captionFinished=false,captionVisible=-1,captionWordCount=0,captionLineShownAt=0;
 let captionLastTextAt=0,firstAudioTime=null,finalAudioTime=0;
 let sources=new Set(),connectAttempt=0,playbackGeneration=0;
 let mutedByUser=false,keyboardOpen=false,callEnded=false,hasConnected=false,callGeneration=0;
@@ -87,7 +87,7 @@ const startedDownloads=new Set();
 const measureCanvas=document.createElement('canvas'),ctx=measureCanvas.getContext('2d');
 function textFits(t){const f=parseInt(getComputedStyle(el.subBox).fontSize)||20;ctx.font='700 '+f+"px 'DM Sans',Arial,sans-serif";return ctx.measureText(t).width<=Math.max(50,el.subBox.clientWidth-35)}
 function showSubtitle(text){el.subtitle.textContent=text||' ';el.subtitle.style.fontSize='';el.subtitle.style.transform='';if(text&&!textFits(text)){let n=parseInt(getComputedStyle(el.subBox).fontSize);while(n>13){n--;ctx.font='700 '+n+"px 'DM Sans',Arial,sans-serif";if(ctx.measureText(text).width<el.subBox.clientWidth-24){el.subtitle.style.fontSize=n+'px';break}}const fs=parseInt(el.subtitle.style.fontSize)||n;ctx.font='700 '+fs+"px 'DM Sans',Arial,sans-serif";const max=el.subBox.clientWidth-22,width=ctx.measureText(text).width;if(width>max)el.subtitle.style.transform='scaleX('+(max/width)+')';}}
-function resetSubtitle(){captionRaw='';captionLines=[];captionCommitted=0;captionFinished=false;captionVisible=-1;captionWordCount=0;captionLastTextAt=0;showSubtitle(' ')}
+function resetSubtitle(){captionRaw='';captionLines=[];captionCommitted=0;captionFinished=false;captionVisible=-1;captionWordCount=0;captionLineShownAt=0;captionLastTextAt=0;showSubtitle(' ')}
 function appendTranscription(text){
  if(!text)return;
  if(captionFinished){resetSubtitle();firstAudioTime=null;finalAudioTime=0;}
@@ -115,22 +115,37 @@ function commitCaptionLines(flush){
 }
 function beginResponseIfNeeded(){if(captionFinished&&audioContext&&audioContext.currentTime>=finalAudioTime-.04){resetSubtitle();firstAudioTime=null;finalAudioTime=0}}
 function renderCaptions(){
- if(!audioContext||firstAudioTime===null)return;
- if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>280)commitCaptionLines(true);
- // Gemini no devuelve marcas temporales por palabra: la línea aparece completa
- // cuando estimamos que empieza su primera palabra en el audio reproducido.
- const subtitleOffsetMs=Math.max(-1200,Math.min(1200,Number(config.subtitleDelay??0)));
- const elapsed=audioContext.currentTime-firstAudioTime-subtitleOffsetMs/1000;
- if(elapsed<0||!captionLines.length)return;
+ if(!audioContext||firstAudioTime===null||audioContext.state!=='running')return;
+ if(!captionFinished&&captionCommitted<captionWordCount&&performance.now()-captionLastTextAt>220)commitCaptionLines(true);
+ if(!captionLines.length)return;
+ // El ritmo se calcula según el audio realmente recibido, no con el
+ // límite anterior de 3,15 palabras/s que atrasaba los subtítulos.
+ const offset=Math.max(-1.2,Math.min(1.2,Number(config.subtitleDelay??0)/1000));
+ const elapsed=audioContext.currentTime-firstAudioTime-offset;
+ if(elapsed<0)return;
  const duration=Math.max(.35,finalAudioTime-firstAudioTime);
- const pace=captionFinished?Math.max(1.15,Math.min(3.15,captionWordCount/Math.max(.5,duration-.12))):2.15;
- const position=elapsed*pace;
+ const measuredRate=captionFinished&&captionWordCount>0?captionWordCount/duration:4.1;
+ const wordsPerSecond=Math.max(3.8,Math.min(6.5,measuredRate));
+ const speed=Math.max(.6,Math.min(2,Number(config.subtitleSpeed??115)/100));
+ const position=elapsed*wordsPerSecond*speed;
  let target=-1;
  for(let k=0;k<captionLines.length;k++){
   if(captionLines[k].startWord<=position+.001)target=k;
   else break;
  }
- if(target>captionVisible){captionVisible=target;showSubtitle(captionLines[target].text)}
+ // Una línea por actualización: no saltear las intermedias al recibir
+ // una transcripción larga de golpe, ni hacer cambios imperceptibles.
+ const next=captionVisible+1;
+ if(next>=captionLines.length)return;
+ const prior=captionLines[captionVisible];
+ const count=prior?Math.max(1,prior.endWord-prior.startWord):0;
+ const minHold=prior?Math.max(.32,Math.min(1.6,(.25+count*.15)/speed)):0;
+ const readable=next===0||audioContext.currentTime-captionLineShownAt>=minHold;
+ const nearingEnd=captionFinished&&audioContext.currentTime>=finalAudioTime-.05;
+ if(readable&&(target>=next||nearingEnd)){
+  captionVisible=next;captionLineShownAt=audioContext.currentTime;
+  showSubtitle(captionLines[next].text);
+ }
 }
 function pcmToFloat(base64){const s=atob(base64),v=new Float32Array(s.length/2);for(let i=0;i<v.length;i++){let x=s.charCodeAt(i*2)|(s.charCodeAt(i*2+1)<<8);if(x&0x8000)x-=0x10000;v[i]=x/32768;}return v}
 async function ensureAudio(resume=true){
@@ -256,7 +271,7 @@ function voicePlaybackStarted(){
  setStatus(micOn?'Escuchando':mutedByUser?'Silenciado':'Solo teclado',true);
 }
 function scheduleReconnect(){
- if(role!=='student'||callEnded)return;
+ if(role!=='student'||callEnded||document.hidden)return;
  if(reconnectTimer)clearTimeout(reconnectTimer);
  connectingUi=true;hasConnected=false;
  updateConversationOverlay();
@@ -308,6 +323,7 @@ async function downloadCVAutomatically(id,filenameBase){
 }
 
 async function connectLive(){
+ if(role!=='student'||callEnded||document.hidden)return;
  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const attempt=++connectAttempt;
  setStatus('Conectando…');
@@ -427,6 +443,7 @@ function stopMicrophone(){
  updateConversationOverlay();
 }
 async function startCall({reconnect=false}={}){
+ if(role!=='student'||document.hidden)return;
  if(callPending||ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
  const thisCall=++callGeneration;
  callPending=true;callEnded=false;hasConnected=false;connectingUi=true;
@@ -440,7 +457,7 @@ async function startCall({reconnect=false}={}){
  try{
   let micReady=false;
   if(!mutedByUser&&!keyboardOpen)micReady=await startMicrophone();
-  if(thisCall!==callGeneration)return;
+  if(thisCall!==callGeneration||document.hidden){if(document.hidden&&thisCall===callGeneration)stopCall();return;}
   if(!micReady&&!mutedByUser&&!keyboardOpen){
    mutedByUser=true;
    toast('Permití el micrófono en Chrome o usá el teclado.');
@@ -564,13 +581,15 @@ function setupStudent(){
   finally{btn.disabled=false}
  };
 }
-// Chrome puede descartar las texturas GPU cuando se cambia de app.
-// Pausamos SOLO el dibujo, sin cerrar micrófono, WebSocket ni salida de voz.
+// Salir del navegador equivale a colgar con el botón rojo.
+// Cerrar micrófono, audio, WebSocket y cancelar cualquier reconexión.
+function endCallWhenLeaving(){
+ if(role==='student'&&!callEnded&&(ws||callPending||connectingUi||micOn||audioContext))stopCall();
+}
 function suspendAvatarVisuals(){
  avatarWasBackgrounded=true;
  if(animationId){cancelAnimationFrame(animationId);animationId=0;}
- blinkingUntil=0;
- nextBlink=Infinity;
+ blinkingUntil=0;nextBlink=Infinity;
  if(role==='student')showFrame(0);
 }
 function resumeAvatarVisuals(){
@@ -580,24 +599,20 @@ function resumeAvatarVisuals(){
  const now=performance.now();
  avatarResumeHoldUntil=now+1200;
  nextBlink=avatarResumeHoldUntil+Math.max(2,Number(config.blinkRate)||4)*1000;
- blinkingUntil=0;
- lastAvatarPaint=0;
- showFrame(0);
- if(audioContext&&!animationId)animateMouth();
+ blinkingUntil=0;lastAvatarPaint=0;showFrame(0);
+ // No abrir otra llamada al regresar: requiere tocar el botón rojo.
 }
 document.addEventListener('visibilitychange',()=>{
- if(document.hidden)suspendAvatarVisuals();
+ if(document.hidden){endCallWhenLeaving();suspendAvatarVisuals();}
  else resumeAvatarVisuals();
 });
-window.addEventListener('pagehide',suspendAvatarVisuals);
-window.addEventListener('pageshow',event=>{
- if(event.persisted)resumeAvatarVisuals();
-});
+window.addEventListener('pagehide',()=>{endCallWhenLeaving();suspendAvatarVisuals();});
+window.addEventListener('pageshow',event=>{if(event.persisted)resumeAvatarVisuals();});
 // Administración: lista de ocho fotogramas y vista previa responsive.
 const frameDescriptions=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 function buildFrames(){const root=$('#frames-grid');root.innerHTML='';frameDescriptions.forEach((name,i)=>{const card=document.createElement('div');card.className='frame-card';card.innerHTML=`<div class="frame-thumb"><span class="frame-num">${String(i+1).padStart(2,'0')}</span><span class="frame-placeholder">✧</span><img class="hidden" alt="Fotograma ${i+1}" /></div><strong>${name}</strong><small>PNG · mismo encuadre</small><label class="frame-upload">${frames[i]?'Reemplazar PNG':'Subir PNG'} <input type="file" accept="image/png" aria-label="Cargar imagen ${i+1}"></label>`;if(frames[i]){const img=card.querySelector('img');img.src=`/api/frames/${i}?optimized=1&v=${frameVersions[i]||0}`;img.classList.remove('hidden');card.querySelector('.frame-placeholder').classList.add('hidden')};card.querySelector('input').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;const fd=new FormData();fd.append('image',file);try{const out=await api(`/api/admin/frames/${i}`,{method:'POST',body:fd});frames[i]=true;frameVersions[i]++;buildFrames();updatePreviewImage();toast(`Imagen ${i+1} guardada: ${out.width} × ${out.height} px`);}catch(err){toast(err.message)}};root.appendChild(card)});$('#frames-count').textContent=`${frames.filter(Boolean).length} / 8 cargadas`}
 function updatePreviewImage(){const img=$('#admin-preview-img');if(frames[0]){img.src=`/api/frames/0?optimized=1&v=${frameVersions[0]||0}`;img.classList.remove('hidden');$('.avatar-mini-fallback').classList.add('hidden')}else{img.classList.add('hidden');$('.avatar-mini-fallback').classList.remove('hidden')}const s=Number($('[data-setting="avatarScale"]')?.value||100)/100, x=Number($('[data-setting="avatarOffsetX"]')?.value||0),y=Number($('[data-setting="avatarOffsetY"]')?.value||0);img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.objectFit=$('[data-setting="avatarFit"]')?.value||'contain';}
-function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+((o.dataset.for==='mouthDelay'||o.dataset.for==='subtitleDelay')?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':'');}updatePreviewImage()}
+function syncOutputs(){for(const o of $$('output[data-for]')){const inp=$(`[data-setting="${o.dataset.for}"]`);if(inp)o.textContent=inp.value+((o.dataset.for==='mouthDelay'||o.dataset.for==='subtitleDelay')?' ms':o.dataset.for==='blinkRate'?' s':o.dataset.for==='subtitleWidth'?' px':o.dataset.for==='subtitleFont'?' px':o.dataset.for==='subtitleSpeed'?' %':'');}updatePreviewImage()}
 function fillVoiceSelector(list, current){
  const select=$('#voice-select');
  const all=Array.isArray(list)&&list.length?list:VOICES;
@@ -635,7 +650,7 @@ window.addEventListener('carmen-authenticated',async event=>{
 
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 if(isLocal&&new URLSearchParams(location.search).get('demo')){const demo=new URLSearchParams(location.search).get('demo');if(demo==='student'){setVisible('student');applySettings({subtitleFont:20,subtitleWidth:760,avatarScale:100});showFrame(0);setStatus('Conectado',true);$('#connection-label').textContent='Vista previa';}else if(demo==='admin'){setVisible('admin');config={avatarScale:100,avatarOffsetX:0,avatarOffsetY:0,avatarFit:'contain',model:'gemini-3.8-live',fallback:'gemini-3.1-flash-live-preview',voice:'Aoede'};buildFrames();syncOutputs();}else setVisible('login');}
-else restoreRole().then(()=>{if(role==='student')void startCall();}).catch(()=>setVisible('login'));
+else restoreRole().then(()=>{if(role==='student'&&!document.hidden)void startCall();else if(role==='student'&&document.hidden)stopCall();}).catch(()=>setVisible('login'));
 window.addEventListener('offline',()=>{
  if(role!=='student'||callEnded)return;
  connectingUi=true;updateConversationOverlay();setStatus('Sin señal');
