@@ -186,9 +186,9 @@ function render(now){
  mouthValue=mouthValue*(.18+smooth*.76)+value*(.82-smooth*.76);
  const scaled=mouthValue*Number(settings.mouthAmplitude??78)/100;
  const speaking=t<speechEnd+.06&&raw>.01;
- if(now>blinkAt){blinkUntil=now+115;blinkAt=now+Number(settings.blinkRate||4.2)*1000;}
+ if(now>blinkAt){blinkUntil=now+135;blinkAt=now+(Number(settings.blinkRate||4.2)+Math.random()*.8)*1000;}
  const closed=now<blinkUntil?1:0;
- const threshold=.09+(1-Number(settings.mouthSensitivity??48)/100)*.12;
+ const threshold=.05+(1-Number(settings.mouthSensitivity??48)/100)*.075;
  // Recorrido A/O/E igual al avatar de construcción del CV.
  const sequence=[1,2,3,1,2,1,3,2,1,3,2,3];
  const beat=Math.floor(t*7.5);
