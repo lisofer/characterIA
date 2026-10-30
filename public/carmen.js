@@ -2,7 +2,7 @@
 const $=selector=>document.querySelector(selector);
 const login=$('#login-view'),dock=$('#carmen-dock'),face=$('#carmen-face');
 const images=$('#carmen-images'),caption=$('#carmen-caption'),state=$('#carmen-state');
-const buttonCall=$('#carmen-call'),buttonMic=$('#carmen-mic');
+// El personaje es el único control de llamada.
 const frameNames=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 const fallbackVoices=['Aoede','Zephyr','Kore','Leda','Puck','Charon'];
 let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
@@ -21,9 +21,9 @@ async function getJSON(url,options={}){
 }
 function updateView(){
  dock.classList.toggle('carmen-disconnected',!desired);
- buttonMic.classList.toggle('active',!micMuted&&!!micStream);
- buttonMic.setAttribute('aria-pressed',String(!micMuted));
- buttonCall.setAttribute('aria-label',desired?'Colgar la llamada de Carmen':'Llamar a Carmen');
+ face.setAttribute('aria-pressed',String(desired));
+ face.setAttribute('aria-label',desired?'Cortar la llamada de Erik':'Volver a llamar a Erik');
+ face.title=desired?'Tocá a Erik para cortar la llamada':'Tocá a Erik para volver a llamar';
 }
 function applySettings(){
  dock.style.setProperty('--carmen-scale',String((settings.avatarScale??90)/100));
@@ -116,12 +116,19 @@ function paintCaption(){
  const progress=Math.min(1,Math.max(0,(t-audioStarted-(Number(settings.subtitleDelay||0)/1000))/duration));
  const endIndex=Math.min(words.length,Math.max(1,Math.floor(progress*words.length)+1));
  measure.font='700 '+(settings.subtitleFont||17)+'px Arial';
- const maxWidth=Math.max(125,caption.clientWidth-20);
+ // El globo muestra hasta cinco renglones, sin cortar palabras.
+ const maxWidth=Math.max(120,caption.clientWidth-34);
  let result='';
  for(let i=endIndex-1;i>=0;i--){
-  const next=words[i]+(result?' '+result:'');
-  if(measure.measureText(next).width>maxWidth&&result)break;
-  result=next;
+  const candidate=words[i]+(result?' '+result:'');
+  let lines=1,line='';
+  for(const word of candidate.split(/\s+/)){
+   const next=line?line+' '+word:word;
+   if(line&&measure.measureText(next).width>maxWidth){lines++;line=word;}
+   else line=next;
+  }
+  if(lines>5&&result)break;
+  result=candidate;
  }
  if(caption.textContent!==result)caption.textContent=result;
 }
@@ -258,17 +265,16 @@ async function start(){
  finally{initializing=false;}
 }
 function setupControls(){
- face.addEventListener('click',()=>void unlockAudio());
- buttonCall.onclick=()=>{if(desired)stop();else void start();};
- buttonMic.onclick=()=>{
+ face.addEventListener('click',()=>{
+  if(desired){stop();return;}
   void unlockAudio();
-  if(!desired){void start();return;}
-  if(micMuted){pauseMic(false);if(!micStream)void startMic();}
-  else pauseMic(true);
- };
- $('#carmen-keyboard').onclick=()=>{void unlockAudio();$('#password').focus();};
- $('#carmen-restart').onclick=()=>{stop({manual:false});void start();};
+  void start();
+ });
+ // El teclado permanece disponible; al salir del campo se recupera el micrófono.
  $('#password').addEventListener('focus',()=>{if(desired&&!micMuted)pauseMic(true);});
+ $('#password').addEventListener('blur',()=>{
+  if(desired&&micMuted){pauseMic(false);if(!micStream)void startMic();}
+ });
  window.addEventListener('nexo-login-ok',()=>stop({manual:false}));
  window.addEventListener('nexo-login-error',()=>{
   if(desired&&socket?.readyState===WebSocket.OPEN)
