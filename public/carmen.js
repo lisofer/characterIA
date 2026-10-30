@@ -6,7 +6,8 @@ const images=$('#carmen-images'),caption=$('#carmen-caption-text'),state=$('#car
 const frameNames=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 const fallbackVoices=['Aoede','Zephyr','Kore','Leda','Puck','Charon'];
 let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
-let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micContext=null,micProcessor=null,micSource=null;
+let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micProcessor=null,micSource=null,micSilent=null,micEpoch=0,micStarting=false;
+let greetingSent=false,greetingTimer=null;
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
 let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
@@ -68,17 +69,26 @@ function makeOutput(){
  if(!output){
   output=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000});
   volume=output.createGain();volume.gain.value=.94;volume.connect(output.destination);
+  output.addEventListener('statechange',()=>{if(output?.state==='running')tryStartGreeting();});
  }
  if(!renderId)renderId=requestAnimationFrame(render);
  return output;
+}
+function tryStartGreeting(){
+ if(!desired||!serverConnected||greetingSent||greetingTimer||!socket||socket.readyState!==WebSocket.OPEN)return;
+ if(output?.state!=='running'){setState('Tocá al guardia para activar el sonido');return;}
+ greetingTimer=setTimeout(()=>{
+  greetingTimer=null;
+  if(!desired||!serverConnected||greetingSent||output?.state!=='running'||socket?.readyState!==WebSocket.OPEN)return;
+  greetingSent=true;socket.send(JSON.stringify({type:'start'}));
+ },220);
 }
 async function unlockAudio(){
  if(!isLogin())return;
  try{
   const ctx=makeOutput();
   if(ctx.state==='suspended')await ctx.resume();
-  if(micContext?.state==='suspended')await micContext.resume();
-  if(ctx.state==='running'&&desired)setState(micMuted?'Micrófono silenciado':'El guardia está escuchando');
+  if(ctx.state==='running'){tryStartGreeting();if(desired)setState(micMuted?'Micrófono silenciado':'El guardia está escuchando');}
  }catch{setState('Podés ingresar la contraseña con el teclado.');}
 }
 function floatsFromPCM(base64){
@@ -95,7 +105,8 @@ function playPCM(base64){
  const audio=ctx.createBuffer(1,samples.length,24000);
  audio.getChannelData(0).set(samples);
  const source=ctx.createBufferSource();source.buffer=audio;source.connect(volume);
- const start=Math.max(ctx.currentTime+.025,playHead);
+ const newTurn=ctx.currentTime>speechEnd+.15;
+ const start=Math.max(ctx.currentTime+(newTurn?.28:.025),playHead);
  source.start(start);
  const end=start+audio.duration;playHead=end;speechEnd=end;
  segments.push({start,end,samples});
@@ -173,9 +184,13 @@ function render(now){
  const speaking=t<speechEnd+.06&&raw>.01;
  if(now>blinkAt){blinkUntil=now+115;blinkAt=now+Number(settings.blinkRate||4.2)*1000;}
  const closed=now<blinkUntil?1:0;
- const mouth=speaking?(scaled>.42?2:scaled>.18?1:0):0;
- const variant=Math.min(7,mouth*2+closed);
- setFrame(variant);
+ const threshold=.09+(1-Number(settings.mouthSensitivity??48)/100)*.12;
+ // Recorrido A/O/E igual al avatar de construcción del CV.
+ const sequence=[1,2,3,1,2,1,3,2,1,3,2,3];
+ const beat=Math.floor(t*7.5);
+ const shape=speaking&&scaled>threshold?sequence[((beat%sequence.length)+sequence.length)%sequence.length]:0;
+ setFrame(shape*2+closed);
+ segments=segments.filter(seg=>seg.end>t-.3);
  // Los subtítulos cambian por frase completa, no por fotograma.
 }
 function resetAudio(){
@@ -184,51 +199,53 @@ function resetAudio(){
  caption.textContent=' ';setFrame(0);
 }
 function haltMic(){
- if(micProcessor){try{micProcessor.disconnect();micSource?.disconnect();}catch{}}
- micStream?.getTracks().forEach(t=>t.stop());
- micContext?.close().catch(()=>{});
- micStream=null;micContext=null;micProcessor=null;micSource=null;updateView();
+ micEpoch++;micStarting=false;
+ if(micProcessor){micProcessor.onaudioprocess=null;try{micProcessor.disconnect();micSource?.disconnect();micSilent?.disconnect();}catch{}}
+ micStream?.getTracks().forEach(track=>track.stop());
+ micStream=null;micProcessor=null;micSource=null;micSilent=null;updateView();
 }
 function pauseMic(paused){
  micMuted=paused;
  micStream?.getAudioTracks().forEach(track=>{track.enabled=!paused;});
- updateView();
- if(desired)setState(paused?'Micrófono silenciado':'El guardia está escuchando');
+ updateView();if(desired)setState(paused?'Micrófono silenciado':'El guardia está escuchando');
 }
 async function startMic(){
- if(!desired||micMuted||micStream||!navigator.mediaDevices?.getUserMedia)return;
+ if(!desired||micMuted||micStream||micStarting||!navigator.mediaDevices?.getUserMedia)return false;
+ const request=++micEpoch;micStarting=true;
  try{
   const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
-  if(!desired){stream.getTracks().forEach(t=>t.stop());return;}
-  const context=new (window.AudioContext||window.webkitAudioContext)();
-  if(context.state==='suspended')context.resume().catch(()=>{});
-  const source=context.createMediaStreamSource(stream);
-  const proc=context.createScriptProcessor(2048,1,1);
-  const silent=context.createGain();silent.gain.value=0;
-  source.connect(proc);proc.connect(silent);silent.connect(context.destination);
-  micStream=stream;micContext=context;micProcessor=proc;micSource=source;
-  proc.onaudioprocess=event=>{
+  if(!desired||request!==micEpoch){stream.getTracks().forEach(t=>t.stop());return false;}
+  // Misma salida y mismo AudioContext para voz y micrófono.
+  const ctx=makeOutput();
+  const source=ctx.createMediaStreamSource(stream),processor=ctx.createScriptProcessor(2048,1,1);
+  const silent=ctx.createGain();silent.gain.value=0;
+  source.connect(processor);processor.connect(silent);silent.connect(ctx.destination);
+  micStream=stream;micSource=source;micProcessor=processor;micSilent=silent;
+  processor.onaudioprocess=event=>{
    if(micMuted||!desired||!socket||socket.readyState!==WebSocket.OPEN||socket.bufferedAmount>180000||pendingTicket)return;
-   const sourceSamples=event.inputBuffer.getChannelData(0);
-   const ratio=context.sampleRate/16000,n=Math.floor(sourceSamples.length/ratio),pcm=new Int16Array(n);
+   const samples=event.inputBuffer.getChannelData(0),ratio=ctx.sampleRate/16000,n=Math.floor(samples.length/ratio),pcm=new Int16Array(n);
    for(let i=0;i<n;i++){
-    const from=Math.floor(i*ratio),until=Math.min(sourceSamples.length,Math.floor((i+1)*ratio));
-    let sum=0;for(let j=from;j<until;j++)sum+=sourceSamples[j];
-    const value=Math.max(-1,Math.min(1,sum/Math.max(1,until-from)));
-    pcm[i]=Math.round(value*(value<0?32768:32767));
+    const from=Math.floor(i*ratio),to=Math.min(samples.length,Math.floor((i+1)*ratio));
+    let sum=0;for(let j=from;j<to;j++)sum+=samples[j];
+    const v=Math.max(-1,Math.min(1,sum/Math.max(1,to-from)));
+    pcm[i]=Math.round(v*(v<0?32768:32767));
    }
    const bytes=new Uint8Array(pcm.buffer);let binary='';
    for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
    socket.send(JSON.stringify({type:'audio',pcm:btoa(binary)}));
   };
-  if(micMuted)pauseMic(true);else{setState('El guardia está escuchando');updateView();}
+  if(micMuted)pauseMic(true);else updateView();
+  if(ctx.state==='suspended')ctx.resume().then(tryStartGreeting).catch(()=>{});
+  else tryStartGreeting();
+  return true;
  }catch{
-  setState('Podés usar el teclado para ingresar');
-  micMuted=true;updateView();
- }
+  if(request===micEpoch){setState('Podés usar el teclado para ingresar');micMuted=true;updateView();}
+  return false;
+ }finally{if(request===micEpoch)micStarting=false;}
 }
 function stop({manual=true}={}){
  desired=false;serverConnected=false;manuallyStopped=manual;clearTimeout(retryTimer);retryTimer=null;
+ clearTimeout(greetingTimer);greetingTimer=null;greetingSent=false;
  if(renderId){cancelAnimationFrame(renderId);renderId=0;}
  if(socket){socket.onclose=null;socket.close();socket=null;}
  haltMic();resetAudio();
@@ -270,9 +287,9 @@ function openSocket(){
   let msg;try{msg=JSON.parse(event.data);}catch{return;}
   switch(msg.type){
    case 'connected':
-    serverConnected=true;retries=0;setState('Conectado · Gemini Live');updateView();
+    serverConnected=true;retries=0;greetingSent=false;setState('Conectado · Gemini Live');updateView();
     if(!transcript.trim())caption.textContent='Podés decir la contraseña o escribirla.';
-    ws.send(JSON.stringify({type:'start'}));break;
+    tryStartGreeting();break;
    case 'transcript':
     if(turnEnded){clearSubtitleTimers();transcript='';captionCommitted=0;}
     clearTimeout(captionClearTimer);
@@ -291,7 +308,7 @@ function openSocket(){
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
   }
  };
- ws.onclose=()=>{if(socket!==ws)return;socket=null;serverConnected=false;updateView();if(desired)reconnectSoon();};
+ ws.onclose=()=>{if(socket!==ws)return;socket=null;serverConnected=false;greetingSent=false;clearTimeout(greetingTimer);greetingTimer=null;updateView();if(desired)reconnectSoon();};
  ws.onerror=()=>{if(socket===ws){serverConnected=false;updateView();setState('Problema de conexión. Podés escribir la contraseña.');}};
 }
 async function start(){
@@ -302,7 +319,10 @@ async function start(){
   const config=await getJSON('/api/carmen/config');
   if(!desired)return;
   settings=config.config||{};available=config.frames||Array(8).fill(false);
-  applySettings();await fetchFrames();makeOutput();openSocket();void startMic();
+  applySettings();await fetchFrames();makeOutput();
+  await startMic();
+  if(!desired)return;
+  openSocket();
  }catch(error){setState('Podés ingresar con el teclado.');notify(error.message);}
  finally{initializing=false;}
 }
