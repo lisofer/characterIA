@@ -1,12 +1,12 @@
 // Carmen es una llamada Gemini Live propia del acceso. No modifica la llamada de NEXO.
 const $=selector=>document.querySelector(selector);
 const login=$('#login-view'),dock=$('#carmen-dock'),face=$('#carmen-face');
-const images=$('#carmen-images'),caption=$('#carmen-caption'),state=$('#carmen-state');
+const images=$('#carmen-images'),caption=$('#carmen-caption-text'),state=$('#carmen-state'),micButton=$('#carmen-mic');
 // El personaje es el único control de llamada.
 const frameNames=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abiertos · A','Ojos cerrados · A','Ojos abiertos · O','Ojos cerrados · O','Ojos abiertos · E','Ojos cerrados · E'];
 const fallbackVoices=['Aoede','Zephyr','Kore','Leda','Puck','Charon'];
 let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
-let socket=null,desired=false,manuallyStopped=false,micMuted=false,micStream=null,micContext=null,micProcessor=null,micSource=null;
+let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micContext=null,micProcessor=null,micSource=null;
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
 let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
@@ -22,15 +22,22 @@ async function getJSON(url,options={}){
 }
 function updateView(){
  dock.classList.toggle('carmen-disconnected',!desired);
+ dock.classList.toggle('carmen-online',desired&&serverConnected);
  face.setAttribute('aria-pressed',String(desired));
- face.setAttribute('aria-label',desired?'Cortar la llamada de Erik':'Volver a llamar a Erik');
- face.title=desired?'Tocá a Erik para cortar la llamada':'Tocá a Erik para volver a llamar';
+ face.setAttribute('aria-label',desired?'Cortar la llamada del guardia':'Volver a llamar al guardia');
+ face.title=desired?'Tocá al guardia para cortar la llamada':'Tocá al guardia para volver a llamar';
+ const active=desired&&!micMuted&&!!micStream;
+ micButton.classList.toggle('is-muted',!active);
+ micButton.setAttribute('aria-pressed',String(active));
+ micButton.setAttribute('aria-label',active?'Silenciar micrófono':'Activar micrófono');
+ micButton.title=active?'Silenciar micrófono':'Activar micrófono';
 }
 function applySettings(){
  dock.style.setProperty('--carmen-scale',String((settings.avatarScale??90)/100));
  dock.style.setProperty('--carmen-x',String(settings.avatarOffsetX??0)+'px');
  dock.style.setProperty('--carmen-y',String(settings.avatarOffsetY??0)+'px');
- caption.style.fontSize=String(settings.subtitleFont??17)+'px';
+ const compact=Math.max(13,Math.min(19,Number(settings.subtitleFont??17)*.82));
+ caption.style.setProperty('font-size',compact+'px','important');
 }
 function setFrame(i){
  const valid=available[i]?i:available[i%2]?i%2:available[0]?0:-1;
@@ -71,7 +78,7 @@ async function unlockAudio(){
   const ctx=makeOutput();
   if(ctx.state==='suspended')await ctx.resume();
   if(micContext?.state==='suspended')await micContext.resume();
-  if(ctx.state==='running'&&desired)setState(micMuted?'Micrófono silenciado':'Carmen está escuchando');
+  if(ctx.state==='running'&&desired)setState(micMuted?'Micrófono silenciado':'El guardia está escuchando');
  }catch{setState('Podés ingresar la contraseña con el teclado.');}
 }
 function floatsFromPCM(base64){
@@ -93,7 +100,7 @@ function playPCM(base64){
  const end=start+audio.duration;playHead=end;speechEnd=end;
  segments.push({start,end,samples});
  source.onended=()=>{segments=segments.filter(x=>x.end>ctx.currentTime-.15);};
- if(ctx.state==='suspended')setState('Tocá a Carmen para escucharla');
+ if(ctx.state==='suspended')setState('Tocá al guardia para escucharlo');
 }
 function levelAt(t){
  let energy=0;
@@ -177,7 +184,7 @@ function pauseMic(paused){
  micMuted=paused;
  micStream?.getAudioTracks().forEach(track=>{track.enabled=!paused;});
  updateView();
- if(desired)setState(paused?'Micrófono silenciado':'Carmen está escuchando');
+ if(desired)setState(paused?'Micrófono silenciado':'El guardia está escuchando');
 }
 async function startMic(){
  if(!desired||micMuted||micStream||!navigator.mediaDevices?.getUserMedia)return;
@@ -205,26 +212,26 @@ async function startMic(){
    for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
    socket.send(JSON.stringify({type:'audio',pcm:btoa(binary)}));
   };
-  if(micMuted)pauseMic(true);else{setState('Carmen está escuchando');updateView();}
+  if(micMuted)pauseMic(true);else{setState('El guardia está escuchando');updateView();}
  }catch{
   setState('Podés usar el teclado para ingresar');
   micMuted=true;updateView();
  }
 }
 function stop({manual=true}={}){
- desired=false;manuallyStopped=manual;clearTimeout(retryTimer);retryTimer=null;
+ desired=false;serverConnected=false;manuallyStopped=manual;clearTimeout(retryTimer);retryTimer=null;
  if(renderId){cancelAnimationFrame(renderId);renderId=0;}
  if(socket){socket.onclose=null;socket.close();socket=null;}
  haltMic();resetAudio();
  if(output){output.close().catch(()=>{});output=null;volume=null;}
  setState(manual?'Llamada terminada':'');
- if(manual)caption.textContent='Llamada terminada. Tocá a Erik para volver a llamar.';
+ if(manual)caption.textContent='Llamada terminada. Tocá al guardia para volver a llamar.';
  updateView();
 }
 function reconnectSoon(){
  if(!desired||!isLogin()||manuallyStopped||retryTimer)return;
  const delay=Math.min(900*Math.pow(1.8,Math.min(retries++,5)),9500);
- setState('Reconectando a Carmen…');
+ setState('Reconectando al guardia…');
  retryTimer=setTimeout(()=>{retryTimer=null;if(desired)openSocket();},delay);
 }
 function maybeFinish(){
@@ -254,7 +261,7 @@ function openSocket(){
   let msg;try{msg=JSON.parse(event.data);}catch{return;}
   switch(msg.type){
    case 'connected':
-    retries=0;setState('Conectada · Gemini Live');
+    serverConnected=true;retries=0;setState('Conectado · Gemini Live');updateView();
     if(!transcript.trim())caption.textContent='Podés decir la contraseña o escribirla.';
     ws.send(JSON.stringify({type:'start'}));break;
    case 'transcript':
@@ -275,12 +282,12 @@ function openSocket(){
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
   }
  };
- ws.onclose=()=>{if(socket!==ws)return;socket=null;if(desired)reconnectSoon();};
- ws.onerror=()=>{if(socket===ws)setState('Problema de conexión. Podés escribir la contraseña.');};
+ ws.onclose=()=>{if(socket!==ws)return;socket=null;serverConnected=false;updateView();if(desired)reconnectSoon();};
+ ws.onerror=()=>{if(socket===ws){serverConnected=false;updateView();setState('Problema de conexión. Podés escribir la contraseña.');}};
 }
 async function start(){
  if(initializing||desired||!isLogin())return;
- initializing=true;manuallyStopped=false;desired=true;redeeming=false;pendingTicket='';micMuted=false;updateView();setState('Conectando a Carmen…');
+ initializing=true;manuallyStopped=false;serverConnected=false;desired=true;redeeming=false;pendingTicket='';micMuted=false;mutedByUser=false;updateView();setState('Conectando al guardia…');
   caption.textContent='Conectando…';
  try{
   const config=await getJSON('/api/carmen/config');
@@ -296,10 +303,17 @@ function setupControls(){
   void unlockAudio();
   void start();
  });
- // El teclado permanece disponible; al salir del campo se recupera el micrófono.
+ micButton.addEventListener('click',()=>{
+  void unlockAudio();
+  if(!desired){void start();return;}
+  mutedByUser=!mutedByUser;
+  pauseMic(mutedByUser);
+  if(!mutedByUser&&!micStream)void startMic();
+ });
+ // Al ingresar por teclado se suspende la escucha sin cancelar un mute manual.
  $('#password').addEventListener('focus',()=>{if(desired&&!micMuted)pauseMic(true);});
  $('#password').addEventListener('blur',()=>{
-  if(desired&&micMuted){pauseMic(false);if(!micStream)void startMic();}
+  if(desired&&!mutedByUser&&micMuted){pauseMic(false);if(!micStream)void startMic();}
  });
  window.addEventListener('nexo-login-ok',()=>stop({manual:false}));
  window.addEventListener('nexo-login-error',()=>{
