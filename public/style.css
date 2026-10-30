@@ -691,7 +691,7 @@ body:has(#login-view:not(.hidden)){
 /* 30/10/2026 · Erik al costado del ingreso, como en la interfaz original.
    Controles: un toque al personaje corta; el siguiente vuelve a llamar. */
 #login-view .carmen-dock{
- position:absolute;z-index:4;top:auto;left:auto;
+ position:absolute;z-index:30;top:auto;left:auto;
  right:max(12px,env(safe-area-inset-right,0px));bottom:clamp(15px,3dvh,34px);
  width:clamp(230px,29vw,330px);height:clamp(260px,39dvh,385px);
  transform:none;display:block;pointer-events:none;
@@ -706,21 +706,35 @@ body:has(#login-view:not(.hidden)){
 #login-view .carmen-disconnected .carmen-images{filter:grayscale(.8) brightness(.66)}
 #login-view .carmen-caption{
  position:absolute;z-index:2;right:calc(100% - 42px);bottom:clamp(76px,10dvh,130px);
- width:clamp(250px,29vw,370px);min-height:85px;height:auto;max-height:260px;
- border:2px solid #6689aa;border-radius:18px;
- background:#edf6ff;color:#102945;box-shadow:0 9px 26px #0007;
- padding:38px 18px 17px;display:block;text-align:left;
- white-space:normal;overflow:visible;line-height:1.32;font-weight:800;overflow-wrap:break-word;
+ width:clamp(250px,29vw,370px);min-height:82px;height:auto;max-height:min(36dvh,270px);
+ border:2px solid #111820;border-radius:18px;
+ background:#eef7ff;color:#080d13;box-shadow:0 9px 26px #0007;
+ padding:14px 16px 15px;display:block;text-align:left;
+ white-space:normal;overflow:visible;line-height:1.25;font-weight:750;overflow-wrap:break-word;
  pointer-events:none;
 }
-#login-view .carmen-caption::before{
- content:"●  ERIK · SECURITY";position:absolute;top:11px;left:16px;
- font:800 12px/1.2 'Outfit',Arial,sans-serif;letter-spacing:.08em;color:#567083;
+#login-view .carmen-caption-header{
+ display:flex;align-items:center;gap:8px;margin:0 0 9px;
+ font:800 11px/1.15 'Outfit',Arial,sans-serif;letter-spacing:.055em;
+ color:#15202e;white-space:nowrap;
+}
+#login-view .carmen-presence{
+ width:9px;height:9px;flex:0 0 9px;background:#71808c;
+ border-radius:50%;
+ box-shadow:0 0 0 2px #eaf4fc;
+}
+#login-view .carmen-online .carmen-presence{
+ background:#19c681;box-shadow:0 0 0 2px #eaf4fc,0 0 8px #1cc98075;
+}
+#login-view .carmen-caption-text{
+ display:block;color:#080d13;font-weight:750;
+ font-size:var(--guard-caption-font,14px)!important;
+ line-height:1.24;white-space:normal;overflow-wrap:break-word;
 }
 #login-view .carmen-caption::after{
- content:"";position:absolute;right:-10px;top:49%;width:17px;height:17px;
- border-top:2px solid #6689aa;border-right:2px solid #6689aa;
- background:#edf6ff;transform:rotate(45deg);
+ content:"";position:absolute;right:-11px;top:31%;width:17px;height:17px;
+ border-top:2px solid #111820;border-right:2px solid #111820;
+ background:#eef7ff;transform:rotate(45deg);
 }
 #login-view .carmen-state{
  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
@@ -730,7 +744,7 @@ body:has(#login-view:not(.hidden)){
 @media(max-width:790px){
  #login-view .login-wrap{
   transform:none;
-  position:relative;z-index:10;
+  position:relative;z-index:2;
  }
  #login-view .carmen-dock{
   right:-26px;bottom:clamp(16px,2.5dvh,28px);
@@ -739,20 +753,45 @@ body:has(#login-view:not(.hidden)){
  #login-view .carmen-caption{
   right:clamp(134px,41vw,174px);bottom:clamp(60px,9dvh,90px);
   width:min(58vw,235px);min-height:82px;max-height:38dvh;
-  padding:34px 14px 15px;border-radius:16px;
+  padding:13px 14px 14px;border-radius:16px;
  }
- #login-view .carmen-caption::before{top:11px;left:13px;font-size:11px}
+ #login-view .carmen-caption-header{font-size:10.5px;margin-bottom:8px}
 }
 @media(max-width:375px){
  #login-view .carmen-dock{right:-25px;width:66vw;height:clamp(170px,28dvh,245px)}
- #login-view .carmen-caption{right:40vw;width:58vw;padding:31px 12px 12px}
+ #login-view .carmen-caption{right:40vw;width:58vw;padding:12px 12px 13px}
 }
 @media(max-width:790px) and (max-height:570px){
  #login-view .login-wrap{transform:none}
  #login-view .carmen-dock{height:155px;bottom:2px;right:-20px;width:min(50vw,195px)}
  #login-view .carmen-caption{
   right:clamp(88px,37vw,130px);bottom:42px;min-height:65px;
-  max-height:38dvh;padding:29px 12px 10px;
+  max-height:38dvh;padding:10px 12px 12px;
  }
- #login-view .carmen-caption::before{top:7px;font-size:10px}
+ #login-view .carmen-caption-header{font-size:10px;margin-bottom:6px}
+}
+
+/* Guardia de seguridad: micrófono flotante como en la pantalla de referencia. */
+#login-view .carmen-mic-bubble{
+ position:absolute;z-index:5;right:3px;bottom:13px;
+ display:grid;place-items:center;width:60px;height:60px;
+ border:2px solid #90e8ff;border-radius:50%;
+ background:linear-gradient(145deg,#25bdf8,#0863c9);
+ color:#fff;box-shadow:0 0 0 4px #69c8ff33,0 0 18px #49d8ff88;
+ padding:12px;pointer-events:auto;touch-action:manipulation;
+}
+#login-view .carmen-mic-bubble svg{width:100%;height:100%;display:block}
+#login-view .carmen-mic-bubble:focus-visible{outline:3px solid #fff;outline-offset:5px}
+#login-view .carmen-mic-bubble.is-muted{
+ background:linear-gradient(145deg,#6e7f9b,#2c405c);
+ border-color:#bdc9db;box-shadow:0 0 0 3px #fff2;
+}
+#login-view .carmen-mic-slash{display:none;position:absolute;height:3px;width:35px;border-radius:3px;background:#fff;transform:rotate(-45deg)}
+#login-view .carmen-mic-bubble.is-muted .carmen-mic-slash{display:block}
+#login-view .carmen-mic-bubble[disabled]{opacity:.7}
+@media(max-width:790px){
+ #login-view .carmen-mic-bubble{right:8px;bottom:4px;width:57px;height:57px;padding:11px}
+}
+@media(max-width:375px){
+ #login-view .carmen-mic-bubble{width:52px;height:52px;right:8px;bottom:1px}
 }
