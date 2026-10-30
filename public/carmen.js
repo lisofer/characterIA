@@ -9,7 +9,7 @@ let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
 let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micProcessor=null,micSource=null,micSilent=null,micEpoch=0,micStarting=false;
 let greetingSent=false,greetingTimer=null,firstAudioChunk=true;
 const soundSources=new Set();
-let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
+let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0,speechStart=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
 let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
 let loadedAdmin=false,frameVersions=Array(8).fill(0),lastFrameTime=0;
@@ -25,6 +25,7 @@ async function getJSON(url,options={}){
 function updateView(){
  dock.classList.toggle('carmen-disconnected',!desired);
  dock.classList.toggle('carmen-online',desired&&serverConnected);
+ if(!desired||!serverConnected)dock.classList.remove('carmen-speaking');
  face.setAttribute('aria-pressed',String(desired));
  face.setAttribute('aria-label',desired?'Cortar la llamada del guardia':'Volver a llamar al guardia');
  face.title=desired?'Tocá al guardia para cortar la llamada':'Tocá al guardia para volver a llamar';
@@ -48,7 +49,7 @@ function setFrame(i){
  if(currentFrame>=0)frameElements[currentFrame]?.classList.remove('is-visible');
  currentFrame=valid;
  if(valid>=0)frameElements[valid]?.classList.add('is-visible');
- $('.carmen-fallback').classList.toggle('hidden',valid>=0);
+ // Sin figura de reemplazo: el personaje aparece solamente cuando el PNG real terminó de cargar.
 }
 async function fetchFrames(){
  const root=images;root.replaceChildren();frameElements=[];currentFrame=-1;
@@ -106,7 +107,9 @@ function playPCM(base64){
  const audio=ctx.createBuffer(1,samples.length,24000);
  audio.getChannelData(0).set(samples);
  const source=ctx.createBufferSource();source.buffer=audio;source.connect(volume);
- const start=Math.max(ctx.currentTime+(firstAudioChunk?.28:.025),playHead);
+ const first=firstAudioChunk;
+ const start=Math.max(ctx.currentTime+(first?.28:.025),playHead);
+ if(first)speechStart=start;
  firstAudioChunk=false;
  source.start(start);soundSources.add(source);
  const end=start+audio.duration;playHead=end;speechEnd=end;
@@ -179,6 +182,11 @@ function render(now){
  if(now-lastFrameTime<55)return;
  lastFrameTime=now;
  const t=output?.currentTime??0;
+ // El globo sólo aparece si hay texto efectivamente dicho por Gemini
+ // y la voz está en reproducción (nunca mientras el guardia escucha).
+ const hasSubtitle=Boolean(caption.textContent.trim());
+ const playing=output?.state==='running'&&speechStart>0&&t>=speechStart-.025&&t<speechEnd+.38;
+ dock.classList.toggle('carmen-speaking',Boolean(desired&&serverConnected&&hasSubtitle&&playing));
  const raw=levelAt(t-Number(settings.mouthDelay||0)/1000);
  const sensitivity=Number(settings.mouthSensitivity??48)/100;
  const value=Math.max(0,Math.min(1,(raw-.014)*(.9+7*sensitivity)));
@@ -199,12 +207,13 @@ function render(now){
 }
 function stopAudioOutput(){
  for(const source of soundSources){try{source.stop();source.disconnect()}catch{}}
- soundSources.clear();segments=[];playHead=0;speechEnd=0;firstAudioChunk=true;
+ soundSources.clear();segments=[];playHead=0;speechEnd=0;speechStart=0;firstAudioChunk=true;
+ dock.classList.remove('carmen-speaking');
 }
 function resetAudio(){
  clearSubtitleTimers();
- segments=[];playHead=0;speechEnd=0;firstAudioChunk=true;transcript='';captionCommitted=0;turnEnded=false;
- caption.textContent=' ';setFrame(0);
+ segments=[];playHead=0;speechEnd=0;speechStart=0;firstAudioChunk=true;transcript='';captionCommitted=0;turnEnded=false;
+ caption.textContent=' ';dock.classList.remove('carmen-speaking');setFrame(0);
 }
 function haltMic(){
  micEpoch++;micStarting=false;
