@@ -56,7 +56,7 @@
       <label class="range-field">Posición horizontal <output data-carmen-output="avatarOffsetX"></output><input data-carmen="avatarOffsetX" type="range" min="-100" max="100"></label>
       <label class="range-field">Posición vertical <output data-carmen-output="avatarOffsetY"></output><input data-carmen="avatarOffsetY" type="range" min="-100" max="100"></label>
       <label class="range-field">Tamaño de subtítulos <output data-carmen-output="subtitleFont"></output><input data-carmen="subtitleFont" type="range" min="14" max="28"></label>
-      <label class="range-field">Desfase de subtítulos <output data-carmen-output="subtitleDelay"></output><input data-carmen="subtitleDelay" type="range" min="-1200" max="1200" step="25"></label>
+      <label class="range-field">Velocidad de lectura <output data-carmen-output="subtitleSpeed"></output><input data-carmen="subtitleSpeed" type="range" min="50" max="180" step="5" value="100" aria-label="Velocidad de lectura del guardia en porcentaje"><span class="range-help">50 % pausado · 100 % normal · 180 % rápido</span></label><label class="range-field">Sincronización con la voz <output data-carmen-output="subtitleDelay"></output><input data-carmen="subtitleDelay" type="range" min="-1200" max="1200" step="25" value="0" aria-label="Adelanto o retraso del subtítulo"><span class="range-help">← Adelantar · Retrasar →</span></label>
       <label class="range-field">Sincronía de boca <output data-carmen-output="mouthDelay"></output><input data-carmen="mouthDelay" type="range" min="-250" max="250"></label>
       <label class="range-field">Sensibilidad <output data-carmen-output="mouthSensitivity"></output><input data-carmen="mouthSensitivity" type="range" min="0" max="100"></label>
       <label class="range-field">Suavizado <output data-carmen-output="mouthSmoothing"></output><input data-carmen="mouthSmoothing" type="range" min="0" max="100"></label>
@@ -71,4 +71,4 @@
  </section>
  </div></div></section>
 <div id="reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div class="modal-card"><div class="modal-icon">↻</div><h3 id="reset-title">¿Empezar un currículum nuevo?</h3><p>Se borrarán definitivamente los datos, la conversación y los PDF del currículum actual. Esta acción no se puede deshacer.</p><div class="modal-actions"><button class="secondary-btn" id="cancel-reset">Cancelar</button><button class="danger-btn" id="confirm-reset">Sí, borrar y reiniciar</button></div></div></div>
-<script type="module" src="/app.js?v=20261029-clean-login-preserve-cv-1"></script><script type="module" src="/carmen.js?v=20261030-guard-speech-v12"></script></body></html>
+<script type="module" src="/app.js?v=20261029-clean-login-preserve-cv-1"></script><script type="module" src="/carmen.js?v=20261030-guard-captions-v13"></script></body></html>
