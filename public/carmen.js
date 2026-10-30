@@ -9,6 +9,7 @@ let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
 let socket=null,desired=false,manuallyStopped=false,micMuted=false,micStream=null,micContext=null,micProcessor=null,micSource=null;
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
+let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
 let loadedAdmin=false,frameVersions=Array(8).fill(0),lastFrameTime=0;
 const isLogin=()=>!login.classList.contains('hidden');
 const setState=text=>{state.textContent=text;};
@@ -106,31 +107,40 @@ function levelAt(t){
  }
  return energy;
 }
-const canvas=document.createElement('canvas'),measure=canvas.getContext('2d');
-function paintCaption(){
- if(!transcript.trim())return;
- const t=output?.currentTime??0;
- const audioStarted=segments.length?segments[0].start:(speechEnd?Math.max(0,speechEnd-2):0);
- const words=transcript.trim().split(/\s+/);
- const duration=Math.max(.7,speechEnd-audioStarted);
- const progress=Math.min(1,Math.max(0,(t-audioStarted-(Number(settings.subtitleDelay||0)/1000))/duration));
- const endIndex=Math.min(words.length,Math.max(1,Math.floor(progress*words.length)+1));
- measure.font='700 '+(settings.subtitleFont||17)+'px Arial';
- // El globo muestra hasta cinco renglones, sin cortar palabras.
- const maxWidth=Math.max(120,caption.clientWidth-34);
- let result='';
- for(let i=endIndex-1;i>=0;i--){
-  const candidate=words[i]+(result?' '+result:'');
-  let lines=1,line='';
-  for(const word of candidate.split(/\s+/)){
-   const next=line?line+' '+word:word;
-   if(line&&measure.measureText(next).width>maxWidth){lines++;line=word;}
-   else line=next;
-  }
-  if(lines>5&&result)break;
-  result=candidate;
- }
- if(caption.textContent!==result)caption.textContent=result;
+// Gemini envía la transcripción en fragmentos. La interfaz publica cada frase
+// completa de una vez; nunca agrega palabras al ritmo de los fotogramas.
+function showFullPhrase(phrase){
+ const sentence=String(phrase||'').replace(/\s+/g,' ').trim();
+ if(!sentence)return;
+ clearTimeout(captionDelayTimer);
+ const version=++captionVersion;
+ const show=()=>{if(desired&&version===captionVersion)caption.textContent=sentence;};
+ const delay=Math.max(0,Number(settings.subtitleDelay||0));
+ if(delay)captionDelayTimer=setTimeout(show,delay);
+ else show();
+}
+function publishCompletePhrase(endOfTurn=false){
+ const pending=transcript.slice(captionCommitted);
+ if(!pending.trim())return;
+ const matches=[...pending.matchAll(/[.!?…]+(?=\s|$)/g)];
+ if(!endOfTurn&&!matches.length)return;
+ const last=matches.at(-1);
+ const cut=endOfTurn?pending.length:last.index+last[0].length;
+ const phrase=pending.slice(0,cut).trim();
+ captionCommitted+=cut;
+ if(phrase)showFullPhrase(phrase);
+}
+function clearSubtitleTimers(){
+ clearTimeout(captionDelayTimer);clearTimeout(captionClearTimer);captionVersion++;
+}
+function scheduleSubtitleClear(){
+ clearTimeout(captionClearTimer);
+ const version=captionVersion;
+ const remaining=Math.max(0,(speechEnd-(output?.currentTime||0))*1000);
+ captionClearTimer=setTimeout(()=>{
+  if(!desired||!turnEnded||pendingTicket||version!==captionVersion)return;
+  transcript='';captionCommitted=0;caption.textContent=' ';
+ },Math.max(2600,remaining+1900));
 }
 function render(now){
  renderId=requestAnimationFrame(render);
@@ -150,10 +160,11 @@ function render(now){
  const mouth=speaking?(scaled>.42?2:scaled>.18?1:0):0;
  const variant=Math.min(7,mouth*2+closed);
  setFrame(variant);
- if(transcript)paintCaption();
+ // Los subtítulos cambian por frase completa, no por fotograma.
 }
 function resetAudio(){
- segments=[];playHead=0;speechEnd=0;transcript='';turnEnded=false;
+ clearSubtitleTimers();
+ segments=[];playHead=0;speechEnd=0;transcript='';captionCommitted=0;turnEnded=false;
  caption.textContent=' ';setFrame(0);
 }
 function haltMic(){
@@ -206,7 +217,9 @@ function stop({manual=true}={}){
  if(socket){socket.onclose=null;socket.close();socket=null;}
  haltMic();resetAudio();
  if(output){output.close().catch(()=>{});output=null;volume=null;}
- setState(manual?'Llamada terminada':'');updateView();
+ setState(manual?'Llamada terminada':'');
+ if(manual)caption.textContent='Llamada terminada. Tocá a Erik para volver a llamar.';
+ updateView();
 }
 function reconnectSoon(){
  if(!desired||!isLogin()||manuallyStopped||retryTimer)return;
@@ -240,12 +253,24 @@ function openSocket(){
   if(socket!==ws||!desired)return;
   let msg;try{msg=JSON.parse(event.data);}catch{return;}
   switch(msg.type){
-   case 'connected':retries=0;setState('Conectada · Gemini Live');ws.send(JSON.stringify({type:'start'}));break;
-   case 'transcript':transcript+=String(msg.text||'');turnEnded=false;break;
+   case 'connected':
+    retries=0;setState('Conectada · Gemini Live');
+    if(!transcript.trim())caption.textContent='Podés decir la contraseña o escribirla.';
+    ws.send(JSON.stringify({type:'start'}));break;
+   case 'transcript':
+    if(turnEnded){clearSubtitleTimers();transcript='';captionCommitted=0;}
+    clearTimeout(captionClearTimer);
+    transcript+=String(msg.text||'');
+    turnEnded=false;publishCompletePhrase(false);break;
    case 'audio':playPCM(msg.pcm);break;
-   case 'turn_complete':turnEnded=true;if(pendingTicket)maybeFinish();else setTimeout(()=>{if(turnEnded&&!pendingTicket){transcript='';caption.textContent=' ';}},Math.max(900,((speechEnd-(output?.currentTime||0))*1000)+650));break;
+   case 'turn_complete':
+    publishCompletePhrase(true);turnEnded=true;
+    if(pendingTicket)maybeFinish();else scheduleSubtitleClear();
+    break;
    case 'access_granted':pendingTicket=msg.ticket;pauseMic(true);setState('Contraseña correcta');setTimeout(maybeFinish,750);setTimeout(()=>{if(pendingTicket)void redeemTicket();},5200);break;
-   case 'interrupted':segments=[];playHead=output?.currentTime||0;speechEnd=playHead;transcript='';break;
+   case 'interrupted':
+    clearSubtitleTimers();segments=[];playHead=output?.currentTime||0;speechEnd=playHead;
+    transcript='';captionCommitted=0;turnEnded=false;caption.textContent=' ';break;
    case 'notice':setState(msg.message||'Conectada');break;
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
   }
@@ -256,6 +281,7 @@ function openSocket(){
 async function start(){
  if(initializing||desired||!isLogin())return;
  initializing=true;manuallyStopped=false;desired=true;redeeming=false;pendingTicket='';micMuted=false;updateView();setState('Conectando a Carmen…');
+  caption.textContent='Conectando…';
  try{
   const config=await getJSON('/api/carmen/config');
   if(!desired)return;
