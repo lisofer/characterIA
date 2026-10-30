@@ -1,4 +1,4 @@
-<!doctype html><html lang="es-AR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091323"><meta name="description" content="Asistente accesible para construir y actualizar tu currículum vitae por voz."><title>NEXO CV</title><link rel="stylesheet" href="/style.css?v=20261029-carmen-v1"></head><body>
+<!doctype html><html lang="es-AR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091323"><meta name="description" content="Asistente accesible para construir y actualizar tu currículum vitae por voz."><title>NEXO CV</title><link rel="stylesheet" href="/style.css?v=20261030-erik-dock-v3"></head><body>
 <div id="toast" role="status" aria-live="polite"></div>
 <section id="login-view" class="page auth-page">
  <div class="ambient orb-one"></div><div class="ambient orb-two"></div>
@@ -7,20 +7,14 @@
  <form id="login-form"><label for="password">Contraseña de acceso</label><div class="field-wrap"><input id="password" type="password" autocomplete="current-password" placeholder="Ingresá tu contraseña" required><button type="button" id="toggle-password" class="show-pass" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña"><svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.8-6 10-6 10 6 10 6-3.8 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 6.1A12.6 12.6 0 0 1 12 6c6.2 0 10 6 10 6a17.4 17.4 0 0 1-4.2 4.4M6.3 6.4C3.6 8.2 2 12 2 12s3.8 6 10 6c1 0 1.9-.1 2.7-.4"/><path d="M10 10a3 3 0 0 0 4 4"/></svg></button></div><button type="submit" id="login-btn" class="primary-btn">INGRESAR</button></form>
  </div></main>
 
- <aside id="carmen-dock" class="carmen-dock" aria-label="Carmen, asistente de acceso">
-   <button id="carmen-face" class="carmen-face" type="button" aria-label="Activar el sonido de Carmen">
+ <aside id="carmen-dock" class="carmen-dock" aria-label="Erik, asistente de acceso">
+   <button id="carmen-face" class="carmen-face" type="button" aria-label="Cortar la llamada de Erik" aria-pressed="true" title="Tocá para cortar o volver a llamar">
      <span class="carmen-fallback" aria-hidden="true">✦</span>
      <span id="carmen-images" class="carmen-images" aria-hidden="true"></span>
    </button>
    <div id="carmen-caption" class="carmen-caption" role="status" aria-live="polite" aria-atomic="true"> </div>
    <div id="carmen-state" class="carmen-state" role="status" aria-live="polite">Preparando la bienvenida…</div>
-   <div class="carmen-controls" aria-label="Controles de Carmen">
-     <button type="button" id="carmen-call" class="control control-coral" aria-label="Colgar o volver a llamar a Carmen" title="Colgar o llamar"><span class="control-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 5.2 2 2 0 0 1 5.1 3h3a2 2 0 0 1 2 1.7l.4 2.8a2 2 0 0 1-.6 1.8L8.1 11a16 16 0 0 0 4.9 4.9l1.7-1.8a2 2 0 0 1 1.8-.6l2.8.4a2 2 0 0 1 1.7 1.9Z"/><path d="M21 3L3 21"/></svg></span></button>
-     <button type="button" id="carmen-mic" class="control control-amber" aria-label="Silenciar o activar el micrófono" title="Micrófono"><span class="control-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></span></button>
-     <button type="button" id="carmen-keyboard" class="control control-blue" aria-label="Escribir la contraseña" title="Teclado"><span class="control-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M7 16h10"/></svg></span></button>
-     <button type="button" id="carmen-restart" class="control control-violet" aria-label="Reiniciar la conversación con Carmen" title="Reiniciar charla"><span class="control-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.4 6.1M3 4v7h7"/></svg></span></button>
-   </div>
- </aside>
+</aside>
 
 </section>
 <section id="student-view" class="page student-page hidden"><header class="topbar"><div class="wordmark"><span class="brand-mark">✦</span><span>NEXO<span class="wordmark-soft">CV</span></span></div><div class="topbar-right"><span class="live-pill"><span class="status-dot"></span><span id="connection-label">Sin conectar</span></span><button class="ghost-btn" id="student-logout">Salir</button></div></header>
@@ -71,4 +65,4 @@
  </section>
  </div></div></section>
 <div id="reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div class="modal-card"><div class="modal-icon">↻</div><h3 id="reset-title">¿Empezar un currículum nuevo?</h3><p>Se borrarán definitivamente los datos, la conversación y los PDF del currículum actual. Esta acción no se puede deshacer.</p><div class="modal-actions"><button class="secondary-btn" id="cancel-reset">Cancelar</button><button class="danger-btn" id="confirm-reset">Sí, borrar y reiniciar</button></div></div></div>
-<script type="module" src="/app.js?v=20261029-clean-login-preserve-cv-1"></script><script type="module" src="/carmen.js?v=20261029-carmen-v1"></script></body></html>
+<script type="module" src="/app.js?v=20261029-clean-login-preserve-cv-1"></script><script type="module" src="/carmen.js?v=20261030-erik-dock-v3"></script></body></html>
