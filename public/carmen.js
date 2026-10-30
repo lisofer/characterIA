@@ -322,14 +322,16 @@ function openSocket(){
  ws.onerror=()=>{if(socket===ws){serverConnected=false;updateView();setState('Problema de conexión. Podés escribir la contraseña.');}};
 }
 async function start(){
- if(initializing||desired||!isLogin())return;
+ if(initializing||desired||!isLogin()||document.hidden)return;
  initializing=true;manuallyStopped=false;serverConnected=false;desired=true;redeeming=false;pendingTicket='';micMuted=false;mutedByUser=false;updateView();setState('Conectando al guardia…');
   caption.textContent=' ';
  try{
   const config=await getJSON('/api/carmen/config');
   if(!desired)return;
   settings=config.config||{};available=config.frames||Array(8).fill(false);
-  applySettings();await fetchFrames();makeOutput();
+  applySettings();await fetchFrames();
+  if(!desired||document.hidden)return;
+  makeOutput();
   await startMic();
   if(!desired)return;
   openSocket();
@@ -450,4 +452,4 @@ function setupAdmin(){
 }
 // La página de ingreso conserva el formulario habitual como alternativa siempre disponible.
 setupControls();setupAdmin();
-getJSON('/api/me').then(data=>{if(!data.role&&isLogin()&&!document.hidden)void start();}).catch(()=>{if(isLogin()&&!document.hidden)void start();});
+getJSON('/api/me').then(data=>{if(!data.role&&isLogin()&&!document.hidden&&!manuallyStopped)void start();}).catch(()=>{if(isLogin()&&!document.hidden&&!manuallyStopped)void start();});
