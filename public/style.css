@@ -828,3 +828,14 @@ body:has(#login-view:not(.hidden)){
  #login-view .carmen-mic-bubble{right:42px;bottom:5px;width:49px;height:49px}
 }
 
+
+/* La burbuja acompaña únicamente la reproducción real del guardia.
+   Sin PNG de reemplazo durante la carga, y sin globo mientras escucha. */
+#login-view .carmen-fallback{display:none!important}
+#login-view .carmen-caption{
+ opacity:0;visibility:hidden;
+ transition:opacity .14s ease,visibility .14s ease;
+}
+#login-view .carmen-speaking .carmen-caption{
+ opacity:1;visibility:visible;
+}
