@@ -76,7 +76,7 @@ function makeOutput(){
 }
 function tryStartGreeting(){
  if(!desired||!serverConnected||greetingSent||greetingTimer||!socket||socket.readyState!==WebSocket.OPEN)return;
- if(output?.state!=='running'){setState('Tocá al guardia para activar el sonido');return;}
+ if(output?.state!=='running'){setState('Tocá al guardia para activar el sonido');if(!transcript.trim())caption.textContent='Tocá al guardia para escuchar el saludo.';return;}
  greetingTimer=setTimeout(()=>{
   greetingTimer=null;
   if(!desired||!serverConnected||greetingSent||output?.state!=='running'||socket?.readyState!==WebSocket.OPEN)return;
@@ -328,11 +328,13 @@ async function start(){
 }
 function setupControls(){
  face.addEventListener('click',()=>{
+  // Si Android aún bloquea el audio, este primer gesto lo desbloquea.
+  if(desired&&output?.state==='suspended'){void unlockAudio();return;}
   if(desired){stop();return;}
-  void unlockAudio();
-  void start();
+  void unlockAudio();void start();
  });
  micButton.addEventListener('click',()=>{
+  if(desired&&output?.state==='suspended'){void unlockAudio();return;}
   void unlockAudio();
   if(!desired){void start();return;}
   mutedByUser=!mutedByUser;
