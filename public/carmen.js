@@ -11,7 +11,7 @@ let greetingSent=false,greetingTimer=null,firstAudioChunk=true;
 const soundSources=new Set();
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0,speechStart=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
-let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
+let captionCommitted=0,captionQueue=[],captionNextAt=0,captionShowing=false;
 let loadedAdmin=false,frameVersions=Array(8).fill(0),lastFrameTime=0;
 const isLogin=()=>!login.classList.contains('hidden');
 const setState=text=>{state.textContent=text;};
@@ -132,49 +132,76 @@ function levelAt(t){
  }
  return energy;
 }
-// Gemini envía la transcripción en fragmentos. La interfaz publica cada frase
-// completa de una vez; nunca agrega palabras al ritmo de los fotogramas.
-function showFullPhrase(phrase){
- const sentence=String(phrase||'').replace(/\s+/g,' ').trim();
- if(!sentence)return;
- clearTimeout(captionDelayTimer);
- const version=++captionVersion;
- const show=()=>{if(desired&&version===captionVersion)caption.textContent=sentence;};
- // Si el audio está programado pero aún no comenzó, coordinamos el globo
- // con el inicio real de la reproducción. Si ya habla, mostramos la frase.
- // El desfase del administrador puede adelantar (hasta que el texto exista)
- // o retrasar la visualización sin revelar palabras sueltas.
- const now=output?.currentTime??0;
- const speaking=segments.some(segment=>segment.start<=now&&segment.end>now);
- const upcoming=speaking?null:segments.find(segment=>segment.start>now);
- const audioWait=upcoming?Math.max(0,(upcoming.start-now)*1000):0;
- const offset=Number(settings.subtitleDelay||0);
- const delay=Math.max(0,Math.min(2200,audioWait+offset));
- if(delay>12)captionDelayTimer=setTimeout(show,delay);
- else show();
+// Gemini envía transcripciones parciales, que a veces llegan todas juntas
+// al final del turno. No deben reemplazarse ni descartarse: se leen en cola.
+function splitReadingParts(text){
+ const source=String(text||'').replace(/\s+/g,' ').trim();
+ if(!source)return [];
+ const words=source.split(/\s+/),parts=[];let part='';
+ for(const word of words){
+  const next=part?part+' '+word:word;
+  // Un párrafo largo cabe en varias pantallas; no cortar palabras.
+  if(part&&(next.length>76||part.split(/\s+/).length>=12)){
+   parts.push(part);part=word;
+  }else part=next;
+  // La coma permite una pausa natural cuando una oración es extensa.
+  if(part&&part.endsWith(',')&&part.split(/\s+/).length>=7){
+   parts.push(part);part='';
+  }
+ }
+ if(part)parts.push(part);
+ return parts;
+}
+function queueSubtitle(text){
+ for(const part of splitReadingParts(text))captionQueue.push(part);
 }
 function publishCompletePhrase(endOfTurn=false){
  const pending=transcript.slice(captionCommitted);
  if(!pending.trim())return;
- const matches=[...pending.matchAll(/[.!?…]+(?=\s|$)/g)];
- if(!endOfTurn&&!matches.length)return;
- const last=matches.at(-1);
- const cut=endOfTurn?pending.length:last.index+last[0].length;
- const phrase=pending.slice(0,cut).trim();
- captionCommitted+=cut;
- if(phrase)showFullPhrase(phrase);
+ let consumed=0;
+ for(const match of pending.matchAll(/[.!?…]+(?=\s|$)/g)){
+  const finish=match.index+match[0].length;
+  queueSubtitle(pending.slice(consumed,finish));
+  consumed=finish;
+ }
+ if(endOfTurn){
+  queueSubtitle(pending.slice(consumed));
+  consumed=pending.length;
+ }
+ captionCommitted+=consumed;
 }
-function clearSubtitleTimers(){
- clearTimeout(captionDelayTimer);clearTimeout(captionClearTimer);captionVersion++;
+function subtitleDwell(text){
+ // Este control SÍ modifica la velocidad de lectura, no un desfase fijo.
+ const words=Math.max(1,String(text).trim().split(/\s+/).length);
+ const speed=Math.max(.5,Math.min(1.8,Number(settings.subtitleSpeed??100)/100));
+ return Math.max(.8,Math.min(8,(0.45+words*.28)/speed));
 }
-function scheduleSubtitleClear(){
- clearTimeout(captionClearTimer);
- const version=captionVersion;
- const remaining=Math.max(0,(speechEnd-(output?.currentTime||0))*1000);
- captionClearTimer=setTimeout(()=>{
-  if(!desired||!turnEnded||pendingTicket||version!==captionVersion)return;
-  transcript='';captionCommitted=0;caption.textContent=' ';
- },Math.max(2600,remaining+1900));
+function resetSubtitleQueue(){
+ captionQueue=[];captionNextAt=0;captionShowing=false;
+ caption.textContent=' ';dock.classList.remove('carmen-speaking');
+}
+function renderCaptionQueue(t){
+ if(!output||output.state!=='running')return;
+ // El desfase existente sigue ajustando la sincronización inicial
+ // (-1200 ms adelanto, +1200 ms retraso); no altera la duración.
+ const offset=Math.max(-1.2,Math.min(1.2,Number(settings.subtitleDelay||0)/1000));
+ const audioReady=speechStart>0&&t>=speechStart+offset;
+ if(audioReady&&captionQueue.length&&t>=captionNextAt){
+  const part=captionQueue.shift();
+  caption.textContent=part;
+  captionShowing=true;
+  captionNextAt=t+subtitleDwell(part);
+ }
+ const hasText=captionShowing&&Boolean(caption.textContent.trim());
+ const stillReading=captionQueue.length>0||t<captionNextAt+.25;
+ const audioOngoing=!turnEnded&&speechEnd>0&&t<=speechEnd+.35;
+ const visible=hasText&&(stillReading||audioOngoing);
+ dock.classList.toggle('carmen-speaking',Boolean(desired&&serverConnected&&visible));
+ if(!visible&&turnEnded&&captionQueue.length===0&&captionShowing){
+  // Termina de mostrar la última frase antes de ocultar la burbuja.
+  resetSubtitleQueue();
+  transcript='';captionCommitted=0;
+ }
 }
 function render(now){
  renderId=requestAnimationFrame(render);
@@ -182,11 +209,7 @@ function render(now){
  if(now-lastFrameTime<55)return;
  lastFrameTime=now;
  const t=output?.currentTime??0;
- // El globo sólo aparece si hay texto efectivamente dicho por Gemini
- // y la voz está en reproducción (nunca mientras el guardia escucha).
- const hasSubtitle=Boolean(caption.textContent.trim());
- const playing=output?.state==='running'&&speechStart>0&&t>=speechStart-.025&&t<speechEnd+.38;
- dock.classList.toggle('carmen-speaking',Boolean(desired&&serverConnected&&hasSubtitle&&playing));
+ renderCaptionQueue(t);
  const raw=levelAt(t-Number(settings.mouthDelay||0)/1000);
  const sensitivity=Number(settings.mouthSensitivity??48)/100;
  const value=Math.max(0,Math.min(1,(raw-.014)*(.9+7*sensitivity)));
@@ -211,9 +234,9 @@ function stopAudioOutput(){
  dock.classList.remove('carmen-speaking');
 }
 function resetAudio(){
- clearSubtitleTimers();
+ resetSubtitleQueue();
  segments=[];playHead=0;speechEnd=0;speechStart=0;firstAudioChunk=true;transcript='';captionCommitted=0;turnEnded=false;
- caption.textContent=' ';dock.classList.remove('carmen-speaking');setFrame(0);
+ setFrame(0);
 }
 function haltMic(){
  micEpoch++;micStarting=false;
@@ -308,19 +331,19 @@ function openSocket(){
     serverConnected=true;retries=0;greetingSent=false;setState('Conectado · Gemini Live');updateView();
     tryStartGreeting();break;
    case 'transcript':
-    if(turnEnded){clearSubtitleTimers();transcript='';captionCommitted=0;}
-    clearTimeout(captionClearTimer);
+    if(turnEnded){resetSubtitleQueue();transcript='';captionCommitted=0;}
     transcript+=String(msg.text||'');
     turnEnded=false;publishCompletePhrase(false);break;
    case 'audio':playPCM(msg.pcm);break;
    case 'turn_complete':
     publishCompletePhrase(true);turnEnded=true;firstAudioChunk=true;
-    if(pendingTicket)maybeFinish();else scheduleSubtitleClear();
+    if(pendingTicket)maybeFinish();
+    // Las frases permanecen en cola, sin borrarse antes de leerlas.
     break;
    case 'access_granted':pendingTicket=msg.ticket;pauseMic(true);setState('Contraseña correcta');setTimeout(maybeFinish,750);setTimeout(()=>{if(pendingTicket)void redeemTicket();},5200);break;
    case 'interrupted':
-    clearSubtitleTimers();stopAudioOutput();
-    transcript='';captionCommitted=0;turnEnded=false;caption.textContent=' ';break;
+    stopAudioOutput();resetSubtitleQueue();
+    transcript='';captionCommitted=0;turnEnded=false;break;
    case 'notice':setState(msg.message||'Conectada');break;
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
   }
@@ -383,7 +406,8 @@ function setupControls(){
 function updateAdminReadouts(){
  for(const output of document.querySelectorAll('[data-carmen-output]')){
   const input=document.querySelector('[data-carmen="'+output.dataset.carmenOutput+'"]');
-  output.textContent=input?.value+(output.dataset.carmenOutput.toLowerCase().includes('delay')?' ms':'');
+  const field=output.dataset.carmenOutput.toLowerCase();
+  output.textContent=input?.value+(field.includes('delay')?' ms':field.includes('speed')?' %':'');
  }
  const p=$('#carmen-preview');
  if(!p.classList.contains('hidden')){
