@@ -174,7 +174,7 @@ function subtitleDwell(text){
  // Este control SÍ modifica la velocidad de lectura, no un desfase fijo.
  const words=Math.max(1,String(text).trim().split(/\s+/).length);
  const speed=Math.max(.5,Math.min(1.8,Number(settings.subtitleSpeed??100)/100));
- return Math.max(.8,Math.min(8,(0.45+words*.28)/speed));
+ return Math.max(1.2,Math.min(8,(0.75+words*.33)/speed));
 }
 function resetSubtitleQueue(){
  captionQueue=[];captionNextAt=0;captionShowing=false;
