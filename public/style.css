@@ -799,32 +799,32 @@ body:has(#login-view:not(.hidden)){
 /* Reajuste visual del guardia: personaje completo, 12% más grande y globo a la altura del mentón. */
 @media(max-width:790px){
  #login-view .carmen-dock{
-  right:-10px;
+  right:-30px;
   bottom:clamp(12px,2.5dvh,27px);
   width:min(69vw,285px);
   height:clamp(220px,34dvh,318px);
  }
  #login-view .carmen-caption{
   right:clamp(144px,44vw,190px);
-  bottom:clamp(82px,12dvh,114px);
+  bottom:clamp(115px,calc(12dvh + 28px),149px);
   width:min(58vw,235px);
  }
  #login-view .carmen-caption::after{top:24%}
  #login-view .carmen-mic-bubble{
-  right:35px;
+  right:50px;
   bottom:12px;
   width:56px;
   height:56px;
  }
 }
 @media(max-width:375px){
- #login-view .carmen-dock{right:-10px;width:71vw;height:clamp(208px,32dvh,295px)}
- #login-view .carmen-caption{right:44vw;bottom:clamp(77px,11dvh,102px);width:57vw}
- #login-view .carmen-mic-bubble{right:32px;bottom:8px;width:52px;height:52px}
+ #login-view .carmen-dock{right:-26px;width:71vw;height:clamp(208px,32dvh,295px)}
+ #login-view .carmen-caption{right:44vw;bottom:clamp(108px,calc(11dvh + 24px),137px);width:57vw}
+ #login-view .carmen-mic-bubble{right:46px;bottom:8px;width:52px;height:52px}
 }
 @media(max-width:790px) and (max-height:570px){
- #login-view .carmen-dock{right:-8px;height:180px;width:min(58vw,225px);bottom:4px}
- #login-view .carmen-caption{right:36vw;bottom:58px;max-height:35dvh}
- #login-view .carmen-mic-bubble{right:28px;bottom:5px;width:49px;height:49px}
+ #login-view .carmen-dock{right:-26px;height:180px;width:min(58vw,225px);bottom:4px}
+ #login-view .carmen-caption{right:36vw;bottom:78px;max-height:35dvh}
+ #login-view .carmen-mic-bubble{right:42px;bottom:5px;width:49px;height:49px}
 }
 
