@@ -7,7 +7,7 @@ const frameNames=['Ojos abiertos · Reposo','Ojos cerrados · Reposo','Ojos abie
 const fallbackVoices=['Aoede','Zephyr','Kore','Leda','Puck','Charon'];
 let settings={},available=Array(8).fill(false),frameElements=[],currentFrame=-1;
 let socket=null,desired=false,serverConnected=false,manuallyStopped=false,micMuted=false,mutedByUser=false,micStream=null,micProcessor=null,micSource=null,micSilent=null,micEpoch=0,micStarting=false;
-let greetingSent=false,greetingTimer=null;
+let greetingSent=false,greetingTimer=null,firstAudioChunk=true;
 let output=null,volume=null,playHead=0,segments=[],renderId=0,blinkAt=performance.now()+4200,blinkUntil=0,mouthValue=0;
 let transcript='',turnEnded=false,speechEnd=0,pendingTicket='',redeeming=false,retryTimer=null,retries=0,initializing=false;
 let captionCommitted=0,captionClearTimer=null,captionDelayTimer=null,captionVersion=0;
@@ -105,8 +105,8 @@ function playPCM(base64){
  const audio=ctx.createBuffer(1,samples.length,24000);
  audio.getChannelData(0).set(samples);
  const source=ctx.createBufferSource();source.buffer=audio;source.connect(volume);
- const newTurn=ctx.currentTime>speechEnd+.15;
- const start=Math.max(ctx.currentTime+(newTurn?.28:.025),playHead);
+ const start=Math.max(ctx.currentTime+(firstAudioChunk?.28:.025),playHead);
+ firstAudioChunk=false;
  source.start(start);
  const end=start+audio.duration;playHead=end;speechEnd=end;
  segments.push({start,end,samples});
@@ -195,7 +195,7 @@ function render(now){
 }
 function resetAudio(){
  clearSubtitleTimers();
- segments=[];playHead=0;speechEnd=0;transcript='';captionCommitted=0;turnEnded=false;
+ segments=[];playHead=0;speechEnd=0;firstAudioChunk=true;transcript='';captionCommitted=0;turnEnded=false;
  caption.textContent=' ';setFrame(0);
 }
 function haltMic(){
@@ -297,12 +297,12 @@ function openSocket(){
     turnEnded=false;publishCompletePhrase(false);break;
    case 'audio':playPCM(msg.pcm);break;
    case 'turn_complete':
-    publishCompletePhrase(true);turnEnded=true;
+    publishCompletePhrase(true);turnEnded=true;firstAudioChunk=true;
     if(pendingTicket)maybeFinish();else scheduleSubtitleClear();
     break;
    case 'access_granted':pendingTicket=msg.ticket;pauseMic(true);setState('Contraseña correcta');setTimeout(maybeFinish,750);setTimeout(()=>{if(pendingTicket)void redeemTicket();},5200);break;
    case 'interrupted':
-    clearSubtitleTimers();segments=[];playHead=output?.currentTime||0;speechEnd=playHead;
+    clearSubtitleTimers();segments=[];firstAudioChunk=true;playHead=output?.currentTime||0;speechEnd=playHead;
     transcript='';captionCommitted=0;turnEnded=false;caption.textContent=' ';break;
    case 'notice':setState(msg.message||'Conectada');break;
    case 'error':setState(msg.message||'Carmen no pudo conectarse. Podés escribir la contraseña.');break;
