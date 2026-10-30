@@ -28,11 +28,11 @@ function updateView(){
  face.setAttribute('aria-pressed',String(desired));
  face.setAttribute('aria-label',desired?'Cortar la llamada del guardia':'Volver a llamar al guardia');
  face.title=desired?'Tocá al guardia para cortar la llamada':'Tocá al guardia para volver a llamar';
- const active=desired&&!micMuted&&!!micStream;
- micButton.classList.toggle('is-muted',!active);
- micButton.setAttribute('aria-pressed',String(active));
- micButton.setAttribute('aria-label',active?'Silenciar micrófono':'Activar micrófono');
- micButton.title=active?'Silenciar micrófono':'Activar micrófono';
+ // Ambos controles representan la misma acción de llamada.
+ micButton.classList.remove('is-muted');
+ micButton.setAttribute('aria-pressed',String(desired));
+ micButton.setAttribute('aria-label',desired?'Cortar llamada del guardia':'Iniciar llamada del guardia');
+ micButton.title=desired?'Cortar llamada':'Iniciar llamada';
 }
 function applySettings(){
  dock.style.setProperty('--carmen-scale',String((settings.avatarScale??90)/100));
@@ -77,7 +77,7 @@ function makeOutput(){
 }
 function tryStartGreeting(){
  if(!desired||!serverConnected||greetingSent||greetingTimer||!socket||socket.readyState!==WebSocket.OPEN)return;
- if(output?.state!=='running'){setState('Tocá al guardia para activar el sonido');if(!transcript.trim())caption.textContent='Tocá al guardia para escuchar el saludo.';return;}
+ if(output?.state!=='running'){setState('Tocá al guardia para activar el sonido');return;}
  greetingTimer=setTimeout(()=>{
   greetingTimer=null;
   if(!desired||!serverConnected||greetingSent||output?.state!=='running'||socket?.readyState!==WebSocket.OPEN)return;
@@ -259,7 +259,8 @@ function stop({manual=true}={}){
  haltMic();stopAudioOutput();resetAudio();
  if(output){output.close().catch(()=>{});output=null;volume=null;}
  setState(manual?'Llamada terminada':'');
- if(manual)caption.textContent='Llamada terminada. Tocá al guardia para volver a llamar.';
+
+ // El globo muestra únicamente transcripciones de Gemini.
  updateView();
 }
 function reconnectSoon(){
@@ -296,7 +297,6 @@ function openSocket(){
   switch(msg.type){
    case 'connected':
     serverConnected=true;retries=0;greetingSent=false;setState('Conectado · Gemini Live');updateView();
-    if(!transcript.trim())caption.textContent='Podés decir la contraseña o escribirla.';
     tryStartGreeting();break;
    case 'transcript':
     if(turnEnded){clearSubtitleTimers();transcript='';captionCommitted=0;}
@@ -324,7 +324,7 @@ function openSocket(){
 async function start(){
  if(initializing||desired||!isLogin())return;
  initializing=true;manuallyStopped=false;serverConnected=false;desired=true;redeeming=false;pendingTicket='';micMuted=false;mutedByUser=false;updateView();setState('Conectando al guardia…');
-  caption.textContent='Conectando…';
+  caption.textContent=' ';
  try{
   const config=await getJSON('/api/carmen/config');
   if(!desired)return;
@@ -336,25 +336,21 @@ async function start(){
  }catch(error){setState('Podés ingresar con el teclado.');notify(error.message);}
  finally{initializing=false;}
 }
+function toggleGuardCall(){
+ // Ambos botones cortan y reinician la misma llamada.
+ if(desired&&output?.state==='suspended'){void unlockAudio();return;}
+ if(desired){stop();return;}
+ if(document.hidden)return;
+ void unlockAudio();
+ void start();
+}
 function setupControls(){
- face.addEventListener('click',()=>{
-  // Si Android aún bloquea el audio, este primer gesto lo desbloquea.
-  if(desired&&output?.state==='suspended'){void unlockAudio();return;}
-  if(desired){stop();return;}
-  void unlockAudio();void start();
- });
- micButton.addEventListener('click',()=>{
-  if(desired&&output?.state==='suspended'){void unlockAudio();return;}
-  void unlockAudio();
-  if(!desired){void start();return;}
-  mutedByUser=!mutedByUser;
-  pauseMic(mutedByUser);
-  if(!mutedByUser&&!micStream)void startMic();
- });
- // Al ingresar por teclado se suspende la escucha sin cancelar un mute manual.
+ face.addEventListener('click',toggleGuardCall);
+ micButton.addEventListener('click',toggleGuardCall);
+ // El formulario sigue siendo una opción de ingreso independiente.
  $('#password').addEventListener('focus',()=>{if(desired&&!micMuted)pauseMic(true);});
  $('#password').addEventListener('blur',()=>{
-  if(desired&&!mutedByUser&&micMuted){pauseMic(false);if(!micStream)void startMic();}
+  if(desired&&micMuted){pauseMic(false);if(!micStream)void startMic();}
  });
  window.addEventListener('nexo-login-ok',()=>stop({manual:false}));
  window.addEventListener('nexo-login-error',()=>{
@@ -362,9 +358,15 @@ function setupControls(){
    socket.send(JSON.stringify({type:'text',text:'La contraseña introducida por teclado no fue aceptada. Ofrecé volver a intentar sin pedir que diga su contraseña en voz alta.'}));
  });
  document.addEventListener('pointerdown',()=>{if(isLogin()&&desired)void unlockAudio();},{capture:true});
+ // Cierre definitivo al salir: sin audio, captura, websocket ni reconexión
+ // hasta que la persona toque nuevamente al guardia o al botón de llamada.
+ const endWhenLeaving=()=>{if(desired)stop({manual:true});};
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)endWhenLeaving();});
+ window.addEventListener('pagehide',endWhenLeaving);
+ window.addEventListener('blur',endWhenLeaving);
  new MutationObserver(()=>{
   if(!isLogin()){if(desired)stop({manual:false});}
-  else if(!desired&&!manuallyStopped&&!initializing)void start();
+  else if(!desired&&!manuallyStopped&&!initializing&&!document.hidden)void start();
  }).observe(login,{attributes:true,attributeFilter:['class']});
 }
 function updateAdminReadouts(){
@@ -448,4 +450,4 @@ function setupAdmin(){
 }
 // La página de ingreso conserva el formulario habitual como alternativa siempre disponible.
 setupControls();setupAdmin();
-getJSON('/api/me').then(data=>{if(!data.role&&isLogin())void start();}).catch(()=>{if(isLogin())void start();});
+getJSON('/api/me').then(data=>{if(!data.role&&isLogin()&&!document.hidden)void start();}).catch(()=>{if(isLogin()&&!document.hidden)void start();});
