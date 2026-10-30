@@ -122,8 +122,17 @@ function showFullPhrase(phrase){
  clearTimeout(captionDelayTimer);
  const version=++captionVersion;
  const show=()=>{if(desired&&version===captionVersion)caption.textContent=sentence;};
- const delay=Math.max(0,Number(settings.subtitleDelay||0));
- if(delay)captionDelayTimer=setTimeout(show,delay);
+ // Si el audio está programado pero aún no comenzó, coordinamos el globo
+ // con el inicio real de la reproducción. Si ya habla, mostramos la frase.
+ // El desfase del administrador puede adelantar (hasta que el texto exista)
+ // o retrasar la visualización sin revelar palabras sueltas.
+ const now=output?.currentTime??0;
+ const speaking=segments.some(segment=>segment.start<=now&&segment.end>now);
+ const upcoming=speaking?null:segments.find(segment=>segment.start>now);
+ const audioWait=upcoming?Math.max(0,(upcoming.start-now)*1000):0;
+ const offset=Number(settings.subtitleDelay||0);
+ const delay=Math.max(0,Math.min(2200,audioWait+offset));
+ if(delay>12)captionDelayTimer=setTimeout(show,delay);
  else show();
 }
 function publishCompletePhrase(endOfTurn=false){
