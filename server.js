@@ -81,7 +81,7 @@ app.put('/api/admin/carmen/config',auth('admin'),(req,res)=>{
 });
 app.post('/api/logout',auth(),(req,res)=>{removeSession(parseCookie(req));cookie(res,'',0);res.json({ok:true});});
 app.get('/api/me',(req,res)=>{const s=session(req);if(!s)return res.json({role:null});res.json({role:s.role,profile:s.role==='student'?getProfile(s.profile_id)?.fields||{}:null,documents:s.role==='student'?listDocs(s.profile_id):[],config:s.role==='student'?publicSettings():allSettings()});});
-function publicSettings(){const s=allSettings();return Object.fromEntries(['subtitleFont','subtitleWidth','subtitleDelay','mouthDelay','mouthSensitivity','mouthSmoothing','blinkRate','mouthAmplitude','avatarScale','avatarOffsetX','avatarOffsetY','avatarFit'].map(k=>[k,s[k]]));}
+function publicSettings(){const s=allSettings();return Object.fromEntries(['subtitleFont','subtitleWidth','subtitleDelay','subtitleSpeed','mouthDelay','mouthSensitivity','mouthSmoothing','blinkRate','mouthAmplitude','avatarScale','avatarOffsetX','avatarOffsetY','avatarFit'].map(k=>[k,s[k]]));}
 // Los PNG originales permanecen en /data. Para Android, se envían variantes
 // WebP reducidas: evita decodificar ocho texturas de hasta 4096 x 4096 en Chrome.
 const optimizedFrameCache=new Map();
@@ -125,7 +125,7 @@ function safeCvDownloadName(profile){
 }
 app.get('/api/cv/:doc',auth('student'),(req,res)=>{const d=lookupDoc(req.params.doc,req.profileId);if(!d)return res.sendStatus(404);const file=path.join(DATA_DIR,'cvs',d.filename);if(!fs.existsSync(file))return res.sendStatus(404);res.download(file,safeCvDownloadName(getProfile(req.profileId)));});
 app.get('/api/admin/config',auth('admin'),(req,res)=>res.json({config:allSettings(),frames:Array.from({length:8},(_,i)=>fs.existsSync(path.join(DATA_DIR,'frames',`${i}.png`))),voices:VOICE_NAMES,geminiReady:!!process.env.GEMINI_API_KEY}));
-app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();const next={};for(const [k,v]of Object.entries(req.body?.config||{})){if(!Object.hasOwn(old,k))continue;if(typeof old[k]==='number'){const n=Number(v);if(!Number.isFinite(n))continue;next[k]=k==='subtitleDelay'?Math.max(-1200,Math.min(1200,n)):Math.max(-500,Math.min(2000,n));}else if(typeof old[k]==='string'){if(!['prompt','personality'].includes(k)&&String(v).length>200)continue;if(k==='prompt'&&String(v).length>32000)return res.status(400).json({error:'El prompt supera el máximo de 32.000 caracteres; no se guardó incompleto.'});next[k]=String(v).slice(0,k==='prompt'?32000:4000);}}
+app.put('/api/admin/config',auth('admin'),(req,res)=>{const old=allSettings();const next={};for(const [k,v]of Object.entries(req.body?.config||{})){if(!Object.hasOwn(old,k))continue;if(typeof old[k]==='number'){const n=Number(v);if(!Number.isFinite(n))continue;next[k]=k==='subtitleDelay'?Math.max(-1200,Math.min(1200,n)):k==='subtitleSpeed'?Math.max(60,Math.min(200,n)):Math.max(-500,Math.min(2000,n));}else if(typeof old[k]==='string'){if(!['prompt','personality'].includes(k)&&String(v).length>200)continue;if(k==='prompt'&&String(v).length>32000)return res.status(400).json({error:'El prompt supera el máximo de 32.000 caracteres; no se guardó incompleto.'});next[k]=String(v).slice(0,k==='prompt'?32000:4000);}}
 
  if(next.voice&&!VOICE_NAMES.includes(next.voice))return res.status(400).json({error:'Voz no reconocida'});
  if(next.model&&!['gemini-3.8-live','gemini-3.1-flash-live-preview'].includes(next.model))return res.status(400).json({error:'Modelo no permitido'});
